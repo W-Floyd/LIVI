@@ -128,10 +128,20 @@ static CRASH_PATH: AtomicPtr<c_char> = AtomicPtr::new(core::ptr::null_mut());
 const SIG_DFL: usize = 0;
 
 unsafe extern "C" {
+    #[cfg(not(target_env = "musl"))]
     fn backtrace(buffer: *mut *mut c_void, size: c_int) -> c_int;
+    #[cfg(not(target_env = "musl"))]
     fn backtrace_symbols_fd(buffer: *const *mut c_void, size: c_int, fd: c_int);
     fn signal(sig: c_int, handler: usize) -> usize;
 }
+
+// musl has no execinfo: the crash dump is the header alone.
+#[cfg(target_env = "musl")]
+unsafe fn backtrace(_: *mut *mut c_void, _: c_int) -> c_int {
+    0
+}
+#[cfg(target_env = "musl")]
+unsafe fn backtrace_symbols_fd(_: *const *mut c_void, _: c_int, _: c_int) {}
 
 extern "C" fn on_crash(sig: c_int) {
     const HEADER: &[u8] = b"\n=== gst-host CRASH backtrace ===\n";

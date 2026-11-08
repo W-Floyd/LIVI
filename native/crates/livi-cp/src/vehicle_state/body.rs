@@ -10,7 +10,7 @@ pub(super) fn seats() -> Accessory {
         iid,
         kind: 0x2200_0001,
         characteristics: vec![
-            shared(iid + 1, 0x3100_0021, names[0], Int32, Value::Int(0)).up_to(2),
+            shared(iid + 1, 0x3100_0021, names[0], Int32, Value::Int(0)).up_to(SEAT_HEATING_LEVELS),
             shared(iid + 2, 0x3000_0002, names[1], Bool, Value::Bool(false)),
             car(
                 iid + 3,

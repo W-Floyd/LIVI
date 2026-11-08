@@ -270,7 +270,7 @@ pub struct Climate {
     pub vent_lower: Option<bool>,
     /// AUTO picks the vents.
     pub vents_auto: Option<bool>,
-    /// 0 to 2.
+    /// 0 (off) to 3.
     pub driver_seat_heating: Option<u8>,
     pub passenger_seat_heating: Option<u8>,
 }

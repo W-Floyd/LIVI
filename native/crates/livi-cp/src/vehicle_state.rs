@@ -326,6 +326,9 @@ const DRIVER_TARGET_TEMPERATURE: i64 = 520;
 const PASSENGER_TARGET_TEMPERATURE: i64 = 534;
 const ZONES_SYNCED: i64 = 538;
 const SEAT_HEATING: [(i64, i64); 2] = [(1026, 1027), (1030, 1031)];
+/// The highest seat heating level the car offers; 0 is off. Three steps, as
+/// many cars have (the Kia EV6 among them).
+pub(super) const SEAT_HEATING_LEVELS: u32 = 3;
 const FAN: (i64, i64) = (525, 524);
 const LEVELLED: [(i64, i64); 3] = [SEAT_HEATING[0], SEAT_HEATING[1], FAN];
 

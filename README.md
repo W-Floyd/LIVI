@@ -172,7 +172,7 @@ driver, a manual fan level ends AUTO, and MAX A/C hands the previous settings ba
 The last state is kept in `state/climate.json` and restored on start.
 
 Covered: on/off, AUTO, A/C, MAX A/C, MAX defrost, recirculation, synced zones, temperature per
-seat, fan level and fan AUTO, vents, front and rear window heating, and two-step seat heating.
+seat, fan level and fan AUTO, vents, front and rear window heating, and three-step seat heating.
 
 ```bash
 livi-core telemetry set climate.driverTargetC=22 climate.fanLevel=3

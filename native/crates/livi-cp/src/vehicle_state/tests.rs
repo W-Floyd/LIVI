@@ -307,7 +307,7 @@ fn the_vehicle_app_shows_the_livi_version_and_build_date() {
 }
 
 #[test]
-fn both_front_seats_heat_in_two_steps() {
+fn both_front_seats_heat_in_their_steps() {
     let (_, info) = VehicleState::new(false, "9.5.0", "2026-10-15 14:30")
         .with_climate(true)
         .info_entry();
@@ -346,7 +346,7 @@ fn both_front_seats_heat_in_two_steps() {
         );
         assert_eq!(
             level.get("maximumValue").and_then(bplist::Value::as_int),
-            Some(2)
+            Some(u64::from(SEAT_HEATING_LEVELS))
         );
         assert_eq!(
             level.get("writable").and_then(bplist::Value::as_bool),
@@ -923,7 +923,7 @@ fn livi_sets_climate_and_the_phone_hears_what_changed() {
     );
     let climate = state.climate().unwrap();
     assert_eq!(climate["driverTargetC"], 28.0);
-    assert_eq!(climate["driverSeatHeating"], 2);
+    assert_eq!(climate["driverSeatHeating"], SEAT_HEATING_LEVELS);
     assert_eq!(climate["fanLevel"], 0);
     assert_eq!(climate["ventsAuto"], false);
     assert!(

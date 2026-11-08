@@ -63,6 +63,11 @@ pub fn stations(_iface: &str) -> Stations {
     Stations::default()
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn station_channel(_ap_iface: &str) -> Option<Channel> {
+    None
+}
+
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 #[cfg(target_os = "linux")]
@@ -90,6 +95,7 @@ const ATTR_IFTYPE: u16 = 5;
 const ATTR_WIPHY_FREQ: u16 = 38;
 const ATTR_SSID: u16 = 52;
 const ATTR_CHANNEL_WIDTH: u16 = 159;
+const IFTYPE_STATION: u32 = 2;
 const IFTYPE_AP: u32 = 3;
 const ATTR_WIPHY: u16 = 1;
 const ATTR_WIPHY_NAME: u16 = 2;
@@ -285,6 +291,55 @@ fn stations_in(payloads: &[Vec<u8>]) -> Stations {
         found.rates = found.rates.or_else(|| rates_of(info));
     }
     found
+}
+
+/// The channel of a connected station on the same radio as `ap_iface`, if
+/// there is one. A radio that runs a station and an access point on one channel
+/// only (brcmfmac's combinations, for one) refuses the access point anywhere
+/// else while the station is associated.
+#[cfg(target_os = "linux")]
+pub fn station_channel(ap_iface: &str) -> Option<Channel> {
+    let fd = open().ok()?;
+    let family = family_id(&fd).ok()?;
+    let request = message(family, NL80211_CMD_GET_INTERFACE, NLM_F_DUMP, &[]);
+    station_channel_in(&call(&fd, &request).ok()?, ap_iface)
+}
+
+fn station_channel_in(payloads: &[Vec<u8>], ap_iface: &str) -> Option<Channel> {
+    struct Iface {
+        name: String,
+        wiphy: Option<u32>,
+        kind: Option<u32>,
+        freq: Option<u32>,
+    }
+    let u32_of = |v: &[u8]| (v.len() >= 4).then(|| u32::from_ne_bytes([v[0], v[1], v[2], v[3]]));
+    let ifaces: Vec<Iface> = payloads
+        .iter()
+        .map(|payload| {
+            let mut i = Iface {
+                name: String::new(),
+                wiphy: None,
+                kind: None,
+                freq: None,
+            };
+            for (kind, value) in Attrs(&payload[..]) {
+                match kind {
+                    ATTR_IFNAME => i.name = text(value),
+                    ATTR_WIPHY => i.wiphy = u32_of(value),
+                    ATTR_IFTYPE => i.kind = u32_of(value),
+                    ATTR_WIPHY_FREQ => i.freq = u32_of(value),
+                    _ => {}
+                }
+            }
+            i
+        })
+        .collect();
+    let wiphy = ifaces.iter().find(|i| i.name == ap_iface)?.wiphy?;
+    // A station reports a frequency only while it is associated.
+    ifaces
+        .iter()
+        .filter(|i| i.name != ap_iface && i.wiphy == Some(wiphy) && i.kind == Some(IFTYPE_STATION))
+        .find_map(|i| Channel::of_freq(i.freq?))
 }
 
 fn rates_of(info: &[u8]) -> Option<(u32, u32)> {
@@ -641,5 +696,48 @@ mod tests {
             }
         );
         assert_eq!(stations_in(&[]), Stations::default());
+    }
+
+    #[test]
+    fn the_access_point_takes_the_channel_of_an_associated_station_on_its_radio() {
+        let iface = |name: &str, wiphy: u32, kind: u32, freq: Option<u32>| {
+            let mut a = attr(ATTR_IFNAME, format!("{name}\0").as_bytes());
+            a.extend(attr(ATTR_WIPHY, &wiphy.to_ne_bytes()));
+            a.extend(attr(ATTR_IFTYPE, &kind.to_ne_bytes()));
+            if let Some(f) = freq {
+                a.extend(attr(ATTR_WIPHY_FREQ, &f.to_ne_bytes()));
+            }
+            a
+        };
+        let ap = iface("ap0", 0, IFTYPE_AP, None);
+        for (name, payloads, want) in [
+            (
+                "associated station, same radio",
+                vec![ap.clone(), iface("wlan0", 0, IFTYPE_STATION, Some(2412))],
+                Some(Channel::new(Band::Ghz24, 1)),
+            ),
+            (
+                "station not associated",
+                vec![ap.clone(), iface("wlan0", 0, IFTYPE_STATION, None)],
+                None,
+            ),
+            (
+                "station on another radio",
+                vec![ap.clone(), iface("wlan1", 1, IFTYPE_STATION, Some(5180))],
+                None,
+            ),
+            (
+                "only the access point",
+                vec![iface("ap0", 0, IFTYPE_AP, Some(5180))],
+                None,
+            ),
+            (
+                "no such access point interface",
+                vec![iface("wlan0", 0, IFTYPE_STATION, Some(2412))],
+                None,
+            ),
+        ] {
+            assert_eq!(station_channel_in(&payloads, "ap0"), want, "{name}");
+        }
     }
 }

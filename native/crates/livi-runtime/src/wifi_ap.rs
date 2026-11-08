@@ -497,6 +497,19 @@ pub fn run(cfg: ApConfig) -> ! {
         run_cmd("pkill", &["-f", &format!("hostapd.*{HOST_CONF}")]);
         run_cmd("pkill", &["-f", &format!("dnsmasq.*{DNSMASQ_CONF}")]);
         std::thread::sleep(Duration::from_millis(300));
+        // A station associated on the same radio (wlan0 beside an ap0) holds
+        // its channel; a single-channel radio refuses the access point
+        // anywhere else. Checked on every start, so it follows a roam.
+        if let Some(channel) = livi_wifi::station_channel(&cfg.iface)
+            && channel != cfg.channel
+        {
+            println!(
+                "[wifi-ap] a station on this radio is on channel {channel}: the access point shares it"
+            );
+            cfg.channel = channel;
+            cfg.width = 20;
+            weakened = None;
+        }
         setup_interface(&cfg);
         wait_regulatory(&cfg.country, Duration::from_secs(10));
         let conf = weakened

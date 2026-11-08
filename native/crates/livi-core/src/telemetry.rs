@@ -15,6 +15,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
 use tower_http::cors::CorsLayer;
 
+use crate::cp_telemetry::{NIGHT_MODE, SURFACE_KEYS};
 use crate::server::Core;
 use crate::state_files::Saved;
 
@@ -146,7 +147,7 @@ impl Telemetry {
     fn seed(&mut self, cfg: &Config, saved: &Saved) {
         let mut patch = Snapshot::new();
         if let Some(night) = cfg.appearance_mode.night_mode() {
-            patch.insert("nightMode".into(), night.into());
+            patch.insert(NIGHT_MODE.into(), night.into());
         }
         if let Some(fix) = saved.gps.as_ref().and_then(last_fix) {
             patch.insert("gps".into(), fix);
@@ -231,8 +232,9 @@ impl Telemetry {
         }
         self.appearance = mode;
         if let Some(night) = mode.night_mode() {
-            self.push(&json!({ "nightMode": night, "clusterNightMode": null }))
-                .await;
+            let mut patch = Map::from_iter([(NIGHT_MODE.to_string(), night.into())]);
+            patch.extend(SURFACE_KEYS.map(|(_, key)| (key.to_string(), Value::Null)));
+            self.push(&Value::Object(patch)).await;
         }
     }
 
@@ -533,7 +535,7 @@ mod tests {
         };
         let mut t = Telemetry::new(core.clone(), io, &saved);
         assert_eq!(t.snap["nightMode"], true);
-        assert!(t.snap.get("clusterNightMode").is_none());
+        assert!(t.snap.get("clusterUiNightMode").is_none());
         assert_eq!(
             (&t.snap["fuelPct"], &t.snap["odometerKm"]),
             (&json!(42), &json!(123456))
@@ -564,10 +566,10 @@ mod tests {
         t.appearance(AppearanceMode::Night).await;
         t.appearance(AppearanceMode::Day).await;
         let both = core.hub.watch().borrow().telemetry.clone();
-        assert_eq!(
-            (&both["nightMode"], &both["clusterNightMode"]),
-            (&json!(false), &Value::Null)
-        );
+        assert_eq!(both["nightMode"], false);
+        for (_, key) in SURFACE_KEYS {
+            assert_eq!(both[key], Value::Null, "{key}");
+        }
         t.appearance(AppearanceMode::Auto).await;
         assert_eq!(t.snap["nightMode"], false);
     }

@@ -64,6 +64,8 @@ const SILENCE_CHECK: Duration = Duration::from_millis(250);
 
 const CLUSTER_MAP_URL: &str = "maps:/car/instrumentcluster/map";
 const APPEARANCE_AUTOMATIC: u64 = 0;
+const UI_APPEARANCE: &str = "uiAppearanceUpdate";
+const MAP_APPEARANCE: &str = "mapAppearanceUpdate";
 
 const AAC_LC_44K_STEREO: u64 = 0x40_0000;
 const AAC_LC_48K_STEREO: u64 = 0x80_0000;
@@ -150,6 +152,34 @@ pub struct Touch {
     pub down: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surface {
+    MainUi,
+    MainMap,
+    ClusterUi,
+    ClusterMap,
+}
+
+impl Surface {
+    pub const ALL: [Surface; 4] = [
+        Surface::MainUi,
+        Surface::MainMap,
+        Surface::ClusterUi,
+        Surface::ClusterMap,
+    ];
+
+    fn on_cluster(self) -> bool {
+        matches!(self, Surface::ClusterUi | Surface::ClusterMap)
+    }
+
+    fn update(self) -> &'static str {
+        match self {
+            Surface::MainUi | Surface::ClusterUi => UI_APPEARANCE,
+            Surface::MainMap | Surface::ClusterMap => MAP_APPEARANCE,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum StackCmd {
     NextClusterContent,
@@ -166,7 +196,7 @@ pub enum StackCmd {
     Telephony(u8),
     Siri,
     NightMode(bool),
-    ClusterNightMode(bool),
+    Appearance(Surface, bool),
     LimitedUi(bool),
     VideoAllowed(bool),
     Keyframe,
@@ -326,7 +356,7 @@ struct Conn<M: Media> {
     event: Option<EventConn>,
     live: bool,
     night_mode: Option<bool>,
-    cluster_night_mode: Option<bool>,
+    appearance: [Option<bool>; 4],
     limited_ui: Option<bool>,
     cluster_want: bool,
     cluster_url: Option<String>,
@@ -595,7 +625,7 @@ pub async fn run<M: Media>(
         event: None,
         live: false,
         night_mode: None,
-        cluster_night_mode: None,
+        appearance: [None; 4],
         limited_ui: None,
         cluster_want: false,
         cluster_url: None,

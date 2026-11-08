@@ -29,7 +29,9 @@
 //! | lights, highBeam, hazards           | ✓    | ✓            | ·               | ·             |
 //! | parkingBrake                        | ✓    | ✓            | ·               | ·             |
 //! | nightMode                           | ·    | ✓            | ✓               | ✓             |
-//! | clusterNightMode                    | ·    | ·            | ✓               | ✓             |
+//! | mainUiNightMode, mainMapNightMode   | ·    | ·            | ✓               | ✓             |
+//! | clusterUiNightMode                  | ·    | ·            | ✓               | ✓             |
+//! | clusterMapNightMode                 | ·    | ·            | ✓               | ✓             |
 //! | darkMode                            | ✓    | ·            | ·               | ·             |
 //! | path                                | ✓    | ·            | ·               | ·             |
 //! | volume                              | ✓    | ·            | ·               | ✓             |
@@ -154,11 +156,18 @@ pub struct TelemetrySnapshot {
     pub ambient_lux: Option<f64>,
     /// The dimmer of the panel lights, 0 to 100.
     pub dimmer_pct: Option<f64>,
-    /// Day or night for Android Auto and CarPlay, LIVI's own look follows `darkMode`.
+    /// Day or night for Android Auto and CarPlay, LIVI's own look follows `darkMode`. A change of
+    /// LIVI's appearance setting sets it and clears the four below.
     pub night_mode: Option<bool>,
-    /// Day or night for the CarPlay cluster, it follows `nightMode` while absent or null. A
-    /// change of LIVI's appearance setting sets `nightMode` and clears this one.
-    pub cluster_night_mode: Option<bool>,
+    /// Day or night for the UI on the main screen, it follows `nightMode` while absent or
+    /// null, as do the three below.
+    pub main_ui_night_mode: Option<bool>,
+    /// The map on the main screen.
+    pub main_map_night_mode: Option<bool>,
+    /// The UI on the cluster.
+    pub cluster_ui_night_mode: Option<bool>,
+    /// The map on the cluster.
+    pub cluster_map_night_mode: Option<bool>,
     /// LIVI's own look, dark or light. A push sets the Dark Mode setting, a change of that
     /// setting shows up here.
     pub dark_mode: Option<bool>,

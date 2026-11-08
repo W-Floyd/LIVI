@@ -1401,7 +1401,9 @@ async fn a_verified_session_streams_and_takes_input() {
         .unwrap();
     rig.cmds.send(StackCmd::Keyframe).unwrap();
     rig.cmds.send(StackCmd::NightMode(true)).unwrap();
-    rig.cmds.send(StackCmd::ClusterNightMode(true)).unwrap();
+    for surface in Surface::ALL {
+        rig.cmds.send(StackCmd::Appearance(surface, true)).unwrap();
+    }
     rig.cmds.send(StackCmd::LimitedUi(true)).unwrap();
     rig.cmds.send(StackCmd::Siri).unwrap();
     rig.cmds

@@ -58,6 +58,8 @@ pub struct DisplayConfig {
     pub safe_area_draw_outside: Option<bool>,
     pub status_bar_edge: Option<u64>,
     pub initial_url: Option<String>,
+    pub ui_night: Option<bool>,
+    pub map_night: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,6 +226,10 @@ pub fn mm_at_dpi(pixels: i64, dpi: f64) -> i64 {
     (hid::round_half_up(pixels as f64 * 25.4 / dpi) as i64).max(1)
 }
 
+fn appearance(night: Option<bool>) -> Value {
+    Value::Int(night.map_or(APPEARANCE_DARK, u64::from))
+}
+
 fn display(d: &DisplayConfig, kind: u64, uuid: &str) -> Value {
     let width_physical = d
         .width_physical_mm
@@ -250,12 +256,12 @@ fn display(d: &DisplayConfig, kind: u64, uuid: &str) -> Value {
         ),
         ("cornerMasks".to_string(), Value::Bool(false)),
         ("adjacentViewAreas".to_string(), Value::Array(Vec::new())),
-        ("uiAppearanceMode".to_string(), Value::Int(APPEARANCE_DARK)),
+        ("uiAppearanceMode".to_string(), appearance(d.ui_night)),
         (
             "uiAppearanceSetting".to_string(),
             Value::Int(APPEARANCE_AUTOMATIC),
         ),
-        ("mapAppearanceMode".to_string(), Value::Int(APPEARANCE_DARK)),
+        ("mapAppearanceMode".to_string(), appearance(d.map_night)),
         (
             "mapAppearanceSetting".to_string(),
             Value::Int(APPEARANCE_AUTOMATIC),
@@ -516,6 +522,40 @@ pub(crate) mod tests {
         wide.main.width_pixels = 1920;
         wide.main.height_pixels = 1080;
         assert_eq!(size(&wide), (Some(Value::Int(244)), Some(Value::Int(137))));
+    }
+
+    #[test]
+    fn each_display_starts_with_its_own_ui_and_map_appearance() {
+        let mut cfg = sample();
+        cfg.main.ui_night = Some(true);
+        cfg.main.map_night = Some(false);
+        cfg.cluster = Some(DisplayConfig {
+            width_pixels: 800,
+            height_pixels: 480,
+            ui_night: Some(false),
+            map_night: Some(true),
+            ..Default::default()
+        });
+        let info = build(&cfg);
+        let modes: Vec<_> = info
+            .get("displays")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .map(|d| {
+                (
+                    d.get("uiAppearanceMode").cloned(),
+                    d.get("mapAppearanceMode").cloned(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            modes,
+            [
+                (Some(Value::Int(1)), Some(Value::Int(0))),
+                (Some(Value::Int(0)), Some(Value::Int(1)))
+            ]
+        );
     }
 
     #[test]

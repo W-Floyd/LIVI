@@ -5,7 +5,7 @@
 use livi_core_proto::config::{AppearanceMode, defaults};
 use livi_core_proto::input::Point;
 use livi_core_proto::state::Maneuver;
-use livi_cp::stack::AudioProfile;
+use livi_cp::stack::{AudioProfile, Surface};
 use livi_media::compositor::CompositorControl;
 use livi_media::gst_host::GstHost;
 use serde_json::json;
@@ -1341,6 +1341,12 @@ async fn the_phone_hands_the_screen_back() {
     assert_eq!(rig.front(), Front::Livi);
 }
 
+fn night(on: bool) -> Vec<CpCmd> {
+    std::iter::once(CpCmd::NightMode(on))
+        .chain(Surface::ALL.map(|s| CpCmd::Appearance(s, on)))
+        .collect()
+}
+
 #[tokio::test]
 async fn telemetry_reaches_carplay_and_only_a_config_change_sets_the_night_mode_again() {
     let mut rig = Rig::new();
@@ -1350,10 +1356,7 @@ async fn telemetry_reaches_carplay_and_only_a_config_change_sets_the_night_mode_
         .on_state(cfg.clone(), snap(json!({ "nightMode": true, "ts": 1 })));
     rig.p
         .on_state(cfg.clone(), snap(json!({ "nightMode": true, "ts": 2 })));
-    assert_eq!(
-        rig.drain(),
-        [CpCmd::NightMode(true), CpCmd::ClusterNightMode(true)]
-    );
+    assert_eq!(rig.drain(), night(true));
 
     let mut day = cfg.clone();
     day.appearance_mode = AppearanceMode::Day;
@@ -1373,11 +1376,7 @@ async fn telemetry_reaches_carplay_and_only_a_config_change_sets_the_night_mode_
     rig.p.on_event(CpEvent::Spawned { id: 1 });
     assert_eq!(
         rig.drain(),
-        [
-            CpCmd::NightMode(true),
-            CpCmd::ClusterNightMode(true),
-            levels
-        ],
+        [night(true), vec![levels]].concat(),
         "a new session hears the volumes"
     );
 }

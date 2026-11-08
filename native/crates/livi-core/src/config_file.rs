@@ -20,14 +20,35 @@ pub struct HostFacts {
     pub panel_px: Option<(u32, u32)>,
 }
 
+/// Presets a distribution or integrator installs: partial configs, merged in
+/// file-name order over LIVI's defaults and under the user's file. The user's
+/// file holds every key once LIVI has written it, so a preset shapes a first
+/// run, or keys the file lacks.
+const PRESET_DIR: &str = "/usr/share/livi/preset.d";
+
 pub struct ConfigFile {
     path: PathBuf,
     backup: PathBuf,
+    presets: Vec<PathBuf>,
 }
 
 impl ConfigFile {
+    /// Presets from PRESET_DIR, then LIVI_PRESET (a file or a directory).
     pub fn new(path: PathBuf, backup: PathBuf) -> Self {
-        Self { path, backup }
+        let mut presets = vec![PathBuf::from(PRESET_DIR)];
+        if let Some(extra) = std::env::var_os("LIVI_PRESET") {
+            presets.push(extra.into());
+        }
+        Self {
+            path,
+            backup,
+            presets,
+        }
+    }
+
+    pub fn with_presets(mut self, presets: Vec<PathBuf>) -> Self {
+        self.presets = presets;
+        self
     }
 
     pub fn load(&self, host: &HostFacts) -> Config {
@@ -55,6 +76,19 @@ impl ConfigFile {
             defaults.projection_height = h;
             defaults.cluster_width = w;
             defaults.cluster_height = h;
+        }
+        // After the host's guesses: a preset knows the car better.
+        for preset in preset_files(&self.presets) {
+            let Some(patch) = read_json(&preset) else {
+                continue;
+            };
+            match apply_patch(&defaults, &patch) {
+                Ok(next) => {
+                    println!("[core] preset {}", preset.display());
+                    defaults = next;
+                }
+                Err(e) => eprintln!("[core] preset {} left out: {e}", preset.display()),
+            }
         }
 
         let mut config = merge(&current_names(&file), &defaults);
@@ -94,6 +128,25 @@ fn read_json(path: &Path) -> Option<Value> {
             None
         }
     }
+}
+
+/// The preset files: each path a file, or a directory whose *.json files are
+/// taken in name order. A missing path is no preset.
+fn preset_files(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for path in paths {
+        if path.is_file() {
+            out.push(path.clone());
+        } else if let Ok(entries) = fs::read_dir(path) {
+            let mut files: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "json") && p.is_file())
+                .collect();
+            files.sort();
+            out.extend(files);
+        }
+    }
+    out
 }
 
 fn write_atomic(path: &Path, data: &str) -> io::Result<()> {
@@ -329,6 +382,50 @@ pub mod tests {
             dir.0.join("LIVI/config.json"),
             dir.0.join("backup/config.json"),
         )
+        .with_presets(Vec::new())
+    }
+
+    #[test]
+    fn presets_lie_between_the_defaults_and_the_file() {
+        let dir = TempDir::new();
+        let presets = dir.0.join("preset.d");
+        fs::create_dir_all(&presets).unwrap();
+        // Name order: 50 then 60, the later one winning; a broken or
+        // misfitting preset is left out, the others still apply.
+        fs::write(
+            presets.join("50-device.json"),
+            json!({ "wifiInterface": "wlan0", "carName": "Device", "bindings": { "home": "Home" } })
+                .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            presets.join("60-car.json"),
+            json!({ "carName": "Car" }).to_string(),
+        )
+        .unwrap();
+        fs::write(presets.join("70-broken.json"), "{ nope").unwrap();
+        fs::write(
+            presets.join("80-misfit.json"),
+            json!({ "kiosk": { "main": null } }).to_string(),
+        )
+        .unwrap();
+        fs::write(presets.join("90-ignored.txt"), "{}").unwrap();
+
+        let file = file_in(&dir).with_presets(vec![presets.clone()]);
+        let fresh = file.load(&HostFacts {
+            car_name: Some("host".into()),
+            panel_px: None,
+        });
+        assert_eq!(fresh.car_name, "Car");
+        assert_eq!(fresh.wifi_interface, "wlan0");
+        assert_eq!(fresh.bindings.home, "Home");
+        assert_eq!(fresh.bindings.play_pause, defaults().bindings.play_pause);
+
+        // The user's file wins over every preset.
+        let mut mine = written(&dir, "LIVI/config.json");
+        mine["carName"] = json!("Mine");
+        fs::write(dir.0.join("LIVI/config.json"), mine.to_string()).unwrap();
+        assert_eq!(file.load(&HostFacts::default()).car_name, "Mine");
     }
 
     fn written(dir: &TempDir, rel: &str) -> Value {

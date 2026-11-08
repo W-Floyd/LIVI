@@ -243,7 +243,18 @@ async fn settle(p: &Privileged, core: &Core, started: &Config) -> Config {
             if live.width > 0 && live.width != cfg.wifi_channel_width {
                 patch.insert("wifiChannelWidth".into(), live.width.into());
             }
-            if !patch.is_empty() {
+            // On the channel of a station associated on the same radio, the
+            // access point borrowed that channel rather than had its own refused:
+            // saving it would keep it there once the station is gone (out of
+            // range of the home network, say).
+            let borrowed = livi_wifi::station_channel(&cfg.wifi_interface)
+                .is_some_and(|s| s.number == live.channel);
+            if !patch.is_empty() && borrowed {
+                println!(
+                    "[wifi-ap] it runs on {} at {} MHz, the channel of a station on the same radio; channel {} stays the setting",
+                    live.channel, live.width, cfg.wifi_channel
+                );
+            } else if !patch.is_empty() {
                 println!(
                     "[wifi-ap] channel {} at {} MHz was refused, it runs on {} at {} MHz",
                     cfg.wifi_channel, cfg.wifi_channel_width, live.channel, live.width

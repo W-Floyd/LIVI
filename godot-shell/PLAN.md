@@ -330,6 +330,72 @@ of its tags stays.
 kept with and without the duplicates, and the runner checks that no element
 shows a tag the config hides.
 
+## Scene themes
+
+A theme may draw the UI as a real 3D scene: buttons as machined aluminum
+keys, panels as smoked glass over a leather-grained dash, the car model
+behind the stats, with lights, PBR materials, normal maps and glTF models.
+It's the same UI with the same rules, drawn another way.
+
+**Components are logic plus a skin.** From milestone 4 every standard
+component is split:
+- **Logic:** state, actions to the core, and its hit areas. These are plain
+  `Control`s, laid out in panel pixels from the rule table. They take all
+  input and are what the tests and the touch-target checks measure.
+- **Skin:** how it looks. The default skin is 2D (theme tokens and
+  `StyleBox`es). A scene theme gives a component a 3D skin, a scene that
+  receives the same parameters and state and draws over the logic's exact
+  rectangle.
+
+So a 3D theme can't move a touch target, shrink a hit area or change a
+flow. It changes only pixels.
+
+**How a 3D skin is drawn:**
+- One 3D scene per display, behind and around the 2D layer. Its camera is
+  set so the panel plane maps 1:1 to panel pixels: orthographic, or a
+  perspective camera within a small field of view, with the plane at the
+  focal distance.
+- Assets are glTF models and `StandardMaterial3D` / `ShaderMaterial`
+  (albedo, normal, roughness and metallic, emission), with a lighting rig
+  and an environment map per appearance (day, night).
+- Materials take their colors from the theme's tokens (albedo tint,
+  emission for lit elements), so day and night, the accent and high
+  contrast still come from one place.
+- **Text stays sharp and flat:** labels are drawn by the 2D layer, or as
+  MSDF text on a plane facing the camera, never lit, bent or put in
+  perspective beyond a set angle.
+- **Video and hosted windows stay unlit and screen-aligned:** the
+  projection, apps and the reversing camera are never shaded, distorted or
+  covered by scene effects. They may sit in a 3D frame, but their pixels
+  map 1:1.
+- **Motion:** idle animation (light sweeps, a turning car) stops while
+  driving and under reduced motion. Transitions follow the motion budget.
+
+**Godot's GLES3 compatibility renderer** (all the Mali-G51 has) does PBR
+with per-object light limits. It has no SDFGI, SSR or SSAO, so scene themes
+use baked lighting, reflection probes and lightmaps where they need depth.
+
+**Cost and fallback:**
+- A scene theme declares a budget (draw calls, triangles, texture memory,
+  lights), and `cargo test` checks its assets against it.
+- Quality profiles decide what runs: normal maps, shadows, the
+  environment map, MSAA, texture size. `low` drops to the 2D skins, which
+  exist for every component.
+- High contrast and reduced transparency drop to 2D skins as well.
+
+**Checks:** with a 3D skin, the rules are checked on what is rendered, not
+on tokens:
+- contrast is sampled from the frame's pixels around each label;
+- legibility is checked on the drawn text's size;
+- touch targets still come from the logic layer, so they hold whatever
+  the skin does.
+
+**Tests:**
+- Goldens for each scene theme at the key pages, under `vm`.
+- `measure` runs under each quality profile and fails over its budget.
+- A scenario switches 3D and 2D skins at run time and checks that no
+  logic, hit area or flow changed.
+
 ## Quality profiles
 
 Rendering cost is set by the device, not the theme. A theme says what a
@@ -553,6 +619,8 @@ Every milestone lands with its scenarios.
       every scenario from here on.
 - [ ] Quality profiles (see "Quality profiles") and idle redraw, with `vm`
       and a first guess at `unit`.
+- [ ] Components as logic plus skin (see "Scene themes"), with 2D skins
+      only, so 3D skins can come later without a rewrite.
 
 ### 5. Hosting and the launcher
 
@@ -585,6 +653,17 @@ Every milestone lands with its scenarios.
 Go or no-go after 7: if the Mali can't composite the projection and Godot at a
 usable rate, stop; the work up to 6 is still usable as hosted pages under
 `livi-compositor`.
+
+### 8. Scene themes
+
+After the go or no-go, as the unit's numbers decide how much 3D it can
+afford.
+
+- [ ] The 3D layer, its panel-plane camera, and 3D skins for a few
+      components, with the rendered-pixel checks.
+- [ ] One full scene theme, with its asset budget and goldens.
+- [ ] Measure it on the unit under each quality profile; set `unit`'s
+      budget from that.
 
 ## Testing
 

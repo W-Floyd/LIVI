@@ -1,0 +1,6 @@
+# Vendor reference material is the vendor's copyright: kept locally, never committed.
+*
+!*/
+!.gitignore
+!.gitkeep
+!README.md

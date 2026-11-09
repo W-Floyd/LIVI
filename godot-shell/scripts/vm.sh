@@ -7,7 +7,7 @@ cd "$(dirname "$0")/../.."
 DEST=${VM_DEST:-livi}
 ssh_cmd="ssh -p 2222 -o BatchMode=yes"
 rsync -a --delete -e "$ssh_cmd" \
-    --exclude target/ --exclude .godot/ --exclude 'project/bin/' --exclude out/ --exclude vm/ \
+    --exclude target/ --exclude .godot/ --exclude 'project/bin/' --exclude out/ --exclude vm/ --exclude ref/ \
     godot-shell native user@localhost:"$DEST"/ >/dev/null
 rc=0
 $ssh_cmd user@localhost "cd $DEST/godot-shell && $*" || rc=$?

@@ -336,6 +336,77 @@ of its tags stays.
 kept with and without the duplicates, and the runner checks that no element
 shows a tag the config hides.
 
+## Vendor themes
+
+A theme can reproduce the car's stock UI as exactly as possible: its fonts, colors, icons,
+artwork, layout positions, sounds and timings. The shell then looks native, so a driver sees
+the car's own design, with LIVI's functions behind it.
+
+**What stays out of the repo:** the vendor's fonts, icons, logos and artwork are its
+copyright, and LIVI is public. The repo carries the mechanism, the importer and the schema,
+but no vendor assets. A vendor theme is a **pack** built locally from the owner's own unit and
+kept on it (`~/.local/share/livi-shell/themes/<pack>/`). The README says not to redistribute
+packs.
+
+**Where a pack comes from (the G5W):** stock Android 4.4 still boots first, so its
+`/system` is on the unit: Mobis's launcher and system APKs, `framework-res`, `/system/fonts`.
+`tools/import-vendor` (to write):
+- takes a copy of those files from the owner's unit;
+- decodes the APK resources (colors, dimensions, styles, drawables including 9-patches, fonts);
+- writes a pack: a `theme.yaml`, plus the assets it refers to;
+- maps the shell's icon names to the vendor's drawables, and lists what it couldn't map.
+
+**What a pack can set, beyond a normal theme:**
+- **Skins from images:** 9-patch and bitmap backgrounds for components and their states,
+  as `StyleBoxTexture` and `TextureButton` states, instead of drawn boxes.
+- **Exact layout:** absolute rectangles per page and component, taken from the stock screens.
+  It's still the same components and logic, placed where the stock UI puts them.
+- **Fonts by file:** the vendor's own faces, at the vendor's sizes.
+- **Icons:** the vendor's drawables in place of the shell's symbols.
+- **Sounds:** touch clicks and chimes.
+- **Motion:** transition timings and curves.
+- **Boot splash and wallpaper.**
+- Pages the stock UI never had (LIVI's own) use the pack's colors, fonts and icon style
+  through the normal token path, so they don't look foreign.
+
+**How close it is, measured:**
+- The pack carries reference screenshots of the stock UI. On the G5W they're taken with
+  `screencap` from stock Android, at the same 1920 × 720, so it can be pixel for pixel.
+- A `compare_reference` scenario step renders the matching shell page and reports the share
+  of pixels within tolerance. It writes a diff, an onion-skin overlay and a flicker GIF, with
+  a mask for live content (clock, map, values).
+- A `--reference` run mode draws the reference over the live shell at 50 %, for aligning a
+  layout by eye.
+- References and results stay local with the pack. They're never goldens in the repo.
+
+**Worked example: the EV6's "Electric vehicle" screen.** Matching it shows what a pack needs
+beyond colors and fonts.
+- **Header:** back, home and menu on the left; time and date; title; a profile icon on the
+  right. That's a vendor header component with the vendor's icons and font.
+- **Car:** the car in perspective, with a battery badge at the charge level. It needs the
+  scene path: a car model (glTF, or the stock UI's own pre-rendered frames if that's how it
+  draws it), a fixed camera and lighting matched to the stock render.
+- **Range road:** a perspective road with markers placed by distance: the next charger
+  (740 m), range with climate on (243 km) and off (253 km). That's a new component, a range
+  ribbon, which every theme can use, drawn in perspective by a vendor pack and flat by others.
+- **Bottom tiles:** next departure, scheduled charging and target temperature, and EV charge
+  transfer (V2G/V2L), plus a settings gear. These are tile components with the vendor's
+  9-patches.
+- **Data it needs that the core doesn't have yet:**
+  - range with climate off, as well as on;
+  - the car's departure schedule, scheduled charging and target temperature;
+  - V2L state.
+  These come from the car (micom-livi) into the core's telemetry, each a task for the
+  core, not the shell. Until then, the tiles show what is known and say what isn't.
+- **Reference:** the stock screen captured on the unit, compared with `compare_reference`,
+  masking the clock and the live values.
+
+**Rules still hold:**
+- A pack may relax the rule table (stock targets are sometimes smaller than 10 mm) only with
+  an explicit `rules_override`. The report lists every place it does, with the size it uses.
+- The legal constraints are never overridable: the driving lockouts, the reversing camera,
+  and what a driver-visible screen may show.
+
 ## Scene themes
 
 A theme may draw the UI as a real 3D scene: buttons as machined aluminum
@@ -626,6 +697,8 @@ Every milestone lands with its scenarios.
       every scenario from here on.
 - [ ] Quality profiles (see "Quality profiles") and idle redraw, with `vm`
       and a first guess at `unit`.
+- [ ] Theme packs from outside the repo, with image skins (9-patch, `TextureButton`
+      states) and absolute per-page layout in the schema (see "Vendor themes").
 - [ ] Components as logic plus skin (see "Scene themes"), with 2D skins
       only, so 3D skins can come later without a rewrite.
 
@@ -647,6 +720,9 @@ Every milestone lands with its scenarios.
 - [ ] Volume and mute always visible; next track and calls one touch away.
 - [ ] Regional profiles for what shows while driving, with their scenarios.
 - [ ] Brightness levels and screen off; the tap-response check in the runner.
+- [ ] `tools/import-vendor` and an EV6 pack from the unit's stock `/system`; the "Electric
+      vehicle" page with its range ribbon and tiles, matched against a stock capture with
+      `compare_reference` (see "Vendor themes").
 
 ### 7. On the unit
 

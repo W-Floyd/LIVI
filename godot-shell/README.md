@@ -32,10 +32,12 @@ Goldens are lossless WebP, a third of PNG's size. Captures are compared in memor
 (as PNG) only on a mismatch, `--update-goldens`, `--shots-only` or `compare: false`.
 
 Scenario fixtures: `core` (a partial state) and `clients`: `{ role: app, app_id, pattern:
-grid|bars, size: WxH, animate: N }` runs the test client, `{ role: command, run: [...] }` any
+grid|bars, size: WxH, animate: N, buffer: shm|dmabuf, events: true }` runs the test client
+(`events` logs the input it gets, for `expect_client`), `{ role: command, run: [...] }` any
 Wayland program.
 
-Steps: `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }`, `key`,
+Steps: `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`
+for a finger), `key`, `expect_client: { app_id, lines: [...] }`,
 `set: { core: {...} }`, `expect_action`, `expect_input`, `expect_node: { path, <property>:
 value }`, `screenshot: name` or `{ name, tolerance, max_pixels, mask: [[x, y, w, h]], compare
 }`, `measure: { name, frames, expect: { <profile>: { <metric>: max } } }`, and `gdscript: |`

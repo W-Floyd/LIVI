@@ -14,7 +14,12 @@ use smithay::delegate_dmabuf;
 use smithay::delegate_seat;
 use smithay::delegate_shm;
 use smithay::delegate_xdg_shell;
+use smithay::backend::input::{ButtonState, KeyState, TouchSlot};
+use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, XkbConfig};
+use smithay::input::pointer::{ButtonEvent, MotionEvent as PointerMotion, PointerHandle};
+use smithay::input::touch::{DownEvent as TouchDown, MotionEvent as TouchMotion, TouchHandle, UpEvent as TouchUp};
 use smithay::input::{Seat, SeatHandler, SeatState};
+use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason, ObjectId};
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
@@ -78,6 +83,9 @@ pub struct State {
     shm: ShmState,
     seat_state: SeatState<State>,
     _seat: Seat<State>,
+    pointer: PointerHandle<State>,
+    keyboard: KeyboardHandle<State>,
+    touch: TouchHandle<State>,
     dmabuf: DmabufState,
     dmabuf_global: Option<DmabufGlobal>,
     pub windows: Vec<Window>,
@@ -115,8 +123,15 @@ impl Server {
         let display: Display<State> = Display::new().map_err(io::Error::other)?;
         let dh = display.handle();
         let mut seat_state = SeatState::new();
-        let seat = seat_state.new_wl_seat(&dh, "seat0");
+        let mut seat = seat_state.new_wl_seat(&dh, "seat0");
+        let pointer = seat.add_pointer();
+        let touch = seat.add_touch();
+        // The keymap is xkb's default (us); delay and rate are milliseconds and keys per second.
+        let keyboard = seat.add_keyboard(XkbConfig::default(), 400, 25).map_err(io::Error::other)?;
         let state = State {
+            pointer,
+            keyboard,
+            touch,
             compositor: CompositorState::new::<State>(&dh),
             xdg_shell: XdgShellState::new::<State>(&dh),
             shm: ShmState::new::<State>(&dh, vec![]),
@@ -226,6 +241,87 @@ impl Server {
 
     pub fn display_handle(&self) -> DisplayHandle {
         self.display.handle()
+    }
+
+    /// Asks the window to close, as its close button would.
+    pub fn close(&mut self, window: u64) {
+        if let Some(w) = self.state.windows.iter().find(|w| w.id == window) {
+            w.toplevel.send_close();
+        }
+    }
+
+    fn time(&self) -> u32 {
+        self.started.elapsed().as_millis() as u32
+    }
+
+    /// The window's surface, its origin placed at (0, 0): every position below is local to it.
+    fn focus(&self, window: u64) -> Option<(WlSurface, Point<f64, Logical>)> {
+        let w = self.state.windows.iter().find(|w| w.id == window && w.mapped)?;
+        Some((w.toplevel.wl_surface().clone(), (0.0, 0.0).into()))
+    }
+
+    /// Moves the pointer to (x, y) in the window, or out of every window with `None`.
+    pub fn pointer_motion(&mut self, window: Option<u64>, x: f64, y: f64) {
+        let focus = window.and_then(|w| self.focus(w));
+        let event = PointerMotion { location: (x, y).into(), serial: SERIAL_COUNTER.next_serial(), time: self.time() };
+        let pointer = self.state.pointer.clone();
+        pointer.motion(&mut self.state, focus, &event);
+        pointer.frame(&mut self.state);
+    }
+
+    /// `button` is an evdev code: BTN_LEFT is 0x110.
+    pub fn pointer_button(&mut self, button: u32, pressed: bool) {
+        let state = if pressed { ButtonState::Pressed } else { ButtonState::Released };
+        let event = ButtonEvent { button, state, serial: SERIAL_COUNTER.next_serial(), time: self.time() };
+        let pointer = self.state.pointer.clone();
+        pointer.button(&mut self.state, &event);
+        pointer.frame(&mut self.state);
+    }
+
+    pub fn touch_down(&mut self, window: u64, slot: u32, x: f64, y: f64) {
+        let Some(focus) = self.focus(window) else { return };
+        let event = TouchDown {
+            slot: TouchSlot::from(Some(slot)),
+            location: (x, y).into(),
+            serial: SERIAL_COUNTER.next_serial(),
+            time: self.time(),
+        };
+        let touch = self.state.touch.clone();
+        touch.down(&mut self.state, Some(focus), &event);
+        touch.frame(&mut self.state);
+    }
+
+    pub fn touch_motion(&mut self, window: u64, slot: u32, x: f64, y: f64) {
+        let focus = self.focus(window);
+        let event = TouchMotion { slot: TouchSlot::from(Some(slot)), location: (x, y).into(), time: self.time() };
+        let touch = self.state.touch.clone();
+        touch.motion(&mut self.state, focus, &event);
+        touch.frame(&mut self.state);
+    }
+
+    pub fn touch_up(&mut self, slot: u32) {
+        let event = TouchUp { slot: TouchSlot::from(Some(slot)), serial: SERIAL_COUNTER.next_serial(), time: self.time() };
+        let touch = self.state.touch.clone();
+        touch.up(&mut self.state, &event);
+        touch.frame(&mut self.state);
+    }
+
+    /// Gives the window keyboard focus, or takes it from every window with `None`.
+    pub fn keyboard_focus(&mut self, window: Option<u64>) {
+        let focus = window.and_then(|w| self.focus(w)).map(|(s, _)| s);
+        let keyboard = self.state.keyboard.clone();
+        keyboard.set_focus(&mut self.state, focus, SERIAL_COUNTER.next_serial());
+    }
+
+    /// `code` is an evdev key code (KEY_A is 30), sent to the focused window.
+    pub fn key(&mut self, code: u32, pressed: bool) {
+        let state = if pressed { KeyState::Pressed } else { KeyState::Released };
+        let (serial, time) = (SERIAL_COUNTER.next_serial(), self.time());
+        let keyboard = self.state.keyboard.clone();
+        // xkb numbers keys from 8.
+        keyboard.input::<(), _>(&mut self.state, Keycode::new(code + 8), state, serial, time, |_, _, _| {
+            FilterResult::Forward
+        });
     }
 }
 
@@ -467,7 +563,7 @@ mod tests {
         server
     }
 
-    fn client(server: &mut Server, opts: Opts) -> thread::JoinHandle<u32> {
+    fn client(server: &mut Server, opts: Opts) -> thread::JoinHandle<test_client::Report> {
         let (ours, theirs) = UnixStream::pair().unwrap();
         server.insert_client(ours).unwrap();
         thread::spawn(move || test_client::run(Connection::from_socket(theirs).unwrap(), &opts).unwrap())
@@ -482,6 +578,7 @@ mod tests {
             pattern,
             animate,
             dmabuf,
+            events: None,
         }
     }
 
@@ -534,9 +631,41 @@ mod tests {
             let mut server = server();
             let client = client(&mut server, opts(Pattern::Bars, Some(5), dmabuf));
             assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Unmapped(1))), "dmabuf={dmabuf}");
-            assert_eq!(client.join().unwrap(), 5);
+            assert_eq!(client.join().unwrap().drawn, 5);
             assert!(server.state.windows.is_empty());
         }
+    }
+
+    /// Each kind of input reaches the window at the position given, in order.
+    #[test]
+    fn input_reaches_the_window_at_surface_positions() {
+        type Send = fn(&mut Server);
+        let steps: &[(Send, &[&str])] = &[
+            (|s| s.pointer_motion(Some(1), 10.5, 20.0), &["pointer enter 10.5 20.0"]),
+            (|s| s.pointer_motion(Some(1), 12.0, 22.5), &["pointer motion 12.0 22.5"]),
+            (|s| s.pointer_button(0x110, true), &["pointer button 272 pressed"]),
+            (|s| s.pointer_button(0x110, false), &["pointer button 272 released"]),
+            (|s| s.pointer_motion(None, 0.0, 0.0), &["pointer leave"]),
+            (|s| s.touch_down(1, 0, 30.0, 40.0), &["touch down 0 30.0 40.0"]),
+            (|s| s.touch_motion(1, 0, 31.0, 41.5), &["touch motion 0 31.0 41.5"]),
+            (|s| s.touch_up(0), &["touch up 0"]),
+            (|s| s.keyboard_focus(Some(1)), &["keyboard enter"]),
+            (|s| s.key(30, true), &["key 30 pressed"]),
+            (|s| s.key(30, false), &["key 30 released"]),
+            (|s| s.keyboard_focus(None), &["keyboard leave"]),
+        ];
+        let mut server = server();
+        let client = client(&mut server, opts(Pattern::Grid, None, false));
+        assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))));
+        for (send, _) in steps {
+            send(&mut server);
+            server.dispatch().unwrap();
+        }
+        server.close(1);
+        assert!(pump(&mut server, |s| s.windows.is_empty()));
+        let got = client.join().unwrap().events;
+        let want: Vec<&str> = steps.iter().flat_map(|(_, w)| w.iter().copied()).collect();
+        assert_eq!(got, want);
     }
 
     #[test]

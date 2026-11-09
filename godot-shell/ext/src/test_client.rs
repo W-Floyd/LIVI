@@ -12,7 +12,11 @@ use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::wl_shm::{self, WlShm};
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_client::protocol::wl_surface::WlSurface;
-use wayland_client::{Connection, Dispatch, QueueHandle, delegate_noop};
+use wayland_client::protocol::wl_keyboard::{self, WlKeyboard};
+use wayland_client::protocol::wl_pointer::{self, WlPointer};
+use wayland_client::protocol::wl_seat::{self, WlSeat};
+use wayland_client::protocol::wl_touch::{self, WlTouch};
+use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, delegate_noop};
 use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1};
 use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1;
 use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
@@ -71,6 +75,16 @@ pub struct Opts {
     pub animate: Option<u32>,
     /// Send linear XRGB dmabufs (from /dev/udmabuf) instead of shm.
     pub dmabuf: bool,
+    /// Also append each input event, one line each, to this file as it arrives.
+    pub events: Option<std::path::PathBuf>,
+}
+
+/// What a run saw: frames drawn, and every input event in the order it came, such as
+/// `pointer button 272 pressed` or `touch down 0 320.0 180.0`; positions are surface-local.
+#[derive(Debug, Default)]
+pub struct Report {
+    pub drawn: u32,
+    pub events: Vec<String>,
 }
 
 #[derive(Default)]
@@ -84,16 +98,32 @@ struct App {
     frame_due: bool,
     /// Per buffer: attached and not yet released.
     busy: Vec<bool>,
+    seat: Option<WlSeat>,
+    has_input: bool,
+    events: Vec<String>,
+    log: Option<File>,
 }
 
-/// Runs until the compositor closes the window or goes away, or the animation ends. Returns
-/// the number of frames drawn.
-pub fn run(conn: Connection, opts: &Opts) -> io::Result<u32> {
+impl App {
+    fn note(&mut self, line: String) {
+        if let Some(f) = &mut self.log {
+            use std::io::Write;
+            let _ = writeln!(f, "{line}");
+        }
+        self.events.push(line);
+    }
+}
+
+/// Runs until the compositor closes the window or goes away, or the animation ends.
+pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     let err = |e: &dyn std::fmt::Display| io::Error::other(e.to_string());
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
     conn.display().get_registry(&qh, ());
     let mut app = App::default();
+    if let Some(path) = &opts.events {
+        app.log = Some(File::create(path)?);
+    }
     queue.roundtrip(&mut app).map_err(|e| err(&e))?;
     let (Some(compositor), Some(shm), Some(wm_base)) =
         (app.compositor.clone(), app.shm.clone(), app.wm_base.clone())
@@ -200,7 +230,7 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<u32> {
         unsafe { libc::munmap(map, size) };
     }
     let _ = queue.roundtrip(&mut app);
-    Ok(drawn)
+    Ok(Report { drawn, events: app.events })
 }
 
 const XRGB8888: u32 = 0x3432_5258;
@@ -276,6 +306,7 @@ impl Dispatch<WlRegistry, ()> for App {
             "wl_shm" => app.shm = Some(registry.bind(name, 1, qh, ())),
             "xdg_wm_base" => app.wm_base = Some(registry.bind(name, 1, qh, ())),
             "zwp_linux_dmabuf_v1" => app.dmabuf = Some(registry.bind(name, version.min(3), qh, ())),
+            "wl_seat" => app.seat = Some(registry.bind(name, version.min(7), qh, ())),
             _ => {}
         }
     }
@@ -328,3 +359,68 @@ delegate_noop!(App: ignore WlShm);
 delegate_noop!(App: ignore WlSurface);
 delegate_noop!(App: ignore ZwpLinuxDmabufV1);
 delegate_noop!(App: ignore ZwpLinuxBufferParamsV1);
+
+impl Dispatch<WlSeat, ()> for App {
+    fn event(app: &mut Self, seat: &WlSeat, event: wl_seat::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
+        let wl_seat::Event::Capabilities { capabilities: WEnum::Value(caps) } = event else {
+            return;
+        };
+        if app.has_input {
+            return;
+        }
+        app.has_input = true;
+        if caps.contains(wl_seat::Capability::Pointer) {
+            seat.get_pointer(qh, ());
+        }
+        if caps.contains(wl_seat::Capability::Keyboard) {
+            seat.get_keyboard(qh, ());
+        }
+        if caps.contains(wl_seat::Capability::Touch) {
+            seat.get_touch(qh, ());
+        }
+    }
+}
+
+fn pressed(down: bool) -> &'static str {
+    if down { "pressed" } else { "released" }
+}
+
+impl Dispatch<WlPointer, ()> for App {
+    fn event(app: &mut Self, _: &WlPointer, event: wl_pointer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            wl_pointer::Event::Enter { surface_x, surface_y, .. } => app.note(format!("pointer enter {surface_x:.1} {surface_y:.1}")),
+            wl_pointer::Event::Motion { surface_x, surface_y, .. } => app.note(format!("pointer motion {surface_x:.1} {surface_y:.1}")),
+            wl_pointer::Event::Leave { .. } => app.note("pointer leave".into()),
+            wl_pointer::Event::Button { button, state, .. } => {
+                let down = state == WEnum::Value(wl_pointer::ButtonState::Pressed);
+                app.note(format!("pointer button {button} {}", pressed(down)));
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WlTouch, ()> for App {
+    fn event(app: &mut Self, _: &WlTouch, event: wl_touch::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            wl_touch::Event::Down { id, x, y, .. } => app.note(format!("touch down {id} {x:.1} {y:.1}")),
+            wl_touch::Event::Motion { id, x, y, .. } => app.note(format!("touch motion {id} {x:.1} {y:.1}")),
+            wl_touch::Event::Up { id, .. } => app.note(format!("touch up {id}")),
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WlKeyboard, ()> for App {
+    fn event(app: &mut Self, _: &WlKeyboard, event: wl_keyboard::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            wl_keyboard::Event::Enter { .. } => app.note("keyboard enter".into()),
+            wl_keyboard::Event::Leave { .. } => app.note("keyboard leave".into()),
+            wl_keyboard::Event::Key { key, state, .. } => {
+                let down = state == WEnum::Value(wl_keyboard::KeyState::Pressed);
+                app.note(format!("key {key} {}", pressed(down)));
+            }
+            _ => {}
+        }
+    }
+}

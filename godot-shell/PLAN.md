@@ -595,8 +595,9 @@ Every milestone lands with its scenarios.
 - [x] A minimal smithay server in the extension, with `xdg_shell` and shm.
       `weston-terminal` shows as a texture.
 - [x] Test clients, `fixtures.clients`, and the `measure` step.
-- [ ] dmabuf, through EGLImage and a native GL texture.
-- [ ] Input: pointer, touch and keyboard, through `wl_seat`.
+- [x] dmabuf, through EGLImage and a native GL texture.
+- [x] Input: pointer, touch and keyboard, through `wl_seat`.
+- [ ] Scroll (pointer axis), and explicit sync (`drm_syncobj`) for clients that use it.
 
 ### 3. LIVI's video
 

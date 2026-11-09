@@ -7,8 +7,9 @@ cd "$(dirname "$0")/.."
 (cd ext && cargo test --quiet)
 # Release: the measure steps time the extension, and a debug build's numbers mean little.
 scripts/build-ext.sh --release
-# Godot imports the project once, so the extension and resources are registered.
-[ -d project/.godot ] || godot --headless --path project --import >/dev/null 2>&1 || true
+# Every run: the import registers the extension, resources and global class names (a new
+# class_name is unknown until then), and is quick when nothing changed.
+godot --headless --path project --import >/dev/null 2>&1 || true
 scripts/check-gd.sh
 rm -rf out
 

@@ -149,6 +149,9 @@ func _spawn(c: Dictionary) -> String:
 				args.append_array(["--animate", str(int(c.animate))])
 			if c.has("buffer"):
 				args.append_array(["--buffer", c.buffer])
+			if c.get("events", false):
+				DirAccess.make_dir_recursive_absolute(_out.path_join(_scenario))
+				args.append_array(["--events", _client_events(c.get("app_id", "org.livi.test"))])
 		"command":
 			var run: Array = c.get("run", [])
 			if run.is_empty():
@@ -197,7 +200,10 @@ func _step(step: Dictionary) -> String:
 			var at = _point(arg)
 			if at is String:
 				return at
-			await _tap(at)
+			if arg.get("with", "mouse") == "touch":
+				await _touch(at)
+			else:
+				await _tap(at)
 		"key":
 			await _key(str(arg))
 		"set":
@@ -209,6 +215,8 @@ func _step(step: Dictionary) -> String:
 			return _expect("input", "input", _input_from_scenario(arg))
 		"expect_node":
 			return _expect_node(arg)
+		"expect_client":
+			return await _expect_client(arg)
 		"record":
 			if str(arg) == "stop":
 				_record_stop()
@@ -415,6 +423,42 @@ func _ring() -> Image:
 			elif d >= 24 and d < 36:
 				_tap_ring.set_pixel(x, y, Color(0, 0, 0, 0.55))
 	return _tap_ring
+
+
+## A finger: touch events only, as the panel sends them (no emulated mouse, which a pushed
+## event does not get).
+func _touch(at: Vector2) -> void:
+	if _rec_dir != "":
+		_rec_marks.append({pos = at, age = 0})
+	for pressed in [true, false]:
+		var ev := InputEventScreenTouch.new()
+		ev.index = 0
+		ev.position = at
+		ev.pressed = pressed
+		_vp.push_input(ev)
+		await _frames(1)
+
+
+## `{ app_id, lines: [...] }`: the client logged these input events, in this order (others may
+## come between). Clients log as events arrive, so this waits up to a second for them.
+func _expect_client(arg: Dictionary) -> String:
+	var path := _client_events(arg.get("app_id", ""))
+	var want: Array = arg.get("lines", [])
+	var got := PackedStringArray()
+	for i in 60:
+		got = FileAccess.get_file_as_string(path).strip_edges().split("\n", false)
+		var n := 0
+		for line in got:
+			if n < want.size() and line == want[n]:
+				n += 1
+		if n == want.size():
+			return ""
+		await _frames(1)
+	return "client got %s" % JSON.stringify(got)
+
+
+func _client_events(app_id: String) -> String:
+	return _out.path_join(_scenario).path_join(app_id + ".events")
 
 
 func _tap(at: Vector2) -> void:

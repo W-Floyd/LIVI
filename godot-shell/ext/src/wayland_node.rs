@@ -219,6 +219,70 @@ impl WaylandCompositor {
         self.stats = Stats::default();
     }
 
+    /// Pointer at (x, y) in the window's surface, or out of every window with id -1.
+    #[func]
+    fn pointer_motion(&mut self, id: i64, x: f64, y: f64) {
+        if let Some(s) = self.server.as_mut() {
+            s.pointer_motion((id >= 0).then_some(id as u64), x, y);
+        }
+    }
+
+    /// `button` is Godot's mouse button index.
+    #[func]
+    fn pointer_button(&mut self, button: i64, pressed: bool) {
+        if let (Some(s), Some(b)) = (self.server.as_mut(), crate::keys::evdev_button(button)) {
+            s.pointer_button(b, pressed);
+        }
+    }
+
+    #[func]
+    fn touch_down(&mut self, id: i64, slot: i64, x: f64, y: f64) {
+        if let Some(s) = self.server.as_mut() {
+            s.touch_down(id as u64, slot as u32, x, y);
+        }
+    }
+
+    #[func]
+    fn touch_motion(&mut self, id: i64, slot: i64, x: f64, y: f64) {
+        if let Some(s) = self.server.as_mut() {
+            s.touch_motion(id as u64, slot as u32, x, y);
+        }
+    }
+
+    #[func]
+    fn touch_up(&mut self, slot: i64) {
+        if let Some(s) = self.server.as_mut() {
+            s.touch_up(slot as u32);
+        }
+    }
+
+    /// Keyboard focus to the window, or to none with -1.
+    #[func]
+    fn keyboard_focus(&mut self, id: i64) {
+        if let Some(s) = self.server.as_mut() {
+            s.keyboard_focus((id >= 0).then_some(id as u64));
+        }
+    }
+
+    /// A key by Godot's physical keycode, to the focused window. False when it has no mapping.
+    #[func]
+    fn key(&mut self, physical_keycode: i64, pressed: bool) -> bool {
+        match (self.server.as_mut(), crate::keys::evdev(physical_keycode)) {
+            (Some(s), Some(code)) => {
+                s.key(code, pressed);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[func]
+    fn close(&mut self, id: i64) {
+        if let Some(s) = self.server.as_mut() {
+            s.close(id as u64);
+        }
+    }
+
     #[func]
     fn window_count(&self) -> i64 {
         self.server.as_ref().map_or(0, |s| s.state.windows.len() as i64)

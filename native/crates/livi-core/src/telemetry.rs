@@ -89,6 +89,44 @@ fn with_source(key: &str, incoming: &Value) -> Value {
     }
 }
 
+const BATTERY_LEVEL: &str = "batteryLevelKwh";
+const FUEL_PCT: &str = "fuelPct";
+const BATTERY_USABLE: &str = "batteryUsableKwh";
+/// Below this the gauge's whole percent is too coarse a divisor.
+const LEARN_MIN_PCT: f64 = 30.0;
+/// Each new reading moves the learned capacity this share of the way.
+const LEARN_WEIGHT: f64 = 0.05;
+
+/// The capacity behind the gauge: the battery's energy over its state of charge, smoothed. With it
+/// the share Android Auto shows matches the car's own gauge, and it follows the pack as it ages.
+fn learn_usable_capacity(snap: &mut Snapshot) {
+    let num = |k: &str| {
+        snap.get(k)
+            .and_then(Value::as_f64)
+            .filter(|v| v.is_finite())
+    };
+    let (Some(level), Some(pct)) = (num(BATTERY_LEVEL), num(FUEL_PCT)) else {
+        return;
+    };
+    if level <= 0.0 || !(LEARN_MIN_PCT..=100.0).contains(&pct) {
+        return;
+    }
+    let sample = level / (pct / 100.0);
+    if num("batteryCapacityKwh")
+        .is_some_and(|gross| !(gross * 0.5..=gross * 1.05).contains(&sample))
+    {
+        return;
+    }
+    let next = match num(BATTERY_USABLE).filter(|c| *c > 0.0) {
+        Some(prev) => prev + LEARN_WEIGHT * (sample - prev),
+        None => sample,
+    };
+    let next = (next * 100.0).round() / 100.0;
+    if num(BATTERY_USABLE) != Some(next) {
+        snap.insert(BATTERY_USABLE.into(), next.into());
+    }
+}
+
 fn valid(lat: f64, lng: f64) -> bool {
     lat.is_finite()
         && lng.is_finite()
@@ -193,6 +231,9 @@ impl Telemetry {
         let Some(changed) = merge(&mut self.snap, patch) else {
             return;
         };
+        if changed.contains_key(BATTERY_LEVEL) || changed.contains_key(FUEL_PCT) {
+            learn_usable_capacity(&mut self.snap);
+        }
         self.publish().await;
         if let Some(page) = self.snap.get("path").filter(|p| Some(*p) != path.as_ref())
             && let Some(page) = page.as_str()
@@ -444,6 +485,39 @@ mod tests {
 
     fn obj(v: Value) -> Snapshot {
         v.as_object().cloned().unwrap_or_default()
+    }
+
+    #[test]
+    fn the_usable_capacity_is_learned_from_energy_over_charge() {
+        let learned = |v: Value| {
+            let mut snap = obj(v);
+            learn_usable_capacity(&mut snap);
+            snap.get(BATTERY_USABLE).and_then(Value::as_f64)
+        };
+        let gross = json!(77.4);
+        assert_eq!(
+            learned(json!({ "batteryLevelKwh": 37.0, "fuelPct": 50 })),
+            Some(74.0)
+        );
+        assert_eq!(
+            learned(json!({ "batteryLevelKwh": 7.4, "fuelPct": 10, "batteryUsableKwh": 70.0 })),
+            Some(70.0),
+            "too coarse at a low charge"
+        );
+        assert_eq!(
+            learned(json!({ "batteryLevelKwh": 60.0, "fuelPct": 50, "batteryCapacityKwh": gross })),
+            None,
+            "past the gross capacity"
+        );
+        assert_eq!(
+            learned(json!({ "batteryLevelKwh": 37.0, "fuelPct": 50, "batteryUsableKwh": 70.0 })),
+            Some(70.2),
+            "one reading moves it a twentieth of the way"
+        );
+        assert_eq!(
+            learned(json!({ "batteryLevelKwh": 0, "fuelPct": 50 })),
+            None
+        );
     }
 
     #[test]

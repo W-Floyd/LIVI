@@ -39,11 +39,12 @@
 //! | fuelRateLph                         | ✓    | ·            | ·               | ·             |
 //! | consumption*                        | ✓    | ·            | ·               | ✓             |
 //! | batteryCapacityKwh, batteryLevelKwh | ✓    | ✓            | ✓ (electric)    | ✓ (electric)  |
+//! | batteryUsableKwh                    | ✓    | ✓            | ·               | ·             |
 //! | charging, activeConnector           | ✓    | ·            | ✓ (electric)    | ✓ (electric)  |
 //! | rangeMaxElectricKm                  | ✓    | ·            | ✓ (electric)    | ✓ (electric)  |
 //! | carType                             | ✓    | ✓            | ✓               | ✓             |
 //! | evConnectorTypes                    | ✓    | ✓            | ✓               | ✓             |
-//! | evMaxAcPowerKw, evMaxDcPowerKw      | ✓    | ·            | ✓               | ✓             |
+//! | evMaxAcPowerKw, evMaxDcPowerKw      | ✓    | ✓            | ✓               | ✓             |
 //! | coolantC                            | ✓    | ·            | ·               | TODO          |
 //! | iatC, transmissionC                 | ✓    | ·            | ·               | ·             |
 //! | oilC                                | ✓    | ·            | ·               | ·             |
@@ -117,10 +118,15 @@ pub struct TelemetrySnapshot {
     pub fuel_rate_lph: Option<f64>,
     pub consumption_l_per100_km: Option<f64>,
     pub consumption_avg_l_per100_km: Option<f64>,
-    /// Gross capacity. Turns on electric routing in Android Auto, whatever `carType` says.
+    /// Gross capacity. With `batteryLevelKwh`, turns on electric routing in Android Auto, whatever
+    /// `carType` says.
     pub battery_capacity_kwh: Option<f64>,
-    /// Taken from `fuelPct` and the capacity when absent.
+    /// The energy left. CarPlay takes it from `fuelPct` and the capacity when absent, Android
+    /// Auto's energy model goes out only with it.
     pub battery_level_kwh: Option<f64>,
+    /// What a full gauge holds, LIVI learns it from `batteryLevelKwh` over `fuelPct` and keeps it
+    /// across starts. Android Auto's energy model takes it over `batteryCapacityKwh`.
+    pub battery_usable_kwh: Option<f64>,
     /// True while the battery charges.
     pub charging: Option<bool>,
     /// The `EvConnectorType` name of the plug that charges, such as `Combo2`.

@@ -10,6 +10,7 @@ pub mod config;
 pub mod control;
 pub mod discovery;
 pub mod driver;
+pub mod energy;
 pub mod helper_sock;
 pub mod link;
 pub mod log;

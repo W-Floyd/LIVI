@@ -394,8 +394,12 @@ pub mod tests {
         // misfitting preset is left out, the others still apply.
         fs::write(
             presets.join("50-device.json"),
-            json!({ "wifiInterface": "wlan0", "carName": "Device", "bindings": { "home": "Home" } })
-                .to_string(),
+            json!({
+                "wifiInterface": "wlan0", "carName": "Device", "bindings": { "home": "Home" },
+                "evRoadLoad": { "aN": 106.72, "bNPerMps": 2.2776, "cNPerMps2": 0.4655 },
+                "evChargeCurve": [[1, 205], [100, 12]]
+            })
+            .to_string(),
         )
         .unwrap();
         fs::write(
@@ -420,6 +424,16 @@ pub mod tests {
         assert_eq!(fresh.wifi_interface, "wlan0");
         assert_eq!(fresh.bindings.home, "Home");
         assert_eq!(fresh.bindings.play_pause, defaults().bindings.play_pause);
+        assert_eq!(
+            fresh
+                .ev_road_load
+                .map(|r| (r.a_n, r.b_n_per_mps, r.c_n_per_mps2)),
+            Some((106.72, 2.2776, 0.4655))
+        );
+        assert_eq!(
+            fresh.ev_charge_curve,
+            Some(vec![[1.0, 205.0], [100.0, 12.0]])
+        );
 
         // The user's file wins over every preset.
         let mut mine = written(&dir, "LIVI/config.json");

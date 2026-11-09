@@ -90,7 +90,7 @@ pub fn save_sdr(user_data: &Path, sdr: &Sdr) {
     );
 }
 
-pub const KEPT_WHILE_PARKED: [&str; 10] = [
+pub const KEPT_WHILE_PARKED: [&str; 11] = [
     "fuelPct",
     "rangeKm",
     "rangeFuelKm",
@@ -100,6 +100,7 @@ pub const KEPT_WHILE_PARKED: [&str; 10] = [
     "odometerTripKm",
     "batteryLevelKwh",
     "batteryCapacityKwh",
+    "batteryUsableKwh",
     "tirePressure",
 ];
 

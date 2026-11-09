@@ -80,6 +80,7 @@ pub mod nav_msg {
     pub const NEXT_TURN_DISTANCE: u16 = Id::NextTurnDistance as u16;
     pub const STATE: u16 = Id::State as u16;
     pub const CURRENT_POSITION: u16 = Id::CurrentPosition as u16;
+    pub const VEHICLE_ENERGY_FORECAST: u16 = Id::VehicleEnergyForecast as u16;
 }
 
 pub mod playback_msg {

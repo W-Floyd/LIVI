@@ -3,13 +3,13 @@
 // Additional terms: see NOTICE
 
 use livi_aa_proto::{
-    BatteryConfig, CarLocation, ChargingPrefs, CurrentGear, DrivingStatus, EnergyConsumption,
-    EnergyRate, EnergyValue, EngineRpm, EnvironmentConditions, FuelLevel, LightStates,
-    NightModeData, Odometer, ParkingBrake, SensorBatchNotification, TirePressures,
-    VehicleEnergyModel, VehicleSpeed,
+    CarLocation, CurrentGear, DrivingStatus, EngineRpm, EnvironmentConditions, FuelLevel,
+    LightStates, NightModeData, Odometer, ParkingBrake, SensorBatchNotification, TirePressures,
+    VehicleSpeed,
 };
 use prost::Message;
 
+use crate::energy::{self, EnergyModel};
 use crate::wire::round_half_up;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -22,7 +22,7 @@ pub struct GpsFix {
     pub bearing_deg: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Sensor {
     Fuel {
         level_percent: i32,
@@ -50,14 +50,7 @@ pub enum Sensor {
     DrivingStatus(i32),
     TirePressure([i32; 4]),
     Gps(GpsFix),
-    VehicleEnergyModel {
-        capacity_wh: i64,
-        current_wh: i64,
-        range_m: i64,
-        max_charge_power_w: Option<i64>,
-        max_discharge_power_w: Option<i64>,
-        auxiliary_wh_per_km: Option<f64>,
-    },
+    VehicleEnergyModel(Box<EnergyModel>),
 }
 
 fn location(fix: GpsFix) -> Option<CarLocation> {
@@ -73,44 +66,6 @@ fn location(fix: GpsFix) -> Option<CarLocation> {
         altitude_m_e2: optional(fix.altitude_m, 100.0)?,
         speed_m_per_s_e3: optional(fix.speed_ms, 1000.0)?,
         bearing_deg_e6: optional(fix.bearing_deg, 1e6)?,
-    })
-}
-
-fn vehicle_energy_model(
-    capacity_wh: i64,
-    current_wh: i64,
-    range_m: i64,
-    max_charge_power_w: Option<i64>,
-    max_discharge_power_w: Option<i64>,
-    auxiliary_wh_per_km: Option<f64>,
-) -> Option<VehicleEnergyModel> {
-    if capacity_wh <= 0 || current_wh <= 0 || range_m <= 0 {
-        return None;
-    }
-    let energy = |wh: i64| EnergyValue {
-        watt_hours: Some(wh),
-    };
-    let rate = |v: f64| EnergyRate {
-        rate: Some(v as f32),
-    };
-    let reserve = round_half_up(capacity_wh as f64 * 0.05) as i64;
-    let wh_per_km = (current_wh as f64 / range_m as f64) * 1000.0;
-    Some(VehicleEnergyModel {
-        battery: Some(BatteryConfig {
-            config_id: Some(1),
-            min_usable_capacity: Some(energy(current_wh)),
-            max_capacity: Some(energy(capacity_wh)),
-            reserve_energy: Some(energy(reserve)),
-            max_charge_power_w: Some(max_charge_power_w.unwrap_or(150_000)),
-            max_discharge_power_w: Some(max_discharge_power_w.unwrap_or(150_000)),
-            regen_braking_capable: Some(true),
-        }),
-        consumption: Some(EnergyConsumption {
-            driving: Some(rate(wh_per_km)),
-            auxiliary: Some(rate(auxiliary_wh_per_km.unwrap_or(2.0))),
-            aerodynamic: Some(rate(0.36)),
-        }),
-        charging_prefs: Some(ChargingPrefs { mode: Some(1) }),
     })
 }
 
@@ -181,21 +136,9 @@ pub fn batch(sensor: &Sensor) -> Option<Vec<u8>> {
             pressures_e2: pressures.to_vec(),
         }),
         Sensor::Gps(fix) => b.locations.push(location(fix)?),
-        Sensor::VehicleEnergyModel {
-            capacity_wh,
-            current_wh,
-            range_m,
-            max_charge_power_w,
-            max_discharge_power_w,
-            auxiliary_wh_per_km,
-        } => b.vehicle_energy_model_data.push(vehicle_energy_model(
-            capacity_wh,
-            current_wh,
-            range_m,
-            max_charge_power_w,
-            max_discharge_power_w,
-            auxiliary_wh_per_km,
-        )?),
+        Sensor::VehicleEnergyModel(ref m) => {
+            b.vehicle_energy_model_data.push(energy::model(m)?);
+        }
     }
     Some(b.encode_to_vec())
 }
@@ -246,15 +189,25 @@ mod tests {
             bearing_deg: None,
         };
         assert_eq!(batch(&Sensor::Gps(gps)), None);
-        let energy = Sensor::VehicleEnergyModel {
-            capacity_wh: 0,
-            current_wh: 1,
-            range_m: 1,
-            max_charge_power_w: None,
-            max_discharge_power_w: None,
-            auxiliary_wh_per_km: None,
+        let model = |capacity_wh| {
+            Sensor::VehicleEnergyModel(Box::new(EnergyModel {
+                current_wh: 1,
+                capacity_wh,
+                outside_c: None,
+                air_density_kg_per_m3: 1.225,
+                max_charge_power_w: None,
+                max_discharge_power_w: None,
+                max_ac_power_w: None,
+                road_load: None,
+                charge_curve: Vec::new(),
+            }))
         };
-        assert_eq!(batch(&energy), None);
+        assert_eq!(batch(&model(0)), None);
+        assert_eq!(
+            batch(&model(1)).unwrap()[..2],
+            [0xba, 0x01],
+            "sensor type 23"
+        );
     }
 
     #[test]

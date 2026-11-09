@@ -257,3 +257,24 @@ message NavigationTurnDistanceNotification {
 message VehicleEnergyForecastNotification {
   optional bytes serialized_forecast = 1;
 }
+
+// What `serialized_forecast` holds. The phone sends it from protocol 5.1 on, with field numbers as
+// open-android-auto's oaa/navigation/VehicleEnergyForecastMessage.proto gives them.
+message EnergyAtDistance {
+  optional int32 distance_m = 1;
+  optional int32 arrival_energy_wh = 2;
+  optional int32 time_to_arrival_seconds = 4;
+}
+
+message ChargingStopEnergy {
+  optional int32 min_departure_energy_wh = 1;
+  optional int32 max_rated_power_w = 2;
+  optional int32 charging_seconds = 3;
+}
+
+message VehicleEnergyForecast {
+  optional EnergyAtDistance next_stop = 1;
+  optional EnergyAtDistance empty = 2;
+  optional int32 quality = 3;
+  optional ChargingStopEnergy next_charging_stop = 4;
+}

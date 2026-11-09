@@ -5,36 +5,82 @@ syntax = "proto2";
 
 package livi.aa;
 
-message EnergyValue {
-  optional int64 watt_hours = 1;
+// Sensor 23. Android Auto passes it to Google Maps unread. Maps reads the current energy and the
+// capacity itself and sends the rest unchanged to Google's route planner, which alone decides what
+// each table means. Field numbers and wire types are those of the message Maps 26.43 parses, as
+// recovered in github.com/willemcvu/egmp-aa-ev-feat (reference/vehicle_energy_model.proto,
+// docs/ENERGY-MODEL.md). The meanings are inferred there from Maps' demo models and a Ford sample;
+// each field says how sure that is.
+
+message Quantity {
+  optional int32 value = 1;
 }
 
-message EnergyRate {
-  optional float rate = 1;
+message Scalar {
+  optional float value = 1;
 }
 
 message BatteryConfig {
+  // Android Auto 17.6 reads it, Maps' message has no field 1. Kept: models with it plan routes.
   optional int32 config_id = 1;
-  optional EnergyValue min_usable_capacity = 3;
-  optional EnergyValue max_capacity = 4;
-  optional EnergyValue reserve_energy = 8;
-  optional int64 max_charge_power_w = 9;
-  optional int64 max_discharge_power_w = 10;
+  // Below the gauge's zero, about 3 % of the capacity in every known model.
+  optional Quantity reserve_wh = 2;
+  // Maps drops the model when this is 0, and shows it over `capacity_wh` as the battery level.
+  optional Quantity current_wh = 3;
+  optional Quantity capacity_wh = 4;
+  optional float air_density_kg_per_m3 = 6;
+  optional float outside_temperature_c = 7;
+  // Watts, 170 and 155 kW in Maps' demo models. That they cap charging and discharging is a guess.
+  optional uint32 max_charge_power_w = 9;
+  optional uint32 max_discharge_power_w = 10;
+  // A bool in Maps' message, meaning unknown.
   optional bool regen_braking_capable = 11;
 }
 
-message EnergyConsumption {
-  optional EnergyRate driving = 1;
-  optional EnergyRate auxiliary = 2;
-  optional EnergyRate aerodynamic = 3;
+// The force to roll at v m/s on a level road, A + B·v + C·v², as an EPA coast-down gives it.
+// Maps re-plans the route when A moves by 50, B by 5 or C by 0.05.
+message RoadLoad {
+  optional Scalar a_n = 1;
+  optional Scalar b_n_per_mps = 2;
+  optional Scalar c_n_per_mps2 = 3;
 }
 
+message EnergyPower {
+  optional int32 energy_wh = 1;
+  optional uint32 power_w = 2;
+}
+
+// The most the battery takes at each energy level, energy rising.
+message ChargePowerLimits {
+  repeated EnergyPower max_charge_power = 1;
+}
+
+// Wh still to go to full and the seconds that takes, headroom falling, without a (0, 0) end.
+message ChargeTimePoint {
+  optional int32 to_full_wh = 1;
+  optional int32 to_full_s = 2;
+}
+
+message ChargeTimeTable {
+  optional int32 charger_power_w = 1;
+  repeated ChargeTimePoint points = 2;
+}
+
+message ChargeTimes {
+  repeated ChargeTimeTable by_charger_power = 1;
+}
+
+// Android Auto 17.6 reads it, Maps' message has no field 12.
 message ChargingPrefs {
   optional int32 mode = 3;
 }
 
+// Blocks 3 (drivetrain losses), 5 (battery losses), 6, 7 (auxiliary power by outside temperature),
+// 9 and 10 are left out: no published data gives them for a car.
 message VehicleEnergyModel {
   optional BatteryConfig battery = 1;
-  optional EnergyConsumption consumption = 2;
+  optional RoadLoad road_load = 2;
+  optional ChargePowerLimits charge_limits = 4;
+  optional ChargeTimes charge_times = 8;
   optional ChargingPrefs charging_prefs = 12;
 }

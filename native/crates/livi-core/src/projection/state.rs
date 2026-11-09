@@ -60,6 +60,7 @@ impl Projection {
         let camera = self.reverse_camera();
         if cfg != self.config_seen {
             self.on_config(&cfg);
+            self.aa_telemetry.configure(&cfg);
             let language = cfg.language != self.config_seen.language;
             let theme = cfg.car_play_theme != self.config_seen.car_play_theme;
             if theme {

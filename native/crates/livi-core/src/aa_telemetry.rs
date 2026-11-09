@@ -2,12 +2,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Additional terms: see NOTICE
 
+use livi_aa_stack::energy::{self, EnergyModel};
 use livi_aa_stack::manager::{AaCmd, AaHandle};
 use livi_aa_stack::sensors::{GpsFix, Sensor};
+use livi_core_proto::config::Config;
 use serde_json::{Map, Value};
 use tokio::time::Instant;
 
 const ENERGY_MODEL_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Dry air: p / (R·T) with R = 287.05 J/(kg·K), and the standard atmosphere's sea level.
+const AIR_GAS_CONSTANT: f64 = 287.05;
+const SEA_LEVEL_KPA: f64 = 101.325;
+const STANDARD_AIR_DENSITY: f64 = 1.225;
 
 pub const LOW_FUEL_PCT: f64 = 10.0;
 
@@ -80,12 +87,75 @@ struct Sent {
     energy_model_at: Option<Instant>,
 }
 
+/// What the energy model takes from the settings rather than the car's telemetry.
+#[derive(Default)]
+struct EnergySetup {
+    road_load: Option<[f64; 3]>,
+    charge_curve: Vec<[f64; 2]>,
+    max_dc_kw: Option<f64>,
+    max_ac_kw: Option<f64>,
+    max_discharge_kw: Option<f64>,
+}
+
 #[derive(Default)]
 pub struct AaTelemetry {
     sent: Sent,
+    energy: EnergySetup,
+}
+
+fn air_density(next: &Map<String, Value>) -> f64 {
+    let Some(c) = num(next, "ambientC").filter(|c| c.is_finite() && *c > -100.0) else {
+        return STANDARD_AIR_DENSITY;
+    };
+    let kpa = num(next, "baroKpa")
+        .filter(|p| (50.0..=110.0).contains(p))
+        .unwrap_or(SEA_LEVEL_KPA);
+    kpa * 1000.0 / (AIR_GAS_CONSTANT * (c + 273.15))
+}
+
+fn watts(kw: Option<f64>) -> Option<i64> {
+    kw.filter(|kw| kw.is_finite() && *kw > 0.0)
+        .map(|kw| round(kw * 1000.0))
 }
 
 impl AaTelemetry {
+    pub fn configure(&mut self, cfg: &Config) {
+        self.energy = EnergySetup {
+            road_load: cfg
+                .ev_road_load
+                .map(|r| [r.a_n, r.b_n_per_mps, r.c_n_per_mps2]),
+            charge_curve: cfg.ev_charge_curve.clone().unwrap_or_default(),
+            max_dc_kw: cfg.ev_max_dc_power_kw,
+            max_ac_kw: cfg.ev_max_ac_power_kw,
+            max_discharge_kw: cfg.ev_max_discharge_power_kw,
+        };
+    }
+
+    fn energy_model(&self, next: &Map<String, Value>) -> Option<EnergyModel> {
+        let level_kwh = num(next, "batteryLevelKwh").filter(|l| *l > 0.0)?;
+        let capacity_kwh = num(next, "batteryUsableKwh")
+            .filter(|c| *c > 0.0)
+            .or_else(|| num(next, "batteryCapacityKwh"))
+            .filter(|c| *c > 0.0)?;
+        let current_wh = round(level_kwh * 1000.0);
+        let e = &self.energy;
+        let road_load = e.road_load.or_else(|| {
+            let range_km = num(next, "rangeKm")?;
+            energy::road_load_from_range(current_wh, round(range_km * 1000.0))
+        });
+        Some(EnergyModel {
+            current_wh,
+            capacity_wh: round(capacity_kwh * 1000.0),
+            outside_c: num(next, "ambientC").filter(|c| c.is_finite()),
+            air_density_kg_per_m3: air_density(next),
+            max_charge_power_w: watts(e.max_dc_kw),
+            max_discharge_power_w: watts(e.max_discharge_kw),
+            max_ac_power_w: watts(e.max_ac_kw),
+            road_load,
+            charge_curve: e.charge_curve.clone(),
+        })
+    }
+
     pub fn hydrate(&mut self, snap: &Map<String, Value>, aa: &AaHandle) {
         self.sent = Sent::default();
         if !snap.is_empty() {
@@ -255,30 +325,13 @@ impl AaTelemetry {
             }
         }
 
-        if let (Some(capacity_kwh), Some(range_km)) =
-            (num(next, "batteryCapacityKwh"), num(next, "rangeKm"))
-            && range_km > 0.0
-            && sent
-                .energy_model_at
-                .is_none_or(|at| now.duration_since(at) >= ENERGY_MODEL_EVERY)
+        if sent
+            .energy_model_at
+            .is_none_or(|at| now.duration_since(at) >= ENERGY_MODEL_EVERY)
+            && let Some(model) = self.energy_model(next)
         {
-            let capacity_wh = round(capacity_kwh * 1000.0);
-            let current_wh = match (num(next, "batteryLevelKwh"), num(next, "fuelPct")) {
-                (Some(kwh), _) => round(kwh * 1000.0),
-                (None, Some(pct)) => round(pct / 100.0 * capacity_wh as f64),
-                (None, None) => 0,
-            };
-            if capacity_wh > 0 && current_wh > 0 {
-                out.push(Sensor::VehicleEnergyModel {
-                    capacity_wh,
-                    current_wh,
-                    range_m: round(range_km * 1000.0),
-                    max_charge_power_w: None,
-                    max_discharge_power_w: None,
-                    auxiliary_wh_per_km: None,
-                });
-                sent.energy_model_at = Some(now);
-            }
+            out.push(Sensor::VehicleEnergyModel(Box::new(model)));
+            self.sent.energy_model_at = Some(now);
         }
         out
     }
@@ -286,6 +339,7 @@ impl AaTelemetry {
 
 #[cfg(test)]
 mod tests {
+    use livi_core_proto::config::EvRoadLoad;
     use serde_json::json;
 
     use super::*;
@@ -388,34 +442,65 @@ mod tests {
             sent.iter()
                 .any(|s| matches!(s, Sensor::Gps(f) if f.lat_deg == 52.5))
         );
-        assert!(sent.contains(&Sensor::VehicleEnergyModel {
-            capacity_wh: 77_000,
-            current_wh: 6468,
-            range_m: 120_500,
-            max_charge_power_w: None,
-            max_discharge_power_w: None,
-            auxiliary_wh_per_km: None
+        let model = |sent: Vec<Sensor>| {
+            sent.into_iter().find_map(|s| match s {
+                Sensor::VehicleEnergyModel(m) => Some(*m),
+                _ => None,
+            })
+        };
+        assert_eq!(model(sent), None, "no model without the battery's energy");
+
+        let with_level = map(json!({
+            "batteryCapacityKwh": 77.4, "rangeKm": 119.0, "batteryLevelKwh": 30.0, "ambientC": 15.0
         }));
-        let later = map(json!({ "batteryCapacityKwh": 77.0, "rangeKm": 119.0 }));
-        assert!(
-            !t.sensors(&snap, &later, now)
-                .iter()
-                .any(|s| matches!(s, Sensor::VehicleEnergyModel { .. }))
+        let first = model(t.sensors(&snap, &with_level, now)).unwrap();
+        assert_eq!((first.current_wh, first.capacity_wh), (30_000, 77_400));
+        assert_eq!(first.outside_c, Some(15.0));
+        assert!((first.air_density_kg_per_m3 - 1.225).abs() < 0.001);
+        assert_eq!(
+            first.road_load,
+            energy::road_load_from_range(30_000, 119_000),
+            "without a configured road load, the one LIVI always sent"
         );
-        let much_later = now + ENERGY_MODEL_EVERY;
-        let with_level =
-            map(json!({ "batteryCapacityKwh": 77.0, "rangeKm": 119.0, "batteryLevelKwh": 30.0 }));
-        assert!(
-            t.sensors(&later, &with_level, much_later)
-                .iter()
-                .any(|s| matches!(
-                    s,
-                    Sensor::VehicleEnergyModel {
-                        current_wh: 30_000,
-                        ..
-                    }
-                ))
+        assert_eq!(
+            (first.max_charge_power_w, first.charge_curve.len()),
+            (None, 0)
         );
+        let lower = map(json!({ "batteryCapacityKwh": 77.4, "batteryLevelKwh": 29.0 }));
+        assert_eq!(
+            model(t.sensors(&with_level, &lower, now)),
+            None,
+            "not that often"
+        );
+
+        t.configure(&Config {
+            ev_road_load: Some(EvRoadLoad {
+                a_n: 106.7,
+                b_n_per_mps: 2.278,
+                c_n_per_mps2: 0.4655,
+            }),
+            ev_charge_curve: Some(vec![[1.0, 205.0], [100.0, 12.0]]),
+            ev_max_dc_power_kw: Some(240.0),
+            ev_max_ac_power_kw: Some(10.9),
+            ..livi_core_proto::config::defaults()
+        });
+        let learned = map(json!({
+            "batteryCapacityKwh": 77.4, "batteryUsableKwh": 74.0, "batteryLevelKwh": 29.0,
+            "ambientC": -10.0, "baroKpa": 95.0
+        }));
+        let m = model(t.sensors(&lower, &learned, now + ENERGY_MODEL_EVERY)).unwrap();
+        assert_eq!((m.current_wh, m.capacity_wh), (29_000, 74_000));
+        assert_eq!(m.road_load, Some([106.7, 2.278, 0.4655]));
+        assert_eq!(m.charge_curve, [[1.0, 205.0], [100.0, 12.0]]);
+        assert_eq!(
+            (
+                m.max_charge_power_w,
+                m.max_ac_power_w,
+                m.max_discharge_power_w
+            ),
+            (Some(240_000), Some(10_900), None)
+        );
+        assert!((m.air_density_kg_per_m3 - 95_000.0 / (287.05 * 263.15)).abs() < 1e-9);
     }
 
     #[test]

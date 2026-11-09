@@ -30,6 +30,7 @@ use crate::config::{Addresses, Codecs, Geometry, ScreenWidths, from_livi};
 use crate::control::{ControlChannel, ControlEvent};
 use crate::discovery;
 use crate::driver::{self, SessionCmd};
+use crate::energy::{self, EnergyModel};
 use crate::link::{self, Link, LinkItem, LinkReader};
 use crate::log::hex;
 use crate::media::AudioKind;
@@ -663,14 +664,21 @@ impl Replay {
             }
             "sendVehicleEnergyModel" => {
                 let o = &a[3];
-                self.sensor(Sensor::VehicleEnergyModel {
+                let current_wh = arg_u(a, 1).unwrap();
+                let aux = o.get("auxiliaryWhPerKm").and_then(Json::as_f64);
+                let road_load = energy::road_load_from_range(current_wh, arg_u(a, 2).unwrap())
+                    .map(|[a, b, c]| [a, aux.unwrap_or(b), c]);
+                self.sensor(Sensor::VehicleEnergyModel(Box::new(EnergyModel {
+                    current_wh,
                     capacity_wh: arg_u(a, 0).unwrap(),
-                    current_wh: arg_u(a, 1).unwrap(),
-                    range_m: arg_u(a, 2).unwrap(),
+                    outside_c: None,
+                    air_density_kg_per_m3: 1.225,
                     max_charge_power_w: o.get("maxChargePowerW").and_then(Json::as_i64),
                     max_discharge_power_w: o.get("maxDischargePowerW").and_then(Json::as_i64),
-                    auxiliary_wh_per_km: o.get("auxiliaryWhPerKm").and_then(Json::as_f64),
-                })
+                    max_ac_power_w: None,
+                    road_load,
+                    charge_curve: Vec::new(),
+                })))
             }
             "requestVideoFocus" => self.s.request_video_focus(),
             "requestMainKeyframe" => self.s.request_main_keyframe(),

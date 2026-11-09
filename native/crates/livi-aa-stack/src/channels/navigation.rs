@@ -6,6 +6,8 @@ use crate::channels::text;
 use crate::log::detail;
 use crate::wire::{WIRE_LEN, WIRE_VARINT, decode_fields, decode_varint_value};
 use livi_aa_proto::consts::nav_msg;
+use livi_aa_proto::{EnergyAtDistance, VehicleEnergyForecast, VehicleEnergyForecastNotification};
+use prost::Message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavigationState {
@@ -166,6 +168,46 @@ fn opt<T: std::fmt::Debug>(v: &Option<T>) -> String {
         .map_or_else(|| "undefined".to_string(), |v| format!("{v:?}"))
 }
 
+/// Maps' own forecast for the route the energy model planned, as a log line.
+fn forecast_text(payload: &[u8]) -> String {
+    let forecast = VehicleEnergyForecastNotification::decode(payload)
+        .ok()
+        .and_then(|n| VehicleEnergyForecast::decode(n.serialized_forecast?.as_slice()).ok());
+    let Some(f) = forecast else {
+        return format!("undecodable len={}", payload.len());
+    };
+    let at = |e: &Option<EnergyAtDistance>| {
+        e.as_ref().map_or_else(
+            || "undefined".to_string(),
+            |e| {
+                format!(
+                    "(wh={} m={} s={})",
+                    opt(&e.arrival_energy_wh),
+                    opt(&e.distance_m),
+                    opt(&e.time_to_arrival_seconds)
+                )
+            },
+        )
+    };
+    let charge = f.next_charging_stop.as_ref().map_or_else(
+        || "undefined".to_string(),
+        |c| {
+            format!(
+                "(w={} s={} departure_wh={})",
+                opt(&c.max_rated_power_w),
+                opt(&c.charging_seconds),
+                opt(&c.min_departure_energy_wh)
+            )
+        },
+    );
+    format!(
+        "next_stop={} empty={} quality={} charging={charge}",
+        at(&f.next_stop),
+        at(&f.empty),
+        opt(&f.quality)
+    )
+}
+
 #[derive(Debug, Default)]
 pub struct NavigationChannel;
 
@@ -230,6 +272,13 @@ impl NavigationChannel {
                     opt(&p.step_distance_meters)
                 );
                 Some(NavigationEvent::Position(p))
+            }
+            nav_msg::VEHICLE_ENERGY_FORECAST => {
+                println!(
+                    "[NavigationChannel] energy forecast {}",
+                    forecast_text(payload)
+                );
+                None
             }
             other => {
                 println!(
@@ -419,6 +468,36 @@ mod tests {
 
     fn s(field: u32, v: &str) -> Vec<u8> {
         field_len_delim(field, v.as_bytes())
+    }
+
+    #[test]
+    fn the_energy_forecast_reads_as_a_line() {
+        let inner = VehicleEnergyForecast {
+            next_stop: Some(EnergyAtDistance {
+                distance_m: Some(120_000),
+                arrival_energy_wh: Some(-1500),
+                time_to_arrival_seconds: None,
+            }),
+            empty: None,
+            quality: Some(2),
+            next_charging_stop: None,
+        };
+        let wrapped = VehicleEnergyForecastNotification {
+            serialized_forecast: Some(inner.encode_to_vec()),
+        };
+        assert_eq!(
+            forecast_text(&wrapped.encode_to_vec()),
+            "next_stop=(wh=-1500 m=120000 s=undefined) empty=undefined quality=2 charging=undefined"
+        );
+        assert_eq!(
+            forecast_text(&[0x0a, 0x00]),
+            "next_stop=undefined empty=undefined quality=undefined charging=undefined"
+        );
+        assert_eq!(forecast_text(&[0xff]), "undecodable len=1");
+        assert_eq!(
+            NavigationChannel.handle_message(nav_msg::VEHICLE_ENERGY_FORECAST, &[0x0a, 0x00]),
+            None
+        );
     }
 
     #[test]

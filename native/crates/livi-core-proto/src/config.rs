@@ -92,6 +92,16 @@ pub struct Config {
     pub ev_max_ac_power_kw: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ev_max_dc_power_kw: Option<f64>,
+    /// The most the battery gives, for Android Auto's energy model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ev_max_discharge_power_kw: Option<f64>,
+    /// The car's coast-down, for Android Auto's energy model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ev_road_load: Option<EvRoadLoad>,
+    /// `[state of charge %, kW]` pairs, the fastest DC charging at each level, for Android Auto's
+    /// energy model. Linear between the pairs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ev_charge_curve: Option<Vec<[f64; 2]>>,
     pub max_speed_kph: u32,
     pub speed_scale_step: u32,
     pub max_rpm: u32,
@@ -338,6 +348,16 @@ impl EvConnectorType {
     }
 }
 
+/// Road load F(v) = A + B·v + C·v² with v in m/s. From an EPA test car list's target
+/// coefficients: A lbf × 4.44822, B lbf/mph × 9.95039, C lbf/mph² × 22.2584.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvRoadLoad {
+    pub a_n: f64,
+    pub b_n_per_mps: f64,
+    pub c_n_per_mps2: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowBounds {
     pub x: i32,
@@ -503,6 +523,9 @@ pub fn defaults() -> Config {
         ev_connector_types: Some(Vec::new()),
         ev_max_ac_power_kw: None,
         ev_max_dc_power_kw: None,
+        ev_max_discharge_power_kw: None,
+        ev_road_load: None,
+        ev_charge_curve: None,
         max_speed_kph: 200,
         speed_scale_step: 40,
         max_rpm: 5000,

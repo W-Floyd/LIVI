@@ -532,6 +532,8 @@ impl Projection {
         } = drivers;
         let cp_telemetry = CpTelemetry::new(devices.helper.clone());
         let cfg = hub.config();
+        let mut aa_telemetry = AaTelemetry::default();
+        aa_telemetry.configure(&cfg);
         cp.send(CpCmd::InitialNightMode(cfg.appearance_mode.night_mode()));
         let cluster_on = shows_cluster(&wants);
         cp.send(CpCmd::ClusterActive(cluster_on));
@@ -568,7 +570,7 @@ impl Projection {
             camera_found: false,
             config_seen: cfg,
             cp_telemetry,
-            aa_telemetry: AaTelemetry::default(),
+            aa_telemetry,
             bye: None,
             activity: None,
             apply_due: None,

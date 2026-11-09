@@ -375,6 +375,7 @@ pub fn stack_config(
     theme: &Theme,
 ) -> StackConfig {
     let or = |v: u32, d: u32| if v == 0 { d } else { v };
+    let night = cfg.appearance_mode.night_mode();
     let (main_w, main_h) = main_size(cfg);
     let main_mm = dpi_mm(cfg.projection_dpi, main_w, main_h)
         .or_else(|| main_mm(cfg, panels, screen.as_ref()));
@@ -404,6 +405,8 @@ pub fn stack_config(
                 cfg.cluster_safe_area_left,
                 cfg.cluster_safe_area_right,
             ),
+            ui_night: night,
+            map_night: night,
             ..Default::default()
         }
     });
@@ -449,6 +452,8 @@ pub fn stack_config(
                 safe_area_draw_outside: Some(cfg.projection_safe_area_draw_outside),
                 status_bar_edge: Some(status_bar_edge(cfg.car_play_dock_position)),
                 initial_url: None,
+                ui_night: night,
+                map_night: night,
             },
             cluster,
             entertainment_sample_rate: if cfg.sampling_frequency == 1 {
@@ -817,7 +822,7 @@ impl ConfigSource {
 
 #[cfg(test)]
 mod tests {
-    use livi_core_proto::config::defaults;
+    use livi_core_proto::config::{AppearanceMode, defaults};
     use livi_core_proto::theme::livi_theme;
 
     use super::*;
@@ -1129,6 +1134,30 @@ mod tests {
         assert_eq!(edge(&cfg), Some(2));
         cfg.car_play_dock_position = DockPosition::Auto;
         assert_eq!(edge(&cfg), Some(0));
+    }
+
+    #[test]
+    fn the_phone_starts_with_the_saved_appearance() {
+        let mut cfg = livi_core_proto::config::defaults();
+        let main = |cfg: &Config| {
+            let main = stack_config(
+                cfg,
+                &HashMap::new(),
+                None,
+                false,
+                &addresses(),
+                &livi_theme(),
+            )
+            .info
+            .main;
+            (main.ui_night, main.map_night)
+        };
+        cfg.appearance_mode = AppearanceMode::Day;
+        assert_eq!(main(&cfg), (Some(false), Some(false)));
+        cfg.appearance_mode = AppearanceMode::Night;
+        assert_eq!(main(&cfg), (Some(true), Some(true)));
+        cfg.appearance_mode = AppearanceMode::Auto;
+        assert_eq!(main(&cfg), (None, None));
     }
 
     #[test]

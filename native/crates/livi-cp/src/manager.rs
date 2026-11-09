@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 use crate::helper_sock::Feed;
 use crate::media::Media;
 use crate::net::{host_of, norm_host};
-use crate::stack::{self, AudioProfile, ScreenCodec, StackCmd, StackCtx, StackEvent};
+use crate::stack::{self, AudioProfile, ScreenCodec, StackCmd, StackCtx, StackEvent, Surface};
 use crate::vehicle_state::{Climate, Gauges, Radio, RadioCommand};
 
 const RESTART_FIRST: Duration = Duration::from_millis(500);
@@ -153,7 +153,7 @@ pub enum CpEvent {
 pub enum CpCmd {
     Stack { id: SessionId, cmd: StackCmd },
     NightMode(bool),
-    ClusterNightMode(bool),
+    Appearance(Surface, bool),
     InitialNightMode(Option<bool>),
     LimitedUi(bool),
     VideoAllowed(bool),
@@ -204,6 +204,13 @@ impl Session {
         }
     }
 
+    fn appearance(&self, night: bool) {
+        self.send(StackCmd::NightMode(night));
+        for surface in Surface::ALL {
+            self.send(StackCmd::Appearance(surface, night));
+        }
+    }
+
     fn matches(&self, ids: &Ids) -> bool {
         let same = |a: &Option<String>, b: &str| a.as_deref().is_some_and(|a| same_mac(a, b));
         same(&ids.bt_mac, &self.bt_mac)
@@ -244,7 +251,7 @@ struct Manager<M: Media> {
     // The car's latest, for sessions that connect after it arrived; a forced
     // appearance (initial_night_mode) wins over it.
     car_night_mode: Option<bool>,
-    car_cluster_night_mode: Option<bool>,
+    car_appearance: [Option<bool>; 4],
     notices: Notices,
     cluster_stream_active: bool,
     video_allowed: bool,
@@ -290,7 +297,7 @@ async fn run<M: Media>(
         reset_once: HashSet::new(),
         initial_night_mode: None,
         car_night_mode: None,
-        car_cluster_night_mode: None,
+        car_appearance: [None; 4],
         notices: Notices::default(),
         cluster_stream_active: true,
         video_allowed: true,
@@ -372,11 +379,17 @@ impl<M: Media> Manager<M> {
     fn register(&mut self, session: Session) -> SessionId {
         let id = self.next_id;
         self.next_id += 1;
-        if let Some(night) = self.initial_night_mode.or(self.car_night_mode) {
-            session.send(StackCmd::NightMode(night));
-        }
-        if let Some(night) = self.initial_night_mode.or(self.car_cluster_night_mode) {
-            session.send(StackCmd::ClusterNightMode(night));
+        if let Some(night) = self.initial_night_mode {
+            session.appearance(night);
+        } else {
+            if let Some(night) = self.car_night_mode {
+                session.send(StackCmd::NightMode(night));
+            }
+            for surface in Surface::ALL {
+                if let Some(night) = self.car_appearance[surface as usize] {
+                    session.send(StackCmd::Appearance(surface, night));
+                }
+            }
         }
         session.send(StackCmd::ClusterActive(self.cluster_stream_active));
         if !self.notices.history.is_empty() {
@@ -979,18 +992,17 @@ impl<M: Media> Manager<M> {
                     s.send(StackCmd::NightMode(night));
                 }
             }
-            CpCmd::ClusterNightMode(night) => {
-                self.car_cluster_night_mode = Some(night);
+            CpCmd::Appearance(surface, night) => {
+                self.car_appearance[surface as usize] = Some(night);
                 for s in self.sessions.values() {
-                    s.send(StackCmd::ClusterNightMode(night));
+                    s.send(StackCmd::Appearance(surface, night));
                 }
             }
             CpCmd::InitialNightMode(night) => {
                 self.initial_night_mode = night;
                 if let Some(night) = night {
                     for s in self.sessions.values() {
-                        s.send(StackCmd::NightMode(night));
-                        s.send(StackCmd::ClusterNightMode(night));
+                        s.appearance(night);
                     }
                 }
             }
@@ -1467,7 +1479,7 @@ mod tests {
 
         rig.handle.stack(id, StackCmd::Keyframe);
         rig.handle.send(CpCmd::NightMode(true));
-        rig.handle.send(CpCmd::ClusterNightMode(true));
+        rig.handle.send(CpCmd::Appearance(Surface::ClusterUi, true));
         rig.handle.send(CpCmd::InitialNightMode(Some(false)));
         rig.handle.send(CpCmd::LimitedUi(true));
         rig.handle.send(CpCmd::VideoAllowed(false));

@@ -22,8 +22,9 @@ until [ -S "$runtime/wayland-test" ]; do
     [ $i -lt 50 ] || { cat "$runtime/weston.log" >&2; exit 1; }
     sleep 0.1
 done
-# A script that fails to load leaves Godot idling instead of exiting, so the first such error
-# kills it; the timeout is for hangs.
+# A script file that fails to load leaves Godot idling instead of exiting, so the first such
+# error kills it; the timeout is for hangs. Only files: a scenario's gdscript step that does not
+# compile fails that scenario instead.
 status=$runtime/status
 {
     XDG_RUNTIME_DIR=$runtime WAYLAND_DISPLAY=wayland-test timeout "${TEST_TIMEOUT:-60}" \
@@ -32,6 +33,6 @@ status=$runtime/status
         --audio-driver Dummy --fixed-fps 60 --disable-vsync -- --test "$@" &&
         echo 0 >"$status" || echo $? >"$status"
 } 2>&1 | awk -v pidf="$runtime/pid" '{ print; fflush() }
-    /SCRIPT ERROR: (Parse|Compile) Error|Failed to load script/ && !k {
+    /Failed to load script/ && !k {
         getline p < pidf; system("kill " p); k = 1 }'
 exit "$(cat "$status")"

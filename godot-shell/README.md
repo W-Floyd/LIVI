@@ -37,7 +37,9 @@ Wayland program.
 Steps: `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }`, `key`,
 `set: { core: {...} }`, `expect_action`, `expect_input`, `expect_node: { path, <property>:
 value }`, `screenshot: name` or `{ name, tolerance, max_pixels, mask: [[x, y, w, h]], compare
-}`, and `measure: { name, frames, expect: { <profile>: { <metric>: max } } }`.
+}`, `measure: { name, frames, expect: { <profile>: { <metric>: max } } }`, and `gdscript: |`
+with a block that is the body of `func run(shell, runner)`: it can use the autoloads, `await
+runner.frames(n)`, and returns an error string to fail.
 
 `measure` runs frames unthrottled and writes `out/<scenario>/<name>.metrics.json`: fps, frame
 time p50/p95/max, the viewport's CPU render time, process CPU % and RSS, the compositor's

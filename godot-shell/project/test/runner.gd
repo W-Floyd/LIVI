@@ -189,9 +189,33 @@ func _step(step: Dictionary) -> String:
 			return await _screenshot(arg if arg is Dictionary else {name = arg})
 		"measure":
 			return await _measure(arg)
+		"gdscript":
+			return await _gdscript(str(arg))
 		_:
 			return "unknown step"
 	return ""
+
+
+## For what the other steps cannot say. The block is the body of `func run(shell, runner)`:
+## it may await (runner.frames(n)), and returns an error String, or nothing to pass.
+func _gdscript(body: String) -> String:
+	# Spaces, as the YAML block's own nesting is in spaces and GDScript refuses a mix.
+	var src := "extends RefCounted\n\n\nfunc run(shell: Control, runner: Node) -> Variant:\n"
+	for line in body.split("\n"):
+		src += "    " + line + "\n"
+	src += "    return null\n"
+	var script := GDScript.new()
+	script.source_code = src
+	var err := script.reload()
+	if err != OK:
+		return "does not compile (%s); Godot's error is above" % error_string(err)
+	var r = await script.new().run(_shell, self)
+	return "" if r == null or str(r) == "" else str(r)
+
+
+## For gdscript steps.
+func frames(n: int) -> void:
+	await _frames(n)
 
 
 ## `{ name, frames: N, expect: { <profile>: { <metric>: max } } }`: runs N frames as fast as

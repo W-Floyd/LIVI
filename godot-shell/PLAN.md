@@ -365,7 +365,6 @@ Every milestone lands with its scenarios.
 - [x] Check that `livi-core-client` links from the extension.
 - [x] Stand up the test harness (see "Testing") before any UI work: the fake
       core, the scenario runner, goldens, and the runner in the VM.
-- [ ] gdUnit4 for scene tests.
 
 ### 2. Compositor in Godot
 
@@ -439,10 +438,14 @@ and run headless, in the VM and in CI. No test needs a phone, a car or a GPU.
   - checks that a buffer becomes a texture of the right size, damage is
     tracked, frame callbacks pace, and input reaches the focused surface at the
     right surface-local coordinates.
-- **Godot scene tests** with gdUnit4 (GDScript and C#, a scene runner,
-  simulated input): node state, signals, and actions sent to the fake core.
 - **Scenario and screenshot tests:** the YAML-driven runner below. These are
   the regression net and the source of every screenshot in the docs.
+  - Scene-level checks (node state, signals, actions sent to the fake core)
+    are scenario steps too.
+  - A `gdscript` step embeds code for what the other steps can't express.
+  - A Godot unit-test framework (gdUnit4) comes in only if logic written in
+    GDScript outgrows that; such logic should go in the Rust extension
+    first.
 - **On the unit:** a smoke run of the same scenarios, recording frame times,
   CPU, GPU and memory against thresholds. On-device runs check performance,
   not pixels.
@@ -478,7 +481,7 @@ fixtures:
 steps:
   - layout: split                         # full | split | apps
   - wait: { frames: 30 }
-  - screenshot: split-idle                # golden: goldens/split-idle.png
+  - screenshot: split-idle                # golden: goldens/split-idle.webp
   - tap: { node: SidePanel/Precondition }  # or { x: 1700, y: 420 }
   - expect_action: { PreconditionBattery: { on: true } }
   - set: { core: { telemetry: { batteryConditioning: true } } }
@@ -490,17 +493,29 @@ steps:
 
 - Steps are tap or drag (by node path or coordinates), key, wait (frames or a
   condition), `set` (change fixture state mid-run), `expect_action`,
-  `expect_input`, `expect_node` (property checks), and `screenshot`.
+  `expect_input`, `expect_node` (property checks), `screenshot`, `measure`,
+  and `gdscript`.
+- A `gdscript` block is the body of `func run(shell, runner)`. It can use
+  the autoloads, can `await runner.frames(n)`, and returns an error string
+  to fail:
+
+  ```yaml
+  - gdscript: |
+      var shown: String = shell.get_node("Home/Soc").text
+      if shown != "%d %%" % roundi(Core.get_value("/telemetry/fuelPct")):
+          return "shows %s" % shown
+  ```
 - Coordinates are the panel's, the same as touch on the unit.
 
 **Runner:**
 - `godot-shell --test tests/scenarios/` runs every scenario, or one by name.
 - It compares each screenshot with its golden, per pixel with a tolerance and
   a maximum differing area, or with a mask for regions that may vary.
-- It writes `out/<scenario>/<shot>.png`, a diff image for each mismatch, and
-  one HTML report with golden, new and diff side by side.
-- `--update-goldens` rewrites the goldens on purpose; the golden PNGs are
-  reviewed in the diff like code.
+- It writes `out/<scenario>/<shot>.png` and a diff image for each mismatch
+  (a pass compares in memory and writes nothing), and one HTML report with
+  golden, new and diff side by side.
+- `--update-goldens` rewrites the goldens (lossless WebP) on purpose; they
+  are reviewed in the diff like code.
 - `--shots-only` renders screenshots without comparing, for docs and review
   (day and night, every page).
 
@@ -508,7 +523,7 @@ steps:
 - In the VM, under its GNOME session or a headless compositor (`weston
   --backend=headless`, or the shell's own compositor with no output).
 - In CI in a Linux container: the same, with llvmpipe and no display.
-- Before each merge: `cargo test`, gdUnit4, and all scenarios.
+- Before each merge: `cargo test` and all scenarios.
 
 ## Open questions
 

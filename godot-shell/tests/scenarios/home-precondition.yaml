@@ -13,5 +13,11 @@ steps:
   - set: { core: { precondition: { manualUntil: 1794213000 }, telemetry: { fuelPct: 63.0 } } }
   - wait: { frames: 2 }
   - expect_node: { path: Home/Precondition, text: Stop preconditioning }
+  - gdscript: |
+      # The page and the core's mirror agree on the patched charge.
+      var shown: String = shell.get_node("Home/Soc").text
+      var mirrored = Core.get_value("/telemetry/fuelPct")
+      if shown != "%d %%" % roundi(mirrored):
+          return "shows %s, the core has %s" % [shown, mirrored]
   - tap: { node: Home/Precondition }
   - expect_action: { PreconditionBattery: { on: false } }

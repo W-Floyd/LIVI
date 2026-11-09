@@ -219,6 +219,99 @@ an animation, and it logs each change.
 - Goldens are rendered under `vm`. A profile change that changes pixels
   shows up in the goldens' diff.
 
+## App launcher
+
+The shell can start any installed Wayland app and host its window, and it
+treats its own pages (home, maps, stats, LIVI's settings) as entries in the
+same launcher.
+
+**Discovery:**
+- Apps are found from XDG desktop entries in `XDG_DATA_DIRS`, which includes
+  Flatpak's exports.
+- `NoDisplay`, `Hidden`, `OnlyShowIn` and `NotShowIn` are honored. The shell
+  claims the desktop name `LIVI`, so an entry can be shown or hidden for it.
+- The shell's own keys:
+  - `X-LIVI-DriveSafe`: may be used while moving;
+  - `X-LIVI-Region`: full, split, or panel widget;
+  - `X-LIVI-Hidden`.
+- A file watch picks up installs and removals while the shell runs, so
+  there's no rescan or restart.
+- X11-only apps are left out, as the compositor has no XWayland. An entry
+  can be marked `X-LIVI-Wayland=false`, or is found out after its first
+  failed launch.
+
+**Icons:**
+- Icons are looked up by the freedesktop icon theme rules: inherited
+  themes, sizes and scales, then `hicolor`, then the pixmaps folder. The
+  shell's theme picks which icon theme is used.
+- SVG is preferred, rendered at the display's DPI and cached.
+- Symbolic icons are tinted with the theme's tokens.
+- A missing icon falls back to a monogram on an accent tile.
+
+**Launching** (in Rust, not `OS.create_process`, so the shell owns every
+child it starts):
+- `Exec` is run with its field codes stripped or filled, in the entry's
+  `Path`, with `WAYLAND_DISPLAY` set to the shell's socket.
+  `DBusActivatable` apps are started over D-Bus.
+- Each app gets its own `systemd-run --user --scope`, so it has its own
+  cgroup for CPU and memory limits and its usage can be measured. Where
+  there is no systemd user session, a process group is used instead.
+- An `xdg-activation-v1` token is passed in `XDG_ACTIVATION_TOKEN`. The
+  window that presents the token belongs to that launch. Otherwise a window
+  is matched by `app_id` to the desktop file's ID, then by
+  `StartupWMClass`, then by the client's PID (`SO_PEERCRED`) within the
+  launched cgroup.
+- The launcher shows that an app is starting until its first frame,
+  and reports a failure if no window appears within a timeout.
+- Each app's stdout and stderr go to a per-app log.
+
+**Lifecycle:**
+- One instance per app by default. Launching an app that is running
+  brings its window forward.
+- Closing an app sends `xdg_toplevel.close`, then SIGTERM, then SIGKILL,
+  each after a grace period.
+- An app that crashes is reported, not restarted. Pinned panel widgets are
+  the exception and are restarted, with backoff.
+- Under memory pressure, which is likely on the unit, background apps are
+  first frozen (cgroup freezer) and then closed, oldest first. The
+  foreground app and projection video are never touched.
+- Recent apps can be switched between from the launcher or with a
+  side-panel gesture.
+
+**While driving:**
+- Apps not marked `DriveSafe` are limited once the car moves. Moving means
+  speed above a threshold, or the parking brake off, from the core's
+  telemetry.
+- A limited app's window is covered (it keeps running) and its launcher
+  icon is greyed, with the reason shown.
+- Which apps count as safe is a driver setting, with the entry's key as the
+  default.
+
+**Arrangement:**
+- A paged grid of icons, with favorites pinned to the home page or the
+  side panel. The order, folders and hidden apps are kept per driver profile.
+- The grid's sizes come from the theme and the display's DPI, and its
+  layout mirrors for RHD.
+- Search waits for the on-screen keyboard (see "Open questions").
+
+**Tests:**
+- A fixture data dir (`tests/fixtures/apps/`) is set as `XDG_DATA_DIRS`. It
+  holds desktop entries for test clients, an icon theme with inheritance
+  and missing sizes, an X11-only entry, a hidden entry and a `DriveSafe`
+  entry.
+- Rust unit tests cover desktop-entry parsing and field codes, icon lookup,
+  and window matching (token, `app_id`, `StartupWMClass`, PID), all
+  table-driven.
+- Scenarios:
+  - tap an icon → `wait: { window }` → screenshot;
+  - launching a running app focuses it;
+  - a launch that fails is reported;
+  - setting `speedKph` limits an app that isn't `DriveSafe`;
+  - an app that crashes is reported;
+  - a desktop entry installed during the run appears in the launcher.
+- `measure` records the time from tap to first frame for each app, and each
+  app's cgroup CPU and memory, against limits for each profile.
+
 ## Milestones
 
 1. **Toolchain and test harness.**
@@ -248,10 +341,15 @@ an animation, and it logs each change.
      every scenario from here on.
    - Quality profiles (see "Quality profiles") and idle redraw, with `vm` and
      a first guess at `unit`.
-5. **Hosting.** godot-maps, then LIVI's Slint UI, as windows in a region.
+5. **Hosting and the launcher.**
+   - godot-maps, then LIVI's Slint UI, as windows in a region.
+   - The launcher (see "App launcher"):
+     - first discovery, icons, launching in its own scope, and matching
+       windows to launches;
+     - then lifecycle, the driving limits and per-driver arrangement.
 6. **Pages.** Home, side panel (drive stats, the preconditioning toggle from
    the core's `PreconditionBattery` and status), stats and graphs (from the
-   core's telemetry), the launcher (desktop entries and icon themes).
+   core's telemetry). Built-in pages are launcher entries too.
 7. **On the unit.**
    - armv7 build and package.
    - Measure Android Auto decode plus Godot compositing on the Mali-G51

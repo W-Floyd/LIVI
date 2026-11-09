@@ -1,0 +1,10 @@
+name: terminal
+# A real client: weston-terminal draws with its own fonts and a blinking cursor, so this
+# checks it maps and shows, not its pixels.
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: command, run: [weston-terminal] }
+steps:
+  - wait: { window: org.freedesktop.weston.wayland-terminal }
+  - screenshot: { name: terminal, compare: false }

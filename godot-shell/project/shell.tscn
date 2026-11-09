@@ -58,3 +58,12 @@ offset_top = 560.0
 offset_right = 1872.0
 offset_bottom = 672.0
 theme_override_font_sizes/font_size = 36
+
+[node name="App" type="TextureRect" parent="Home"]
+layout_mode = 0
+offset_left = 720.0
+offset_top = 40.0
+offset_right = 1872.0
+offset_bottom = 520.0
+expand_mode = 1
+stretch_mode = 5

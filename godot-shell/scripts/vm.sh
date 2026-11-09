@@ -11,6 +11,7 @@ rsync -a --delete -e "$ssh_cmd" \
     godot-shell native user@localhost:"$DEST"/ >/dev/null
 rc=0
 $ssh_cmd user@localhost "cd $DEST/godot-shell && $*" || rc=$?
-rsync -a -e "$ssh_cmd" user@localhost:"$DEST"/godot-shell/out/ godot-shell/out/ 2>/dev/null || true
-rsync -a -e "$ssh_cmd" user@localhost:"$DEST"/godot-shell/tests/goldens/ godot-shell/tests/goldens/
+# --delete: the VM's copies started as ours, so anything missing there was removed on purpose.
+rsync -a --delete -e "$ssh_cmd" user@localhost:"$DEST"/godot-shell/out/ godot-shell/out/ 2>/dev/null || true
+rsync -a --delete -e "$ssh_cmd" user@localhost:"$DEST"/godot-shell/tests/goldens/ godot-shell/tests/goldens/
 exit $rc

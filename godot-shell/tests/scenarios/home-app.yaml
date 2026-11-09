@@ -1,0 +1,9 @@
+name: home-app
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: org.livi.test.bars, pattern: bars, size: 640x360 }
+steps:
+  - wait: { window: org.livi.test.bars }
+  - screenshot: home-app

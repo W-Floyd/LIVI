@@ -9,7 +9,10 @@ func _ready() -> void:
 		add_child(runner)
 		runner.run(args)
 		return
-	var err: String = Core.connect_core("")
+	var err: String = Wayland.listen("")
+	if err != "":
+		push_error("compositor: %s" % err)
+	err = Core.connect_core("")
 	if err != "":
 		push_error("core: %s" % err)
 	add_child(preload("res://shell.tscn").instantiate())

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Cross-build the extension for the unit (armv7, Alpine's musl) on macOS or Linux, with no
-# pmbootstrap: the extension has no C dependencies, so the sysroot is just musl and libgcc
+# pmbootstrap: the sysroot is just musl, libgcc and libxkbcommon (smithay's seat links it)
 # from Alpine edge, linked with clang and lld.
 #   scripts/build-armv7.sh [--release]   -> project/bin/linux-arm32/
 set -eu
@@ -13,7 +13,7 @@ SYS=$PWD/target/sysroot-armv7
 if [ ! -e "$SYS/.done" ]; then
     rm -rf "$SYS" && mkdir -p "$SYS"
     curl -fsSL "$MIRROR/APKINDEX.tar.gz" | tar -xzOf - APKINDEX > "$SYS/APKINDEX"
-    for p in musl musl-dev libgcc; do
+    for p in musl musl-dev libgcc libxkbcommon libxkbcommon-dev; do
         v=$(awk -v p="$p" '$0 == "P:" p { f = 1 } f && /^V:/ { print substr($0, 3); exit }' "$SYS/APKINDEX")
         curl -fsSL "$MIRROR/$p-$v.apk" | tar -xzf - -C "$SYS" 2>/dev/null
     done

@@ -1,0 +1,16 @@
+name: perf-app
+# A hosted app redrawing every frame at the projection's size: what an shm client costs the
+# shell, until video arrives over dmabuf.
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: org.livi.test.anim, pattern: grid, size: 1280x720, animate: 100000 }
+steps:
+  - wait: { window: org.livi.test.anim }
+  - measure:
+      name: anim-1280x720
+      frames: 240
+      expect:
+        # Regression limits for llvmpipe in the VM, about twice what it measured (release:
+        # frame p95 12.7 ms, dispatch 1.7 ms mean, upload 4 ms max, RSS 405 MB).
+        vm: { frame_ms_p95: 25, dispatch_ms: 4, upload_ms_max: 10, rss_mb: 800 }

@@ -3,7 +3,9 @@
 A Godot 4 UI on livi-core; see [PLAN.md](PLAN.md).
 
 - `ext/`: the GDExtension (Rust, gdext). `CoreLink` (the core client, or an in-process fake
-  core) and `ShellTest` (scenario YAML, golden comparison).
+  core), `WaylandCompositor` (smithay, shm so far; Linux only), `ShellTest` (scenario YAML,
+  golden comparison), and `livi-shell-test-client`, a Wayland client that draws known
+  patterns.
 - `project/`: the Godot project. `boot.gd` runs the shell, or the scenario runner with
   `-- --test`.
 - `tests/`: scenarios, core fixtures (partial states, filled like the core fills them) and
@@ -19,12 +21,29 @@ scripts/vm.sh scripts/test.sh --shots-only      # render without comparing
 ```
 
 `vm.sh` syncs `godot-shell/` and `native/` into the VM, runs the command, and copies `out/`
-(shots, diffs, `report.html`) and `tests/goldens/` back. Scenarios render in a 1920×720
-SubViewport under a headless weston with llvmpipe, at `--fixed-fps 60` and a fixed clock.
+(`report.html`, metrics, and shots where they failed or were asked for) and `tests/goldens/`
+back. Scenarios render in a 1920×720 SubViewport under a headless weston with llvmpipe, at
+`--fixed-fps 60` and a fixed clock, with the extension built in release. `check-gd.sh` runs
+first and prints GDScript errors as `res://file:line`; a script that still fails to load in
+the run stops it at once.
 
-Scenario steps: `wait: { frames }`, `tap: { node } | { x, y }`, `key`, `set: { core: {...} }`,
-`expect_action`, `expect_input`, `expect_node: { path, <property>: value }`, and
-`screenshot: name` or `{ name, tolerance, max_pixels, mask: [[x, y, w, h]] }`.
+Goldens are lossless WebP, a third of PNG's size. Captures are compared in memory and written
+(as PNG) only on a mismatch, `--update-goldens`, `--shots-only` or `compare: false`.
+
+Scenario fixtures: `core` (a partial state) and `clients`: `{ role: app, app_id, pattern:
+grid|bars, size: WxH, animate: N }` runs the test client, `{ role: command, run: [...] }` any
+Wayland program.
+
+Steps: `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }`, `key`,
+`set: { core: {...} }`, `expect_action`, `expect_input`, `expect_node: { path, <property>:
+value }`, `screenshot: name` or `{ name, tolerance, max_pixels, mask: [[x, y, w, h]], compare
+}`, and `measure: { name, frames, expect: { <profile>: { <metric>: max } } }`.
+
+`measure` runs frames unthrottled and writes `out/<scenario>/<name>.metrics.json`: fps, frame
+time p50/p95/max, the viewport's CPU render time, process CPU % and RSS, the compositor's
+dispatch and upload times and bytes, and each client's frame rate. Limits are per profile
+(`SHELL_PERF_PROFILE`, default `vm`); the VM's are regression limits only, the unit's come
+with milestone 7.
 
 ## The unit's build
 
@@ -32,6 +51,6 @@ Scenario steps: `wait: { frames }`, `tap: { node } | { x, y }`, `key`, `set: { c
 scripts/build-armv7.sh [--release]   # macOS or Linux -> project/bin/linux-arm32/
 ```
 
-A cross build against a sysroot of Alpine edge's armv7 musl and libgcc (fetched once), linked
-with clang and lld; needs rustup and `ld.lld`. No pmbootstrap: the extension has no C
-dependencies. Packaging for the unit is milestone 7.
+A cross build against a sysroot of Alpine edge's armv7 musl, libgcc and libxkbcommon (fetched
+once), linked with clang and lld; needs rustup and `ld.lld`. No pmbootstrap. Packaging for the
+unit is milestone 7.

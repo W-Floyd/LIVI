@@ -1,8 +1,14 @@
 //! The Godot shell's extension: the link to livi-core, and the test harness's native half.
 
+#[cfg(target_os = "linux")]
+pub mod compositor;
 pub mod fake_core;
 pub mod golden;
 pub mod scenario;
+#[cfg(target_os = "linux")]
+pub mod test_client;
+#[cfg(target_os = "linux")]
+mod wayland_node;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};

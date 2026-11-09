@@ -15,12 +15,18 @@ const NIGHT := {bg = Color("#0b0e12"), fg = Color("#e8edf2"), dim = Color("#8a96
 @onready var _soc: Label = $Home/Soc
 @onready var _range: Label = $Home/Range
 @onready var _precondition: Button = $Home/Precondition
+@onready var _app: TextureRect = $Home/App
+
+## Mapped windows, oldest first; the newest is shown until the layouts land.
+var _windows: Array[int] = []
 
 
 func _ready() -> void:
 	Core.welcome.connect(func(_v): _refresh())
 	Core.changed.connect(func(_s): _refresh())
 	_precondition.pressed.connect(_on_precondition)
+	Wayland.window_mapped.connect(func(id, _app_id, _title): _windows.append(id); _show_app())
+	Wayland.window_unmapped.connect(func(id): _windows.erase(id); _show_app())
 	_paint()
 	_refresh()
 
@@ -28,6 +34,10 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	var t := Time.get_datetime_dict_from_unix_time(int(Clock.now()))
 	_clock.text = "%02d:%02d" % [t.hour, t.minute]
+
+
+func _show_app() -> void:
+	_app.texture = Wayland.texture(_windows[-1]) if not _windows.is_empty() else null
 
 
 func _refresh() -> void:

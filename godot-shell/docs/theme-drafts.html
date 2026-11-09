@@ -1,0 +1,711 @@
+<title>LIVI Shell Themes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Saira+Semi+Condensed:wght@500;600;700&family=Atkinson+Hyperlegible+Next:wght@400;600;700&family=Lexend:wght@300;400;500;600&family=Red+Hat+Display:wght@500;700;800&family=Red+Hat+Text:wght@400;500;600&family=Red+Hat+Mono:wght@500&display=swap">
+<style>
+/* Layout: a working document. Controls on top, the panel drawn to scale, then the component
+   catalog in the selected theme. The page chrome stays quiet so the mockups carry the color. */
+:root {
+  --ink: #1d2226;
+  --ink-dim: #5a646c;
+  --paper: #f3f4f2;
+  --sheet: #ffffff;
+  --rule: #d9dcd8;
+  --mark: #2f5f73;
+  --flag: #a3420e;
+  --f-ui: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-data: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #e4e7e5; --ink-dim: #9aa4a8; --paper: #141719; --sheet: #1b1f22;
+    --rule: #2d3337; --mark: #8cc3d6; --flag: #f0905a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ink: #e4e7e5; --ink-dim: #9aa4a8; --paper: #141719; --sheet: #1b1f22;
+  --rule: #2d3337; --mark: #8cc3d6; --flag: #f0905a; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 15px/1.55 var(--f-ui);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 28px 64px;
+}
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 28px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 600; }
+h1 { font-size: 30px; letter-spacing: -0.01em; }
+h2 { font-size: 20px; }
+h3 { font-size: 16px; }
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--ink-dim); }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 22px; font: 13px var(--f-data); color: var(--ink-dim); }
+.facts b { color: var(--ink); font-weight: 500; }
+.label { font: 500 11px var(--f-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+.prov { display: inline-block; font: 500 11px var(--f-ui); letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--flag); border: 1px solid currentColor; border-radius: 3px; padding: 1px 6px; }
+
+/* Controls */
+.controls { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 16px;
+  display: grid; gap: 16px; }
+.ctl-row { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: end; }
+.ctl { display: grid; gap: 6px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
+.seg button { font: 500 13px var(--f-ui); color: var(--ink); background: transparent; border: 0;
+  padding: 7px 12px; cursor: pointer; border-right: 1px solid var(--rule); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--mark); color: var(--sheet); }
+.seg button:focus-visible, .rule input:focus-visible, .mock button:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 20px; }
+.rule { display: grid; gap: 4px; }
+.rule label { font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+.rule output { font: 500 13px var(--f-data); font-variant-numeric: tabular-nums; }
+.rule input { width: 100%; accent-color: var(--mark); }
+.rule small { color: var(--ink-dim); font-size: 12px; }
+.cluster { display: grid; gap: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { font: 500 12.5px var(--f-data); color: var(--ink); background: transparent; cursor: pointer;
+  border: 1px solid var(--rule); border-radius: 999px; padding: 4px 11px; }
+.chips button[aria-pressed="true"] { background: var(--mark); border-color: var(--mark); color: var(--sheet); }
+.chips button:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+.cl-row { display: grid; grid-template-columns: 170px 1fr; gap: 6px 14px; align-items: start; }
+@media (max-width: 560px) { .cl-row { grid-template-columns: 1fr; } }
+.cl-row > span { font-size: 13px; padding-top: 4px; }
+
+.opt-notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.opt-note { border-top: 2px solid var(--rule); padding-top: 10px; display: grid; gap: 6px; cursor: pointer; }
+.opt-note[aria-current="true"] { border-top-color: var(--mark); }
+.opt-note p { font-size: 14px; color: var(--ink-dim); }
+.swatches { display: flex; gap: 4px; }
+.swatches i { width: 22px; height: 22px; border-radius: 3px; border: 1px solid var(--rule); }
+
+/* Stage: anything inside is drawn in panel pixels, var(--u) = one panel pixel. */
+.stage { container-type: inline-size; width: 100%; }
+.stage > .mock { --u: calc(100cqw / var(--stage-w)); }
+.panel-frame { overflow-x: auto; }
+.panel-frame .stage { min-width: 640px; }
+.panel { aspect-ratio: 1920 / 720; border-radius: 10px; overflow: hidden;
+  box-shadow: 0 0 0 1px var(--rule), 0 14px 40px rgba(0,0,0,.18); }
+.scale-note { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font: 12px var(--f-data); color: var(--ink-dim); }
+.warnings { display: grid; gap: 4px; }
+.warnings div { font-size: 13px; color: var(--flag); }
+
+/* ---------- The mock: everything below uses theme tokens set by script on .mock ---------- */
+.mock {
+  --s: calc(var(--u) * var(--gap-px));
+  background: var(--t-bg); color: var(--t-text);
+  font-family: var(--t-body); font-size: calc(var(--u) * var(--fs-body));
+  line-height: 1.2; height: 100%; position: relative; overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+.mock button { font: inherit; color: inherit; }
+.mock .ico { width: calc(var(--u) * var(--icon-px)); height: calc(var(--u) * var(--icon-px)); fill: currentColor; flex: none; }
+
+.m-screen { display: grid; grid-template-rows: calc(var(--u) * var(--status-px)) 1fr; height: 100%; }
+.m-status { display: flex; align-items: center; gap: var(--s); padding: 0 calc(var(--s) * 1.5);
+  font-size: calc(var(--u) * var(--fs-caption)); color: var(--t-dim); border-bottom: var(--t-divider); }
+.m-status .clock { font-family: var(--t-display); font-weight: 600; color: var(--t-text); font-size: calc(var(--u) * var(--fs-body)); }
+.m-status .sp { flex: 1; }
+.m-status .chip { display: inline-flex; align-items: center; gap: calc(var(--s) * .4); }
+.m-body { display: flex; min-height: 0; }
+.mock[data-hand="rhd"] .m-body { flex-direction: row-reverse; }
+.mock[data-near="panel"] .m-body { flex-direction: row-reverse; }
+.mock[data-hand="rhd"][data-near="panel"] .m-body { flex-direction: row; }
+.m-proj { flex: 1; position: relative; background: var(--t-proj); overflow: hidden; }
+.m-proj svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.m-proj .tag { position: absolute; left: var(--s); bottom: var(--s); font-size: calc(var(--u) * var(--fs-caption));
+  background: var(--t-surface); color: var(--t-dim); padding: calc(var(--s) * .3) calc(var(--s) * .6); border-radius: calc(var(--u) * var(--radius-px)); }
+.m-side { width: calc(var(--u) * 620); padding: var(--s); display: flex; flex-direction: column; gap: var(--s);
+  background: var(--t-bg); overflow: hidden; position: relative; }
+/* Materials: the side panel floats over the projection, which runs the full width beneath. */
+.mock[data-material="frosted"] .m-body, .mock[data-material="glass"] .m-body { position: relative; }
+.mock[data-material="frosted"] .m-proj, .mock[data-material="glass"] .m-proj { position: absolute; inset: 0; }
+.mock[data-material="frosted"] .m-side, .mock[data-material="glass"] .m-side { position: absolute; top: 0; bottom: 0; right: 0; background: transparent; }
+.mock[data-side="left"][data-material="frosted"] .m-side, .mock[data-side="left"][data-material="glass"] .m-side { right: auto; left: 0; }
+.mock[data-material="frosted"] .m-screen, .mock[data-material="glass"] .m-screen { grid-template-rows: 1fr; }
+.mock[data-material="frosted"] .m-status, .mock[data-material="glass"] .m-status { position: absolute; z-index: 2; left: var(--s); right: var(--s); top: var(--s);
+  height: calc(var(--u) * var(--status-px)); border-radius: calc(var(--u) * var(--radius-px)); border-bottom: 0; }
+.mock[data-material="frosted"] .m-body, .mock[data-material="glass"] .m-body { grid-row: 1; padding-top: calc(var(--u) * var(--status-px) + var(--s)); }
+.mock[data-material="frosted"] .m-side .c-card, .mock[data-material="frosted"] .m-side .c-btn.toggle[aria-pressed="false"], .mock[data-material="frosted"] .m-status {
+  background: color-mix(in srgb, var(--t-surface) 62%, transparent);
+  -webkit-backdrop-filter: blur(calc(var(--u) * 26)) saturate(1.35); backdrop-filter: blur(calc(var(--u) * 26)) saturate(1.35); }
+.mock[data-material="glass"] .m-side .c-card, .mock[data-material="glass"] .m-side .c-btn.toggle[aria-pressed="false"], .mock[data-material="glass"] .m-status {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--t-surface) 46%, transparent), color-mix(in srgb, var(--t-surface) 26%, transparent));
+  -webkit-backdrop-filter: blur(calc(var(--u) * 12)) saturate(1.8) brightness(1.04); backdrop-filter: blur(calc(var(--u) * 12)) saturate(1.8) brightness(1.04);
+  box-shadow: inset 0 calc(var(--u) * 2) 0 rgba(255,255,255,.38), inset 0 calc(var(--u) * -2) 0 rgba(0,0,0,.18),
+    inset 0 0 0 calc(var(--u) * 1.5) rgba(255,255,255,.18), 0 calc(var(--u) * 10) calc(var(--u) * 30) rgba(0,0,0,.28); }
+.m-side.overflowing::after { content: "clipped"; position: absolute; right: 0; bottom: 0; background: #c0392b; color: #fff;
+  font: 600 calc(var(--u) * 20) var(--f-ui); padding: calc(var(--u)*4) calc(var(--u)*10); }
+
+/* Components */
+.c-card { background: var(--t-surface); border-radius: calc(var(--u) * var(--radius-px)); padding: var(--s);
+  border: var(--t-card-border); box-shadow: var(--t-card-shadow); display: grid; gap: calc(var(--s) * .6); }
+.c-stat { display: flex; align-items: baseline; gap: calc(var(--s) * .4); }
+.c-stat .n { font-family: var(--t-display); font-weight: 600; font-size: calc(var(--u) * var(--fs-display)); line-height: .9; letter-spacing: -0.01em; }
+.c-stat .unit { font-size: calc(var(--u) * var(--fs-title)); color: var(--t-dim); }
+.c-stat .sub { margin-left: auto; text-align: right; color: var(--t-dim); }
+.c-stat .sub b { display: block; color: var(--t-text); font-family: var(--t-display); font-weight: 600; font-size: calc(var(--u) * var(--fs-title)); }
+.c-bar { height: calc(var(--u) * 14); border-radius: calc(var(--u) * 7); background: var(--t-surface2); overflow: hidden; }
+.c-bar i { display: block; height: 100%; width: var(--v); background: var(--t-accent); border-radius: inherit; }
+
+.c-btn { min-height: calc(var(--u) * var(--touch-px)); min-width: calc(var(--u) * var(--touch-px));
+  border-radius: calc(var(--u) * var(--radius-px)); border: 0; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: calc(var(--s) * .5);
+  padding: 0 calc(var(--s) * 1.1); font-weight: 600; font-size: calc(var(--u) * var(--fs-body)); }
+.c-btn.primary { background: var(--t-accent); color: var(--t-on-accent); }
+.c-btn.secondary { background: var(--t-surface2); color: var(--t-text); box-shadow: inset 0 0 0 calc(var(--u)*2) var(--t-line); }
+.c-btn.toggle[aria-pressed="false"] { background: var(--t-surface2); color: var(--t-text); box-shadow: inset 0 0 0 calc(var(--u)*2) var(--t-line); }
+.c-btn.toggle[aria-pressed="true"] { background: var(--t-accent); color: var(--t-on-accent); }
+.c-btn.icon { padding: 0; }
+.c-btn[disabled] { opacity: .45; cursor: not-allowed; }
+.c-btn.wide { width: 100%; justify-content: flex-start; }
+.c-btn .meta { margin-left: auto; font-weight: 400; font-size: calc(var(--u) * var(--fs-caption)); opacity: .85; }
+
+.c-stop { display: grid; grid-template-columns: auto 1fr; gap: calc(var(--s) * .4) var(--s); align-items: center; }
+.c-stop .ico { color: var(--t-accent); width: calc(var(--u) * var(--icon-px) * 1.3); height: calc(var(--u) * var(--icon-px) * 1.3); }
+.c-stop .t { font-weight: 600; font-size: calc(var(--u) * var(--fs-title)); }
+.c-stop .facts2 { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s); }
+.c-stop .facts2 div { display: grid; gap: calc(var(--s) * .15); color: var(--t-dim); font-size: calc(var(--u) * var(--fs-caption)); }
+.c-stop .facts2 b { color: var(--t-text); font-family: var(--t-display); font-weight: 600; font-size: calc(var(--u) * var(--fs-body)); }
+.c-stop .facts2 b.warn { color: var(--t-warn); }
+
+.c-player { display: flex; align-items: center; gap: var(--s); }
+.c-player .art { width: calc(var(--u) * var(--touch-px)); height: calc(var(--u) * var(--touch-px)); border-radius: calc(var(--u) * var(--radius-px));
+  background: linear-gradient(135deg, var(--t-accent), var(--t-surface2)); flex: none; }
+.c-player .meta { min-width: 0; flex: 1; display: grid; }
+.c-player .meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-player .meta span + span { color: var(--t-dim); font-size: calc(var(--u) * var(--fs-caption)); }
+.c-player .ctl { display: flex; gap: calc(var(--u) * var(--touch-gap-px)); }
+
+.c-alert { display: flex; align-items: center; gap: var(--s); padding: var(--s); border-radius: calc(var(--u) * var(--radius-px));
+  background: var(--t-surface); box-shadow: inset calc(var(--u) * 8) 0 0 var(--sev); }
+.c-alert .ico { color: var(--sev); }
+.c-alert b { display: block; }
+.c-alert span { color: var(--t-dim); font-size: calc(var(--u) * var(--fs-caption)); }
+
+.c-row { display: flex; align-items: center; gap: var(--s); min-height: calc(var(--u) * var(--touch-px)); padding: 0 var(--s);
+  border-bottom: var(--t-divider); }
+.c-row:last-child { border-bottom: 0; }
+.c-row .ico { color: var(--t-dim); }
+.c-row .v { margin-left: auto; color: var(--t-dim); }
+.c-list { background: var(--t-surface); border-radius: calc(var(--u) * var(--radius-px)); border: var(--t-card-border); }
+.c-list .more { padding: calc(var(--s)*.6) var(--s); color: var(--t-dim); font-size: calc(var(--u) * var(--fs-caption)); }
+
+.c-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: calc(var(--u) * var(--touch-gap-px) * 2); }
+.c-tile { display: grid; justify-items: center; gap: calc(var(--s) * .4); position: relative; border: 0; background: none; cursor: pointer; padding: 0; }
+.c-tile .face { width: calc(var(--u) * var(--touch-px) * 1.5); height: calc(var(--u) * var(--touch-px) * 1.5);
+  border-radius: calc(var(--u) * var(--radius-px) * 1.4); display: grid; place-items: center; background: var(--t-surface2);
+  color: var(--t-accent); box-shadow: inset 0 0 0 calc(var(--u)*2) var(--t-line); }
+.c-tile .face .ico { width: calc(var(--u) * var(--touch-px) * .75); height: calc(var(--u) * var(--touch-px) * .75); }
+.c-tile span { font-size: calc(var(--u) * var(--fs-caption)); }
+.c-tile.locked .face { opacity: .4; }
+.c-tile .lock { position: absolute; top: 0; right: 12%; color: var(--t-dim); }
+
+.c-slider { display: flex; align-items: center; gap: var(--s); }
+.c-slider .track { flex: 1; height: calc(var(--u) * var(--touch-px)); display: grid; align-items: center; position: relative; }
+.c-slider .track::before { content: ""; height: calc(var(--u) * 12); border-radius: calc(var(--u) * 6); background: var(--t-surface2); }
+.c-slider .fill { position: absolute; left: 0; height: calc(var(--u) * 12); width: var(--v); border-radius: calc(var(--u) * 6); background: var(--t-accent); }
+.c-slider .thumb { position: absolute; left: calc(var(--v) - var(--u) * var(--touch-px) / 2); width: calc(var(--u) * var(--touch-px)); height: calc(var(--u) * var(--touch-px));
+  border-radius: 50%; background: var(--t-surface); box-shadow: inset 0 0 0 calc(var(--u)*4) var(--t-accent); }
+
+.c-lock { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: var(--s); text-align: center;
+  background: color-mix(in srgb, var(--t-bg) 88%, transparent); }
+.c-lock .ico { width: calc(var(--u) * var(--touch-px)); height: calc(var(--u) * var(--touch-px)); color: var(--t-dim); }
+.c-lock b { font-size: calc(var(--u) * var(--fs-title)); }
+.c-lock span { color: var(--t-dim); }
+
+/* Charts: marks from series tokens, text from text tokens, grid recessive. */
+.c-chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.c-chart .head { display: flex; align-items: baseline; gap: calc(var(--s) * .5); }
+.c-chart .head b { font-family: var(--t-display); font-weight: 600; font-size: calc(var(--u) * var(--fs-title)); }
+.c-chart .head span { color: var(--t-dim); font-size: calc(var(--u) * var(--fs-caption)); }
+.c-chart .grid { stroke: var(--t-line); stroke-width: 2; }
+.c-chart .axis { fill: var(--t-dim); font-family: var(--t-body); }
+.c-chart .lab { fill: var(--t-text); font-family: var(--t-body); font-weight: 600; }
+.c-curve { position: relative; }
+.c-curve .tip { position: absolute; pointer-events: none; background: var(--t-surface2); color: var(--t-text);
+  border-radius: calc(var(--u) * var(--radius-px)); padding: calc(var(--s) * .4) calc(var(--s) * .6);
+  font-size: calc(var(--u) * var(--fs-caption)); box-shadow: 0 calc(var(--u)*4) calc(var(--u)*14) rgba(0,0,0,.25); white-space: nowrap; }
+.c-curve .tip[hidden] { display: none; }
+.c-split { display: flex; height: calc(var(--u) * 44); gap: calc(var(--u) * 4); }
+.c-split i { display: block; height: 100%; }
+.c-split i:first-child { border-radius: calc(var(--u) * 6) 0 0 calc(var(--u) * 6); }
+.c-split i:last-child { border-radius: 0 calc(var(--u) * 6) calc(var(--u) * 6) 0; }
+.c-legend { display: grid; gap: calc(var(--s) * .35); }
+/* Values never wrap away from their units; a long label gives way first. */
+.c-legend div { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: calc(var(--s) * .5); }
+.c-legend i { width: calc(var(--u) * 24); height: calc(var(--u) * 24); border-radius: calc(var(--u) * 5); }
+.c-legend em { font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-legend b { font-family: var(--t-display); font-weight: 600; white-space: nowrap; text-align: right; }
+.c-legend span { color: var(--t-dim); white-space: nowrap; text-align: right; min-width: 4.5em; }
+.mock b, .mock .n, .mock .unit { white-space: nowrap; }
+
+/* Catalog */
+.catalog { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; }
+.comp { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: grid; grid-template-rows: auto auto 1fr; overflow: hidden; }
+.comp header { padding: 12px 14px 8px; display: grid; gap: 2px; }
+.comp header p { font-size: 13px; color: var(--ink-dim); }
+.comp .demo { border-block: 1px solid var(--rule); }
+.comp .demo .mock { padding: calc(var(--u) * 24); height: auto; min-height: 100%; }
+.spec { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.spec td { padding: 5px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.spec tr:last-child td { border-bottom: 0; }
+.spec td:nth-child(2) { font-family: var(--f-data); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.spec td:nth-child(3) { color: var(--ink-dim); }
+
+.next { display: grid; gap: 8px; }
+.next ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; max-width: 80ch; }
+@media (prefers-reduced-motion: no-preference) { .mock .c-btn, .mock .c-tile { transition: background-color .15s, box-shadow .15s; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 6v12l8.5-6zM16 6h2v12h-2z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M18 6v12L9.5 12zM6 6h2v12H6z"/></symbol>
+  <symbol id="i-therm" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v8.8a5 5 0 1 0 6 0V5a3 3 0 0 0-3-3zm0 2a1 1 0 0 1 1 1v9.9l.4.3a3 3 0 1 1-2.8 0l.4-.3V5a1 1 0 0 1 1-1zm-1 6h2v7h-2z"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 2 1 21h22zm-1 7h2v6h-2zm0 8h2v2h-2z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 8h2v8h-2zm0-4h2v2h-2z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M7 10V8a5 5 0 0 1 10 0v2h2v12H5V10zm2 0h6V8a3 3 0 0 0-6 0z"/></symbol>
+  <symbol id="i-bars" viewBox="0 0 24 24"><path d="M3 17h3v4H3zM8 13h3v8H8zM13 9h3v12h-3zM18 5h3v16h-3z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M7 1h10a2 2 0 0 1 2 2v18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2zm0 3v15h10V4z"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 1a8 8 0 0 0-8 8c0 6 8 14 8 14s8-8 8-14a8 8 0 0 0-8-8zm0 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 3v11.3A3.5 3.5 0 1 0 11 17V8h7V3z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><path d="M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3zM13 13h8v8h-8z"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3h2v16h16v2H3zM7 13h3v5H7zM12 8h3v10h-3zM17 11h3v7h-3z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path fill-rule="evenodd" d="m10 1-.6 3a8 8 0 0 0-2.2 1.3l-2.9-1-2 3.4 2.3 2a8 8 0 0 0 0 2.6l-2.3 2 2 3.4 2.9-1A8 8 0 0 0 9.4 20l.6 3h4l.6-3a8 8 0 0 0 2.2-1.3l2.9 1 2-3.4-2.3-2a8 8 0 0 0 0-2.6l2.3-2-2-3.4-2.9 1A8 8 0 0 0 14.6 4L14 1zm2 7a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><path d="M2 5h14v14H2zM17 10l5-4v12l-5-4z"/></symbol>
+  <symbol id="i-temp" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v8.8a5 5 0 1 0 6 0V5a3 3 0 0 0-3-3z"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3zM15 8a5 5 0 0 1 0 8l1.4 1.4a7 7 0 0 0 0-10.8z"/></symbol>
+</svg>
+
+<div class="wrap">
+  <header style="display:grid;gap:10px">
+    <span class="label">Godot shell · design draft</span>
+    <h1>LIVI Shell Themes</h1>
+    <p class="lede">Three theme options and the shell's standard components, drawn to scale on the head unit's panel. Every size comes from a handful of rule parameters, so the components stay the same when the rules change; only the parameters move.</p>
+    <div class="facts" id="facts"></div>
+  </header>
+
+  <section class="controls" aria-label="Controls">
+    <div class="ctl-row">
+      <div class="ctl"><span class="label">Theme</span><div class="seg" data-key="opt"></div></div>
+      <div class="ctl"><span class="label">Appearance</span><div class="seg" data-key="mode"></div></div>
+      <div class="ctl"><span class="label">Drive side</span><div class="seg" data-key="hand"></div></div>
+      <div class="ctl"><span class="label">Nearer the driver</span><div class="seg" data-key="near"></div></div>
+      <div class="ctl"><span class="label">Text scale</span><div class="seg" data-key="scale"></div></div>
+      <div class="ctl"><span class="label">Car</span><div class="seg" data-key="moving"></div></div>
+      <div class="ctl"><span class="label">Surface material</span><div class="seg" data-key="material"></div></div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center"><span class="label">Rule parameters</span><span style="font-size:13px;color:var(--ink-dim)">defaults from the guideline research (docs/car-ux.md); "driving" means not in Park, as NHTSA defines it</span></div>
+    <div class="rules" id="rules"></div>
+    <div class="cluster">
+      <span class="label">Vehicle config: the driver's cluster</span>
+      <div class="cl-row"><span>Cluster already shows</span><div class="chips" id="cl-shows"></div></div>
+      <div class="cl-row"><span>Show on the panel anyway</span><div class="chips" id="cl-anyway"></div></div>
+    </div>
+  </section>
+
+  <section style="display:grid;gap:12px">
+    <h2>The panel</h2>
+    <div class="panel-frame"><div class="stage"><div class="mock panel" id="panel"></div></div></div>
+    <div class="scale-note"><span id="scale-note"></span><span>projection area: Android Auto or CarPlay</span></div>
+    <div class="warnings" id="warnings"></div>
+  </section>
+
+  <section style="display:grid;gap:12px">
+    <h2>Theme options</h2>
+    <div class="opt-notes" id="opt-notes"></div>
+  </section>
+
+  <section style="display:grid;gap:12px">
+    <h2>Standard components</h2>
+    <p class="lede">Each component is a function of the theme tokens and the rule parameters. The tables show what the current settings resolve to on this panel.</p>
+    <div class="catalog" id="catalog"></div>
+  </section>
+
+  <section class="next">
+    <h2>What feeds back into the shell</h2>
+    <ul>
+      <li>The chosen option becomes the default theme's <code>theme.yaml</code>: the color tokens for day and night, the type pairing, radius and density.</li>
+      <li>The rule parameters become the shell's rule table. The research fills it, and the scenario runner checks every page against it (touch targets, minimum text, list length while moving).</li>
+      <li>Each component here becomes one Godot scene with the same parameters, and one scenario with goldens across the theme matrix.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+// The G5W's center panel: 12.3 inches across, 1920 × 720.
+const PANEL = { w: 1920, h: 720, diagIn: 12.3 };
+const widthMm = PANEL.diagIn * 25.4 * PANEL.w / Math.hypot(PANEL.w, PANEL.h);
+const PX_PER_MM = PANEL.w / widthMm;
+const CAP_RATIO = 0.7; // cap height over font size, for the faces used here
+
+const OPTIONS = {
+  instrument: {
+    name: "Instrument",
+    pitch: "Night-first. Amber on graphite, like instrument lighting: long wavelengths that keep the driver's night vision. Condensed numerals, hairline dividers instead of cards, tight radius, almost no motion.",
+    display: '"Saira Semi Condensed", "Arial Narrow", sans-serif',
+    body: '"Atkinson Hyperlegible Next", "Atkinson Hyperlegible", Verdana, sans-serif',
+    radiusMm: 1, gapMm: 2, cards: "flat", displayRatio: 2.7,
+    // Chart series, fixed order; validated (lightness, chroma, CVD, contrast) against each surface.
+    series: { night: ["#c97b1a", "#4f95e6", "#d06bb0"], day: ["#9c5600", "#2a6fc9", "#b33f8a"] },
+    night: { bg: "#0e1012", surface: "#171a1d", surface2: "#21262b", line: "#2f363c", text: "#ebe7df", dim: "#9d9a90", accent: "#f2a33a", onAccent: "#1a1205", ok: "#6cc38b", warn: "#f2c14e", crit: "#ff6b5e", proj: "#1b2024" },
+    day:   { bg: "#e6e4df", surface: "#f6f5f2", surface2: "#ebe9e4", line: "#cdc9bf", text: "#1b1c1d", dim: "#5d5b55", accent: "#9c5600", onAccent: "#ffffff", ok: "#1e7a45", warn: "#835c00", crit: "#b3261e", proj: "#d9dcd6" },
+  },
+  calm: {
+    name: "Calm",
+    pitch: "Day-first. Soft blue-grey surfaces, a deep teal accent and generous spacing. One rounded family throughout, cards with a faint shadow, gentle transitions. Reads as quiet and roomy.",
+    display: 'Lexend, "Trebuchet MS", sans-serif',
+    body: 'Lexend, "Trebuchet MS", sans-serif',
+    radiusMm: 3.5, gapMm: 3, cards: "soft", displayRatio: 2.4,
+    series: { night: ["#1798bf", "#c97a30", "#b25fae"], day: ["#00779e", "#c4631a", "#a2479a"] },
+    night: { bg: "#0d161c", surface: "#14212a", surface2: "#1c2c37", line: "#284150", text: "#e3edf2", dim: "#93a9b5", accent: "#6cc4e0", onAccent: "#062029", ok: "#74c69d", warn: "#e9c46a", crit: "#ff8a80", proj: "#16232b" },
+    day:   { bg: "#eaeff2", surface: "#ffffff", surface2: "#f1f5f7", line: "#d3dce1", text: "#13202a", dim: "#536572", accent: "#1d6a85", onAccent: "#ffffff", ok: "#2e7d4f", warn: "#8a6700", crit: "#b42318", proj: "#dde5e9" },
+  },
+  charge: {
+    name: "Charge",
+    pitch: "Built around the battery. Deep green-teal with an electric mint accent that means energy everywhere it appears. Bold display face, tiles with an accent edge, numbers set in a mono for live values.",
+    display: '"Red Hat Display", "Segoe UI", sans-serif',
+    body: '"Red Hat Text", "Segoe UI", sans-serif',
+    radiusMm: 2.2, gapMm: 2.5, cards: "edge", displayRatio: 2.9,
+    series: { night: ["#16a873", "#4c86de", "#c9649f"], day: ["#00754f", "#2f6bd1", "#c0428f"] },
+    night: { bg: "#071514", surface: "#0e2220", surface2: "#15302c", line: "#20463f", text: "#e6f5f1", dim: "#8db3aa", accent: "#3ee6a8", onAccent: "#03231a", ok: "#9bdc5c", warn: "#ffc857", crit: "#ff6f61", proj: "#0c1d1b" },
+    day:   { bg: "#e4eeea", surface: "#fafdfc", surface2: "#edf4f1", line: "#c5d8d1", text: "#0b1f1b", dim: "#4b655f", accent: "#00754f", onAccent: "#ffffff", ok: "#3b7d12", warn: "#875800", crit: "#b3261e", proj: "#d6e3de" },
+  },
+};
+
+// Rule parameters: the only place a size is decided. Defaults from the guideline research.
+const RULES = [
+  { key: "touchMm", label: "Minimum touch target", unit: "mm", min: 6, max: 24, step: 0.5, value: 10, note: "Euro NCAP 2026: 10 × 10 mm. Studies of driving suggest 17.5 to 24." },
+  { key: "touchGapMm", label: "Gap between targets", unit: "mm", min: 0, max: 8, step: 0.5, value: 4, note: "Euro NCAP 2026: 4 mm, less for larger targets." },
+  { key: "viewMm", label: "Viewing distance", unit: "mm", min: 550, max: 950, step: 10, value: 750, note: "Assumed, as in Jung et al. 2021; not yet measured in the EV6." },
+  { key: "arcmin", label: "Minimum character height", unit: "arcmin", min: 12, max: 26, step: 1, value: 20, note: "ISO 15008: 20′ recommended, 16′ acceptable, 12′ for low reading demand." },
+  { key: "listMoving", label: "List rows while moving", unit: "rows", min: 3, max: 12, step: 1, value: 12, note: "CarPlay: cars may cut lists to 12 items while driving." },
+];
+
+const CHOICES = {
+  opt: [["instrument", "Instrument"], ["calm", "Calm"], ["charge", "Charge"]],
+  mode: [["day", "Day"], ["night", "Night"]],
+  hand: [["lhd", "LHD"], ["rhd", "RHD"]],
+  near: [["proj", "Map"], ["panel", "Panel"]],
+  scale: [["1", "1.0"], ["1.2", "1.2"], ["1.4", "1.4"]],
+  moving: [["0", "Parked"], ["1", "Moving"]],
+  material: [["solid", "Solid"], ["frosted", "Frosted"], ["glass", "Glass"]],
+};
+
+const state = { opt: "instrument", mode: "night", hand: "lhd", near: "proj", scale: "1", moving: "0", material: "solid",
+  rules: Object.fromEntries(RULES.map(r => [r.key, r.value])), precondition: false, playing: true,
+  // What the EV6's own cluster shows; example values for the car config.
+  shows: new Set(["speed", "gear", "charge", "range", "clock", "outside_temp", "telltales", "trip", "efficiency"]),
+  anyway: new Set(["clock"]) };
+
+const CLUSTER_TAGS = ["speed", "gear", "charge", "range", "clock", "outside_temp", "telltales", "next_turn", "now_playing", "trip", "efficiency"];
+// A component is left out when every tag it duplicates is on the cluster and none is shown anyway.
+const hidden = tags => tags.length > 0 && tags.every(t => state.shows.has(t) && !state.anyway.has(t));
+const DUPES = { stat: ["charge", "range"], player: ["now_playing"], clock: ["clock"], temp: ["outside_temp"], status_charge: ["charge"] };
+
+function resolve() {
+  const o = OPTIONS[state.opt], r = state.rules, sc = +state.scale;
+  const capMm = 2 * r.viewMm * Math.tan((r.arcmin / 60) * Math.PI / 360);
+  const minFontPx = capMm * PX_PER_MM / CAP_RATIO;
+  const fs = { caption: minFontPx * sc, body: minFontPx * 1.15 * sc, title: minFontPx * 1.4 * sc, display: minFontPx * o.displayRatio * sc };
+  return {
+    o, pal: o[state.mode], capMm, minFontPx, fs,
+    touchPx: r.touchMm * PX_PER_MM, touchGapPx: r.touchGapMm * PX_PER_MM,
+    gapPx: o.gapMm * PX_PER_MM, radiusPx: o.radiusMm * PX_PER_MM,
+    iconPx: Math.max(minFontPx * 1.1 * sc, 4 * PX_PER_MM), statusPx: Math.max(minFontPx * 1.7 * sc, 7 * PX_PER_MM),
+  };
+}
+
+function applyTokens(el, R, stageW) {
+  const p = R.pal, s = el.style;
+  s.setProperty("--stage-w", stageW);
+  const set = (k, v) => s.setProperty(k, v);
+  set("--t-bg", p.bg); set("--t-surface", p.surface); set("--t-surface2", p.surface2); set("--t-line", p.line);
+  set("--t-text", p.text); set("--t-dim", p.dim); set("--t-accent", p.accent); set("--t-on-accent", p.onAccent);
+  set("--t-ok", p.ok); set("--t-warn", p.warn); set("--t-crit", p.crit); set("--t-proj", p.proj);
+  set("--t-display", R.o.display); set("--t-body", R.o.body);
+  R.o.series[state.mode].forEach((c, i) => set(`--t-s${i + 1}`, c));
+  set("--fs-caption", R.fs.caption); set("--fs-body", R.fs.body); set("--fs-title", R.fs.title); set("--fs-display", R.fs.display);
+  set("--touch-px", R.touchPx); set("--touch-gap-px", R.touchGapPx); set("--gap-px", R.gapPx); set("--radius-px", R.radiusPx);
+  set("--icon-px", R.iconPx); set("--status-px", R.statusPx);
+  const u = "var(--u)";
+  set("--t-divider", R.o.cards === "flat" ? `calc(${u} * 2) solid ${p.line}` : "0");
+  set("--t-card-border", R.o.cards === "flat" ? `calc(${u} * 2) solid ${p.line}` : "0");
+  set("--t-card-shadow", R.o.cards === "soft" ? `0 calc(${u}*4) calc(${u}*18) rgba(0,0,0,${state.mode === "night" ? .35 : .08})`
+    : R.o.cards === "edge" ? `inset calc(${u}*6) 0 0 ${p.accent}` : "none");
+  el.dataset.hand = state.hand; el.dataset.near = state.near; el.dataset.material = state.material;
+  // The side panel sits on the right unless the drive side or the "nearer" choice moves it, not both.
+  el.dataset.side = (state.hand === "rhd") !== (state.near === "panel") ? "left" : "right";
+}
+
+const ico = (id) => `<svg class="ico" aria-hidden="true"><use href="#i-${id}"/></svg>`;
+const moving = () => state.moving === "1";
+
+// Components: each renders from tokens only.
+const C = {
+  stat: () => `<div class="c-card">
+      <div class="c-stat"><span class="n">64</span><span class="unit">%</span>
+        <span class="sub">Range<b>312 km</b></span></div>
+      <div class="c-bar" style="--v:64%"><i></i></div></div>`,
+  precondition: () => `<button class="c-btn toggle wide" data-act="precondition" aria-pressed="${state.precondition}">
+      ${ico("therm")}<span>${state.precondition ? "Warming battery" : "Precondition battery"}</span>
+      <span class="meta">${state.precondition ? "until 18:05" : "for 30 min"}</span></button>`,
+  stop: () => `<div class="c-card c-stop">${ico("bolt")}<span class="t">Next charger · 350 kW</span>
+      <div class="facts2"><div>Distance<b>42 km</b></div><div>Arrive<b class="warn">18 %</b></div><div>Charge<b>19 min</b></div></div></div>`,
+  player: () => `<div class="c-card c-player"><div class="art"></div>
+      <div class="meta"><span>Lantern Road</span><span>The Night Shift · Episode 41</span></div>
+      <div class="ctl"><button class="c-btn icon secondary" aria-label="Previous">${ico("prev")}</button>
+      <button class="c-btn icon primary" data-act="play" aria-label="${state.playing ? "Pause" : "Play"}">${ico(state.playing ? "pause" : "play")}</button>
+      <button class="c-btn icon secondary" aria-label="Next">${ico("next")}</button></div></div>`,
+  buttons: () => `<div style="display:flex;flex-wrap:wrap;gap:calc(var(--u) * var(--touch-gap-px) * 2)">
+      <button class="c-btn primary">Start route</button><button class="c-btn secondary">Later</button>
+      <button class="c-btn toggle" aria-pressed="true">${ico("therm")}On</button>
+      <button class="c-btn secondary" disabled>${ico("lock")}Parked only</button></div>`,
+  alerts: () => ["ok:info:Charging stop added:42 km ahead, 350 kW", "warn:warn:Arriving below 20 %:Precondition now to charge faster", "crit:warn:Phone disconnected:Android Auto stopped"]
+      .map(a => { const [sev, i, t, s] = a.split(":"); return `<div class="c-alert" style="--sev:var(--t-${sev})">${ico(i)}<div><b>${t}</b><span>${s}</span></div></div>`; }).join(""),
+  list: () => {
+    const rows = [["pin", "Home", "38 km"], ["bolt", "Fast charger, Ashford", "42 km"], ["pin", "Office", "51 km"], ["pin", "Grandparents", "112 km"],
+      ["bolt", "Destination charger, Hotel", "140 km"], ["pin", "Airport, short stay", "164 km"], ["pin", "Coast car park", "188 km"], ["pin", "Ski lodge", "402 km"]];
+    const n = moving() ? state.rules.listMoving : rows.length;
+    return `<div class="c-list">${rows.slice(0, n).map(r => `<div class="c-row">${ico(r[0])}<span>${r[1]}</span><span class="v">${r[2]}</span></div>`).join("")}
+      ${moving() && rows.length > n ? `<div class="more">${rows.length - n} more when parked</div>` : ""}</div>`;
+  },
+  slider: () => `<div class="c-slider">${ico("vol")}<div class="track" style="--v:58%"><span class="fill"></span><span class="thumb"></span></div><b>58</b></div>`,
+  tiles: () => {
+    const apps = [["pin", "Maps", 1], ["note", "Music", 1], ["chart", "Trip stats", 1], ["bolt", "Charging", 1], ["video", "Video", 0], ["gear", "Settings", 0], ["phone", "Phone", 1], ["grid", "All apps", 1]];
+    return `<div class="c-tiles">${apps.map(a => { const locked = moving() && !a[2];
+      return `<button class="c-tile ${locked ? "locked" : ""}" ${locked ? 'aria-disabled="true"' : ""}><span class="face">${ico(a[0])}</span>${locked ? `<span class="lock">${ico("lock")}</span>` : ""}<span>${a[1]}</span></button>`; }).join("")}</div>`;
+  },
+  status: (all) => `<div class="m-status" style="border-radius:calc(var(--u) * var(--radius-px));background:var(--t-surface)">
+      ${all || !hidden(DUPES.clock) ? '<span class="clock">08:30</span>' : ""}${all || !hidden(DUPES.temp) ? `<span class="chip">${ico("temp")}4 °C</span>` : ""}<span class="sp"></span>
+      <span class="chip">${ico("phone")}Pixel</span><span class="chip">${ico("bars")}</span>${all || !hidden(DUPES.status_charge) ? `<span class="chip">${ico("bolt")}64 %</span>` : ""}</div>`,
+  spark: () => {
+    // kWh/100 km over the last 20 km, one sample per km.
+    const v = [16.2, 16.8, 17.5, 18.9, 19.4, 18.1, 17.0, 16.4, 15.9, 16.6, 17.8, 19.6, 21.2, 20.4, 18.8, 17.9, 17.1, 17.4, 18.0, 17.8];
+    const W = 572, H = 120, lo = 14, hi = 22;
+    const x = i => (i / (v.length - 1)) * (W - 16) + 8, y = n => H - 8 - ((n - lo) / (hi - lo)) * (H - 16);
+    const pts = v.map((n, i) => `${x(i).toFixed(1)},${y(n).toFixed(1)}`);
+    const avg = v.reduce((a, b) => a + b) / v.length;
+    return `<div class="c-card c-chart"><div class="head"><b>${v[v.length - 1].toFixed(1)}</b><span>kWh/100 km now · ${avg.toFixed(1)} over the last 20 km</span></div>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Consumption over the last 20 km, between ${Math.min(...v)} and ${Math.max(...v)} kWh per 100 km">
+        <line class="grid" x1="0" x2="${W}" y1="${y(avg)}" y2="${y(avg)}" stroke-dasharray="6 8"/>
+        <path d="M${pts[0]} L${pts.join(" L")} L${x(v.length - 1)},${H} L${x(0)},${H}Z" fill="var(--t-accent)" opacity=".16"/>
+        <polyline points="${pts.join(" ")}" fill="none" stroke="var(--t-accent)" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${x(v.length - 1)}" cy="${y(v[v.length - 1])}" r="9" fill="var(--t-accent)" stroke="var(--t-surface)" stroke-width="4"/>
+      </svg></div>`;
+  },
+  curve: () => {
+    if (moving()) return `<div class="c-card c-chart"><div class="head"><b>350 kW charger</b><span>18 → 80 % in about 19 min</span></div>
+      <span style="color:var(--t-dim)">${ico("lock")} The charge curve is shown when parked.</span></div>`;
+    // DC power the car accepts by state of charge; the car config's evChargeCurve.
+    const c = [[0, 180], [5, 215], [10, 233], [20, 236], [30, 234], [40, 230], [50, 222], [55, 200], [60, 175], [65, 160], [70, 140], [75, 118], [80, 95], [85, 62], [90, 40], [95, 24], [100, 8]];
+    const W = 572, H = 260, L = 64, B = 44, T = 10, Rt = 12, maxKw = 250;
+    const x = s => L + (s / 100) * (W - L - Rt), y = k => T + (1 - k / maxKw) * (H - T - B);
+    const pts = c.map(([s, k]) => `${x(s).toFixed(1)},${y(k).toFixed(1)}`);
+    const fs = `calc(var(--u) * var(--fs-caption) * ${W} / var(--stage-w))`;
+    const ticksY = [0, 100, 200].map(k => `<line class="grid" x1="${L}" x2="${W - Rt}" y1="${y(k)}" y2="${y(k)}"/><text class="axis" x="${L - 10}" y="${y(k) + 8}" text-anchor="end" style="font-size:${fs}">${k}</text>`).join("");
+    const ticksX = [0, 50, 100].map(s => `<text class="axis" x="${x(s)}" y="${H - 8}" text-anchor="${s === 0 ? "start" : s === 100 ? "end" : "middle"}" style="font-size:${fs}">${s} %</text>`).join("");
+    const arrive = 18, a = c.reduce((p, q) => Math.abs(q[0] - arrive) < Math.abs(p[0] - arrive) ? q : p);
+    const ak = Math.round(c[2][1] + (c[3][1] - c[2][1]) * (arrive - 10) / 10);
+    return `<div class="c-card c-chart c-curve" data-curve='${JSON.stringify(c)}'>
+      <div class="head"><b>Charge curve</b><span>kW accepted, by charge</span></div>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="DC charge curve: about 235 kW from 10 to 40 percent, 95 kW at 80, falling to 8 kW at 100">
+        ${ticksY}${ticksX}
+        <path d="M${x(0)},${y(0)} L${pts.join(" L")} L${x(100)},${y(0)}Z" fill="var(--t-accent)" opacity=".14"/>
+        <polyline points="${pts.join(" ")}" fill="none" stroke="var(--t-accent)" stroke-width="4" stroke-linejoin="round"/>
+        <line x1="${x(arrive)}" x2="${x(arrive)}" y1="${T}" y2="${y(0)}" stroke="var(--t-text)" stroke-width="2" stroke-dasharray="4 6"/>
+        <circle cx="${x(arrive)}" cy="${y(ak)}" r="9" fill="var(--t-accent)" stroke="var(--t-surface)" stroke-width="4"/>
+        <text class="lab" x="${x(arrive) + 14}" y="${y(ak) + 34}" style="font-size:${fs}">arrive ${arrive} % · ${ak} kW</text>
+        <line class="cross" x1="0" x2="0" y1="${T}" y2="${y(0)}" stroke="var(--t-dim)" stroke-width="2" visibility="hidden"/>
+        <rect class="hit" x="${L}" y="${T}" width="${W - L - Rt}" height="${H - T - B}" fill="transparent"/>
+      </svg><div class="tip" hidden></div></div>`;
+  },
+  energy: () => {
+    const parts = [["Driving", 82, "12.9 kWh"], ["Climate", 12, "1.9 kWh"], ["Battery conditioning", 6, "0.9 kWh"]];
+    return `<div class="c-card c-chart"><div class="head"><b>15.7 kWh</b><span>this trip, by use</span></div>
+      <div class="c-split" role="img" aria-label="${parts.map(p => `${p[0]} ${p[1]} percent`).join(", ")}">${parts.map((p, i) => `<i style="flex:${p[1]};background:var(--t-s${i + 1})"></i>`).join("")}</div>
+      <div class="c-legend">${parts.map((p, i) => `<div><i style="background:var(--t-s${i + 1})"></i><em title="${p[0]}">${p[0]}</em><b>${p[1]} %</b><span>${p[2].replace(" ", " ")}</span></div>`).join("")}</div></div>`;
+  },
+  lock: () => `<div style="position:relative;height:calc(var(--u) * 300);background:var(--t-proj);border-radius:calc(var(--u) * var(--radius-px));overflow:hidden">
+      <div class="c-lock">${ico("lock")}<b>Video is available when parked</b><span>Sound keeps playing</span></div></div>`,
+};
+
+const CATALOG = [
+  { id: "buttons", name: "Button", what: "Primary, secondary, toggle, and locked while moving.", w: 620,
+    spec: R => [["Height, minimum", mmpx(R.touchPx), "the touch-target rule"], ["Label", px(R.fs.body), "body size"], ["Radius", mmpx(R.radiusPx), "theme"], ["Spacing", mmpx(R.touchGapPx * 2), "twice the target gap"]] },
+  { id: "stat", name: "Stat", what: "One live value with its unit: charge, range, speed.", w: 620,
+    spec: R => [["Number", px(R.fs.display), `display, ${R.o.displayRatio}× the minimum`], ["Unit", px(R.fs.title), "title size"], ["Digits", "tabular", "values change in place without jitter"]] },
+  { id: "precondition", name: "Toggle row", what: "A full-width setting with its state and a detail.", w: 620,
+    spec: R => [["Height, minimum", mmpx(R.touchPx), "the touch-target rule"], ["States", "off, on, busy", "on uses the accent; state is also said in words"]] },
+  { id: "stop", name: "Charging stop", what: "The route's next charger, from the core's chargingStop.", w: 620,
+    spec: R => [["Fields", "power, distance, arrival, charge time", "arrivalWh negative = short of the stop"], ["Warning", "text + color", "never color alone"]] },
+  { id: "player", name: "Mini player", what: "What's playing, with the three controls a driver needs.", w: 620,
+    spec: R => [["Controls", mmpx(R.touchPx) + " each", "spaced by the target gap"], ["Title", "one line, ellipsis", "no scrolling text while moving"]] },
+  { id: "alerts", name: "Alert", what: "Info, warning and critical, each with an icon and words.", w: 620,
+    spec: R => [["Severity", "stripe + icon + text", "readable without color"], ["Title", px(R.fs.body), "body size"], ["Detail", px(R.fs.caption), "the minimum size"]] },
+  { id: "list", name: "List", what: "Destinations, stations, settings. Cut to the moving limit.", w: 620,
+    spec: R => [["Row height, minimum", mmpx(R.touchPx), "the touch-target rule"], ["Rows while moving", state.rules.listMoving, "then 'N more when parked'"]] },
+  { id: "slider", name: "Slider", what: "Volume and other continuous values.", w: 620,
+    spec: R => [["Thumb", mmpx(R.touchPx), "the touch-target rule"], ["Value", "shown as a number", "so it can be read at a glance"]] },
+  { id: "tiles", name: "Launcher tile", what: "Apps and built-in pages. Locked tiles say why.", w: 620,
+    spec: R => [["Face", mmpx(R.touchPx * 1.5), "1.5× the target"], ["Label", px(R.fs.caption), "the minimum size"], ["While moving", "lock badge", "apps not marked drive-safe"]] },
+  { id: "status", name: "Status bar", what: "Clock, outside temperature, phone, signal, charge.", w: 620,
+    spec: R => [["Height", mmpx(R.statusPx), "fits one line of body text"], ["Items", "info only", "nothing here is a small tap target"]] },
+  { id: "spark", name: "Sparkline", what: "One recent trend beside its current value. Glanceable, so allowed while moving.", w: 620,
+    spec: R => [["Line", "4 px, accent", "one series, no axes"], ["Reference", "dashed average", "the only guide line"], ["Headline", px(R.fs.title), "the value is the point; the line is context"]] },
+  { id: "curve", name: "Charge curve", what: "kW the car accepts by charge, from the car config. Touch to scrub.", w: 620,
+    spec: R => [["Axis text", px(R.fs.caption), "never below the minimum size"], ["Grid", "3 lines, line token", "recessive"], ["While moving", "summary line only", "a chart with axes is read, not glanced"]] },
+  { id: "energy", name: "Energy split", what: "Where a trip's energy went, as one segmented bar.", w: 620,
+    spec: R => [["Series", "s1 to s3, fixed order", "validated against each surface"], ["Identity", "legend + values", "never color alone"], ["Segments", "at most 4", "more fold into 'Other'"]] },
+  { id: "lock", name: "Parked-only cover", what: "Covers a window that isn't allowed while moving.", w: 620,
+    spec: R => [["Covers", "video, non-drive-safe apps", "the app keeps running"], ["Message", "what and when", "'available when parked'"]] },
+];
+
+const fmt = n => (Math.round(n * 10) / 10).toFixed(1);
+const px = n => `${Math.round(n)} px`;
+const mmpx = n => `${fmt(n / PX_PER_MM)} mm · ${Math.round(n)} px`;
+
+function dupeRow(id) {
+  const tags = id === "status" ? [...DUPES.clock, ...DUPES.temp] : DUPES[id];
+  if (!tags) return [];
+  const gone = id === "status" ? tags.filter(t => hidden([t])) : (hidden(tags) ? tags : []);
+  return [["Duplicates the cluster", tags.join(", "), gone.length ? `left out on this car: ${gone.join(", ")}` : "shown on this car"]];
+}
+
+function chips() {
+  const draw = (id, set) => {
+    const el = document.getElementById(id);
+    el.innerHTML = CLUSTER_TAGS.map(t => `<button type="button" id="${id}-${t}" data-t="${t}" aria-pressed="${set.has(t)}">${t}</button>`).join("");
+    el.onclick = e => { const b = e.target.closest("button"); if (!b) return; const t = b.dataset.t; set.has(t) ? set.delete(t) : set.add(t); render(); };
+  };
+  draw("cl-shows", state.shows);
+  draw("cl-anyway", state.anyway);
+}
+
+function seg(key) {
+  const el = document.querySelector(`.seg[data-key="${key}"]`);
+  el.innerHTML = CHOICES[key].map(([v, l]) => `<button type="button" id="seg-${key}-${v}" data-v="${v}" aria-pressed="${state[key] === v}">${l}</button>`).join("");
+  el.onclick = e => { const b = e.target.closest("button"); if (!b) return; state[key] = b.dataset.v; render(); };
+}
+
+function rules() {
+  const el = document.getElementById("rules");
+  el.innerHTML = RULES.map(r => `<div class="rule"><label for="r-${r.key}">${r.label}<output id="o-${r.key}"></output></label>
+    <input type="range" id="r-${r.key}" min="${r.min}" max="${r.max}" step="${r.step}" value="${state.rules[r.key]}"><small>${r.note}</small></div>`).join("");
+  RULES.forEach(r => document.getElementById(`r-${r.key}`).addEventListener("input", e => { state.rules[r.key] = +e.target.value; render(); }));
+}
+
+function panelHTML() {
+  return `<div class="m-screen">${C.status().replace('style="border-radius:calc(var(--u) * var(--radius-px));background:var(--t-surface)"', "")}
+    <div class="m-body">
+      <div class="m-proj">${mapSVG()}<span class="tag">Android Auto</span></div>
+      <div class="m-side" id="side">${hidden(DUPES.stat) ? "" : C.stat()}${C.precondition()}${C.stop()}${hidden(DUPES.player) ? "" : C.player()}</div>
+    </div></div>`;
+}
+
+function mapSVG() {
+  const p = OPTIONS[state.opt][state.mode];
+  const road = state.mode === "night" ? "#3a4148" : "#ffffff";
+  const minor = state.mode === "night" ? "#262c31" : "#eef0ec";
+  return `<svg viewBox="0 0 1300 664" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <rect width="1300" height="664" fill="${p.proj}"/>
+    <path d="M0 120 L1300 160 M0 400 L1300 360 M0 560 L1300 610 M180 0 L240 664 M520 0 L470 664 M860 0 L900 664 M1120 0 L1080 664" stroke="${minor}" stroke-width="14" fill="none"/>
+    <path d="M-20 300 C 300 260, 520 330, 700 250 S 1100 120, 1320 140 M640 -20 C 660 200, 600 420, 680 690" stroke="${road}" stroke-width="30" fill="none"/>
+    <path d="M150 640 C 260 520, 420 360, 640 300 S 900 210, 1040 150" stroke="#4c8dff" stroke-width="18" fill="none" stroke-linecap="round"/>
+    <circle cx="150" cy="640" r="20" fill="#4c8dff" stroke="${road}" stroke-width="6"/>
+    <circle cx="1040" cy="150" r="16" fill="${p.accent}"/>
+    <g transform="translate(40 40)"><rect width="420" height="110" rx="14" fill="#1f6e43"/>
+      <path d="M40 75 V35 M40 35 l-14 14 M40 35 l14 14" stroke="#fff" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="90" y="52" fill="#fff" font-family="Roboto, Arial, sans-serif" font-size="34" font-weight="700">800 m</text>
+      <text x="90" y="90" fill="#d9f2e3" font-family="Roboto, Arial, sans-serif" font-size="26">A28 towards Ashford</text></g>
+  </svg>`;
+}
+
+function render() {
+  Object.keys(CHOICES).forEach(seg);
+  chips();
+  RULES.forEach(r => { const o = document.getElementById(`o-${r.key}`); if (o) o.textContent = `${state.rules[r.key]} ${r.unit}`; });
+  const R = resolve();
+
+  const panel = document.getElementById("panel");
+  applyTokens(panel, R, PANEL.w);
+  panel.innerHTML = panelHTML();
+
+  document.getElementById("facts").innerHTML =
+    `<span>panel <b>${PANEL.diagIn}″ · ${PANEL.w}×${PANEL.h}</b></span><span>width <b>${fmt(widthMm)} mm</b></span>` +
+    `<span>density <b>${fmt(PX_PER_MM * 25.4)} ppi · ${fmt(PX_PER_MM)} px/mm</b></span>`;
+  document.getElementById("scale-note").textContent =
+    `minimum text: cap ${fmt(R.capMm)} mm → ${Math.round(R.minFontPx)} px font · touch target ${Math.round(R.touchPx)} px`;
+
+  document.getElementById("opt-notes").innerHTML = Object.entries(OPTIONS).map(([k, o]) => {
+    const p = o[state.mode];
+    return `<div class="opt-note" role="button" tabindex="0" data-opt="${k}" aria-current="${k === state.opt}">
+      <h3>${o.name}</h3><div class="swatches">${["bg", "surface", "accent", "text", "warn", "crit"].map(c => `<i style="background:${p[c]}" title="${c}"></i>`).join("")}</div>
+      <p>${o.pitch}</p><p style="font-family:${o.display};font-size:22px;color:var(--ink);font-weight:600">64 % · 312 km</p></div>`;
+  }).join("");
+
+  document.getElementById("catalog").innerHTML = CATALOG.map(c => `<article class="comp"><header><h3>${c.name}</h3><p>${c.what}</p></header>
+    <div class="demo"><div class="stage"><div class="mock" data-comp="${c.id}">${C[c.id](true)}</div></div></div>
+    <table class="spec"><tbody>${c.spec(R).concat(dupeRow(c.id)).map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("")}</tbody></table></article>`).join("");
+  document.querySelectorAll(".comp .mock").forEach(m => {
+    const c = CATALOG.find(x => x.id === m.dataset.comp);
+    applyTokens(m, R, c.w);
+    m.style.display = "grid"; m.style.gap = "var(--s)";
+  });
+
+  requestAnimationFrame(() => {
+    const side = document.getElementById("side");
+    const over = side.scrollHeight > side.clientHeight + 1;
+    side.classList.toggle("overflowing", over);
+    const w = [];
+    if (over) w.push("The side panel's content does not fit at this text scale and target size: it needs to scroll, drop items, or switch to a denser layout.");
+    if (moving()) w.push("Moving: lists are cut to the row limit and tiles for apps that aren't drive-safe are locked.");
+    if (state.material !== "solid") w.push("Glass and frosted panels fall back to solid when the quality profile turns blur off, with reduced transparency, or in high contrast. Text contrast is checked against the darkest and lightest map behind them.");
+    const gone = Object.entries(DUPES).filter(([, t]) => hidden(t)).map(([k]) => k.replace("_", " "));
+    if (gone.length) w.push(`Left out because the cluster shows them: ${gone.join(", ")}.`);
+    document.getElementById("warnings").innerHTML = w.map(t => `<div>${t}</div>`).join("");
+  });
+}
+
+document.addEventListener("click", e => {
+  const a = e.target.closest("[data-act]");
+  if (a) { if (a.dataset.act === "precondition") state.precondition = !state.precondition; if (a.dataset.act === "play") state.playing = !state.playing; render(); return; }
+  const n = e.target.closest(".opt-note");
+  if (n) { state.opt = n.dataset.opt; render(); }
+});
+// Charge curve: crosshair and value under the pointer (touch scrub on the unit).
+document.addEventListener("pointermove", e => {
+  const card = e.target.closest?.(".c-curve");
+  document.querySelectorAll(".c-curve").forEach(c => { if (c !== card) { c.querySelector(".tip").hidden = true; c.querySelector(".cross")?.setAttribute("visibility", "hidden"); } });
+  if (!card || !e.target.closest(".hit")) { if (card) { card.querySelector(".tip").hidden = true; card.querySelector(".cross").setAttribute("visibility", "hidden"); } return; }
+  const svg = card.querySelector("svg"), hit = card.querySelector(".hit"), pt = svg.createSVGPoint();
+  pt.x = e.clientX; pt.y = e.clientY;
+  const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+  const hx = +hit.getAttribute("x"), hw = +hit.getAttribute("width");
+  const soc = Math.max(0, Math.min(100, ((p.x - hx) / hw) * 100));
+  const c = JSON.parse(card.dataset.curve);
+  let i = c.findIndex(q => q[0] >= soc); if (i <= 0) i = 1;
+  const [s0, k0] = c[i - 1], [s1, k1] = c[i];
+  const kw = k0 + (k1 - k0) * (soc - s0) / (s1 - s0);
+  const cross = card.querySelector(".cross");
+  cross.setAttribute("x1", p.x); cross.setAttribute("x2", p.x); cross.setAttribute("visibility", "visible");
+  const tip = card.querySelector(".tip"), box = card.getBoundingClientRect();
+  tip.textContent = `${Math.round(soc)} % · ${Math.round(kw)} kW`;
+  tip.hidden = false;
+  const left = e.clientX - box.left + 12;
+  tip.style.left = `${Math.min(left, box.width - tip.offsetWidth - 8)}px`;
+  tip.style.top = `${e.clientY - box.top - tip.offsetHeight - 10}px`;
+});
+
+document.addEventListener("keydown", e => { const n = e.target.closest?.(".opt-note"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); state.opt = n.dataset.opt; render(); } });
+
+rules();
+render();
+</script>

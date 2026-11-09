@@ -134,9 +134,13 @@ changes.
 - **Layouts:** regions (projection, side panel, app area, status bar) as data,
   per display and per mode (full, split, apps), the same model as LIVI's
   layouts and zones.
-- **Handedness:** from the core's `hand`. It mirrors each layout so the
-  driver's controls sit on the driver's side, and it decides which side the
-  projection's margin goes on (`projectionViewAreaRight` or `Left`).
+- **Handedness:** from the core's `hand`.
+  - Panels and controls move to the driver's side. Reading order, headers,
+    full-screen views and the status bar's order stay the same. That's the
+    practice of TomTom's guidance and Google Maps on Android Auto; no
+    standard requires mirroring (see `docs/car-ux.md` §7).
+  - It also decides which side the projection's margin goes on
+    (`projectionViewAreaRight` or `Left`).
 - **Driver preferences:** which content sits nearer the driver (map or media),
   what the side panel shows, the start page, a 12- or 24-hour clock, and the
   units and language from the core's config. Preferences that only the shell
@@ -187,12 +191,45 @@ changes.
 - Key pages have goldens across a matrix: LHD and RHD, day and night, text
   scale 1.0 and 1.4, high contrast, and at least two densities (the G5W's
   panel and a smaller, denser one).
-- The runner checks every scenario automatically:
-  - each text and background token pair meets WCAG AA contrast;
-  - every pressable control is at least the minimum touch-target size;
-  - no label is clipped or overflows;
-  - an RHD layout is the mirror of its LHD layout.
-- `cargo test` validates `theme.yaml` against its schema.
+- The runner checks every scenario automatically, against the rule table
+  below:
+  - each text and icon pair meets the contrast minimum (4.5:1, and 5:1 at
+    night);
+  - every pressable control meets the touch-target size and gap;
+  - no label is clipped or overflows, and no number wraps away from its unit;
+  - in RHD, the driver-side panels have moved and the reading order has not.
+- `cargo test` validates `theme.yaml` against its schema, and validates each
+  chart series palette (lightness band, chroma, separation under color-vision
+  deficiency, contrast) against its surfaces.
+
+**Rule table:** the sizes and limits every component is built from, each
+with its source in `docs/car-ux.md`. Components take these as parameters,
+so a rule can change without a component changing.
+
+| Rule | Default | Source |
+|---|---|---|
+| Touch target | 10 × 10 mm | Euro NCAP 2026 |
+| Gap between targets | 4 mm | Euro NCAP 2026 |
+| Character height | 20′ arc (16′ floor) | ISO 15008, secondary |
+| Text and icon contrast | 4.5:1; 5:1 at night | Android Auto; ISO 15008 |
+| Response to a touch | ≤ 250 ms; busy shown after 2 s | NHTSA, Alliance |
+| Characters at once while driving | ≤ 30 | JAMA |
+| List rows while driving | ≤ 12 | CarPlay |
+| Task depth | ≤ 2 steps from home for car functions; ≤ 5 for others | Euro NCAP; Android Auto, CarPlay |
+| Driving | not in Park | NHTSA |
+| Locked while driving | video, auto-scrolling text, text entry, reading web or messages, non-driving images | NHTSA, ESoP, JAMA |
+| Viewing distance | 750 mm (to be measured in the EV6) | assumption |
+
+**Charts** are components too, drawn by a Godot `Control` (`_draw`), with
+history kept and downsampled in the extension (telemetry has no history of
+its own):
+- A sparkline (one series beside its value, no axes) may show while driving.
+- Charts with axes, such as the charge curve from the car config's
+  `evChargeCurve`, show when parked, with a one-line summary while driving.
+- Splits show at most four segments, with a legend and values, never color
+  alone.
+- Series take the theme's validated series palette in a fixed order. Text
+  uses text tokens, and status colors are never used for series.
 
 ## What the cluster already shows
 
@@ -329,9 +366,10 @@ child it starts):
   side-panel gesture.
 
 **While driving:**
-- Apps not marked `DriveSafe` are limited once the car moves. Moving means
-  speed above a threshold, or the parking brake off, from the core's
-  telemetry.
+- Apps not marked `DriveSafe` are limited while driving. Driving means not in
+  Park, from the core's telemetry (`gear`, or `reverse`), as NHTSA defines
+  it; a car stopped at a light is still driving. Where the gear is unknown,
+  the parking brake and a speed above 0 stand in.
 - A limited app's window is covered (it keeps running) and its launcher
   icon is greyed, with the reason shown.
 - Which apps count as safe is a driver setting, with the entry's key as the

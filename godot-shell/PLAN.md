@@ -176,6 +176,49 @@ changes.
   - an RHD layout is the mirror of its LHD layout.
 - `cargo test` validates `theme.yaml` against its schema.
 
+## Quality profiles
+
+Rendering cost is set by the device, not the theme. A theme says what a
+page looks like; a quality profile says how much the GPU may spend drawing
+it. The Mali-G51 has a different budget from llvmpipe or a desktop.
+
+**What a profile sets:**
+- Anti-aliasing: MSAA for 2D and 3D, FXAA, or none. The panel's own pixels
+  matter here; text is already anti-aliased.
+- Textures:
+  - mipmaps and filtering (linear or nearest, anisotropy) for theme assets;
+  - a cap on texture size for the 3D car and other assets;
+  - for hosted windows, nearest filtering when a window is shown 1:1, and
+    mipmaps only when it is scaled down a lot, since every frame a client
+    sends would need them generated again.
+- 3D: render scale, shadows (off, or one baked shadow), the car model's LOD,
+  and the reflection and lighting model.
+- Motion: the animation and transition budget (full, reduced, or none), and
+  whether the 3D camera may move on its own.
+- Frame pacing: the target fps, and an idle mode that redraws only on change
+  (Godot's low-processor mode, woken by core events and client commits).
+  Video, when it shows, sets the rate.
+- Memory: limits on texture and mesh memory, and how many window textures
+  are kept.
+
+**Profiles:** `unit` (the G5W), `vm` (llvmpipe), `desktop`, and `low` for when
+the unit is under load. A profile is a file. Godot's feature-tag overrides
+pick the default per build (`arm32` gets `unit`), and the settings can switch
+it at run time.
+
+**Adaptive:** if frame time stays over budget (for example, p95 over 16 ms
+for a few seconds while projection video plays), the shell steps down a
+profile, and it steps back up after a quiet period. It never changes inside
+an animation, and it logs each change.
+
+**Tests:**
+- `measure` steps run under a named profile (`SHELL_PERF_PROFILE` selects
+  both the profile and its limits).
+- On the unit, every profile's numbers are recorded, so a setting's cost is
+  measured, not guessed.
+- Goldens are rendered under `vm`. A profile change that changes pixels
+  shows up in the goldens' diff.
+
 ## Milestones
 
 1. **Toolchain and test harness.**
@@ -203,6 +246,8 @@ changes.
      placeholder page moves onto tokens.
    - The theme checks (contrast, touch targets, clipping, mirroring) run in
      every scenario from here on.
+   - Quality profiles (see "Quality profiles") and idle redraw, with `vm` and
+     a first guess at `unit`.
 5. **Hosting.** godot-maps, then LIVI's Slint UI, as windows in a region.
 6. **Pages.** Home, side panel (drive stats, the preconditioning toggle from
    the core's `PreconditionBattery` and status), stats and graphs (from the
@@ -212,6 +257,8 @@ changes.
    - Measure Android Auto decode plus Godot compositing on the Mali-G51
      (frame rate and latency), idle CPU and GPU with low-processor mode, and
      memory.
+   - Run every quality profile on the unit, set the `unit` limits from the
+     results, and tune the adaptive step-down.
 
 Go or no-go after 7: if the Mali can't composite the projection and Godot at a
 usable rate, stop; the work up to 6 is still usable as hosted pages under

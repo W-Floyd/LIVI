@@ -347,6 +347,7 @@ fn nav_event_json(e: &NavigationEvent) -> Json {
             put(&mut o, "currentRoadName", p.current_road_name.clone());
             json!(["nav-position", o])
         }
+        NavigationEvent::EnergyForecast(_) => json!(["nav-energy-forecast"]),
     }
 }
 
@@ -910,6 +911,7 @@ fn bridge_event(name: &str, args: &[Json], formats: &mut [(u32, u32); 3]) -> Ses
                     road_name: s(d, "roadName"),
                     cue: s(d, "cue"),
                     destination_address: s(d, "destinationAddress"),
+                    next_destination: None,
                 },
             ))
         }

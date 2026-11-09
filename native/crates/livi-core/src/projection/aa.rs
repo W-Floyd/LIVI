@@ -338,6 +338,7 @@ impl Projection {
                 turn_angle: from.turn_angle.and_then(|a| i32::try_from(a).ok()),
                 eta_text: from.eta,
                 app_name: from.app_name,
+                charging_stop: from.charging_stop,
                 image,
                 ..Default::default()
             }

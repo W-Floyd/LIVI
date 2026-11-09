@@ -1626,6 +1626,7 @@ async fn android_auto_touches_land_on_its_stream_and_the_voice_key_is_held() {
 #[tokio::test]
 async fn android_auto_media_and_guidance_reach_the_state_of_the_phone_in_front() {
     use livi_aa_stack::channels::nav_maneuver::{DrivingSide, ManeuverType};
+    use livi_core_proto::state::ChargingStop;
 
     let mut rig = Rig::new();
     rig.aa_connect(5, true);
@@ -1682,13 +1683,19 @@ async fn android_auto_media_and_guidance_reach_the_state_of_the_phone_in_front()
         distance_to_destination: Some(5_000),
         time_to_destination: Some(600),
         eta: Some("21:58".into()),
+        charging_stop: Some(ChargingStop {
+            power_w: 350_000,
+            distance_m: Some(5_000),
+            ..Default::default()
+        }),
         ..Default::default()
     };
     rig.p.on_aa(AaEvent::Navigation {
         id: 5,
-        navigation: guidance,
+        navigation: guidance.clone(),
     });
     let nav = rig.navigation();
+    assert_eq!(nav.charging_stop, guidance.charging_stop);
     assert_eq!(nav.maneuver_type, Some(ManeuverType::LeftTurn as u32));
     assert_eq!(
         (nav.turn_side, nav.turn_angle, nav.remain_distance),

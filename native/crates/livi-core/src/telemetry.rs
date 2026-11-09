@@ -439,7 +439,7 @@ mod tests {
     use std::process::ExitCode;
     use std::time::Duration;
 
-    use livi_core_proto::state::{Front, PerScreen};
+    use livi_core_proto::state::{ChargingStop, Front, PerScreen};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
     use tokio::sync::Notify;
@@ -868,16 +868,37 @@ mod tests {
             serde_json::from_str::<Value>(&body).unwrap()
         };
 
-        assert_eq!(get().await["active"], Value::Null);
+        let nav = get().await;
+        assert_eq!(nav["active"], Value::Null);
+        assert_eq!(nav["chargingStop"], Value::Null);
         tx.send_modify(|s| {
             s.navigation.active = Some(true);
             s.navigation.maneuver_type = Some(2);
             s.navigation.remain_distance = Some(300.0);
+            s.navigation.charging_stop = Some(ChargingStop {
+                power_w: 400_000,
+                distance_m: Some(126_800),
+                time_s: Some(6371),
+                charge_s: None,
+                departure_wh: Some(77_400),
+                arrival_wh: Some(-1500),
+            });
         });
         let nav = get().await;
         assert_eq!(nav["active"], json!(true));
         assert_eq!(nav["maneuverType"], json!(2));
         assert_eq!(nav["remainDistance"], json!(300.0));
+        assert_eq!(
+            nav["chargingStop"],
+            json!({
+                "powerW": 400_000,
+                "distanceM": 126_800,
+                "timeS": 6371,
+                "chargeS": null,
+                "departureWh": 77_400,
+                "arrivalWh": -1500,
+            })
+        );
     }
 
     #[tokio::test]

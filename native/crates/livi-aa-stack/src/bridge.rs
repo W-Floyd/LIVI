@@ -8,12 +8,15 @@ use crate::channels::nav_maneuver::{
     DrivingSide, ManeuverType, nav_maneuver_type_to_code, nav_maneuver_type_to_side,
     turn_event_to_maneuver_type, turn_side_to_navi_code,
 };
-use crate::channels::navigation::{NavigationEvent, NavigationState};
+use crate::channels::navigation::{
+    EnergyForecastUpdate, NavigationEvent, NavigationState, NextDestination,
+};
 use crate::config::AaConfig;
 use crate::discovery::VideoCodec;
 use crate::log::detail;
 use crate::media::AudioKind;
 use crate::protocol::{PhoneCall, SessionEvent};
+use livi_core_proto::state::ChargingStop;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NowPlaying {
@@ -49,6 +52,8 @@ pub struct Navigation {
     pub distance_to_destination: Option<u32>,
     pub time_to_destination: Option<u32>,
     pub eta: Option<String>,
+    /// Derived on every publish, never merged from a patch.
+    pub charging_stop: Option<ChargingStop>,
 }
 
 impl Navigation {
@@ -160,6 +165,8 @@ pub struct Bridge {
     navi: Navigation,
     navi_active: bool,
     navi_app: Option<String>,
+    next_destination: Option<NextDestination>,
+    forecast: Option<EnergyForecastUpdate>,
     video_focus: bool,
     cluster_focus: bool,
 }
@@ -174,6 +181,7 @@ impl Bridge {
         self.navi = Navigation::default();
         self.navi_active = false;
         self.navi_app = None;
+        self.end_route();
         if self.video_focus {
             self.video_focus = false;
             report(
@@ -410,6 +418,7 @@ impl Bridge {
             }
             NavigationEvent::Stop => {
                 self.navi_active = false;
+                self.end_route();
                 self.publish(
                     out,
                     Navigation {
@@ -422,6 +431,9 @@ impl Bridge {
             NavigationEvent::Status(state) => {
                 self.navi_active =
                     matches!(state, NavigationState::Active | NavigationState::Rerouting);
+                if !self.navi_active {
+                    self.end_route();
+                }
                 let active = Some(self.navi_active);
                 self.publish(
                     out,
@@ -466,9 +478,10 @@ impl Bridge {
                     destination_name: s.destination_address.filter(|d| !d.is_empty()),
                     ..Default::default()
                 };
-                if !patch.is_empty() {
-                    self.publish(out, patch);
+                if s.next_destination.is_some() {
+                    self.next_destination = s.next_destination;
                 }
+                self.publish_changed(out, patch);
             }
             NavigationEvent::Position(p) => {
                 let patch = Navigation {
@@ -478,10 +491,47 @@ impl Bridge {
                     eta: p.eta_text.filter(|e| !e.is_empty()),
                     ..Default::default()
                 };
-                if !patch.is_empty() {
-                    self.publish(out, patch);
-                }
+                self.publish_changed(out, patch);
             }
+            NavigationEvent::EnergyForecast(f) => {
+                self.forecast = Some(f);
+                self.publish_changed(out, Navigation::default());
+            }
+        }
+    }
+
+    fn end_route(&mut self) {
+        self.next_destination = None;
+        self.forecast = None;
+    }
+
+    /// The next destination, if it is a charger. 0x8006 says whether it is and 0x8007 how far;
+    /// 0x8008's forecast fills what they leave out, and stands in for both when 0x8006 lists
+    /// no destinations, on the assumption that its next charging stop is the next stop.
+    fn charging_stop(&self) -> Option<ChargingStop> {
+        if !self.navi_active {
+            return None;
+        }
+        let forecast = self.forecast.unwrap_or_default();
+        let next = forecast.next_stop.unwrap_or_default();
+        let fallback = forecast.charging.unwrap_or_default();
+        let plan = match self.next_destination {
+            Some(d) => d.charger?,
+            None => forecast.charging?,
+        };
+        Some(ChargingStop {
+            power_w: plan.power_w.or(fallback.power_w)?,
+            distance_m: self.navi.distance_to_destination.or(next.distance_m),
+            time_s: self.navi.time_to_destination.or(next.time_s),
+            charge_s: plan.charge_s.or(fallback.charge_s),
+            departure_wh: plan.departure_wh.or(fallback.departure_wh),
+            arrival_wh: next.arrival_wh,
+        })
+    }
+
+    fn publish_changed(&mut self, out: &mut Vec<BridgeOut>, patch: Navigation) {
+        if !patch.is_empty() || self.charging_stop() != self.navi.charging_stop {
+            self.publish(out, patch);
         }
     }
 
@@ -490,6 +540,7 @@ impl Bridge {
         if self.navi_app.is_some() && self.navi.app_name.is_none() {
             self.navi.app_name = self.navi_app.clone();
         }
+        self.navi.charging_stop = self.charging_stop();
         report(out, Report::Navigation(self.navi.clone()));
     }
 }
@@ -498,8 +549,8 @@ impl Bridge {
 mod tests {
     use super::*;
     use crate::channels::navigation::{
-        NavigationDistanceUpdate, NavigationPositionUpdate, NavigationStateUpdate,
-        NavigationTurnEvent, NavigationTurnSide, NavigationTurnUpdate,
+        ChargerPlan, EnergyAtStop, NavigationDistanceUpdate, NavigationPositionUpdate,
+        NavigationStateUpdate, NavigationTurnEvent, NavigationTurnSide, NavigationTurnUpdate,
     };
 
     fn reports(out: Vec<BridgeOut>) -> Vec<Report> {
@@ -509,6 +560,129 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn the_charging_stop_is_the_next_destination_while_a_route_runs() {
+        use NavigationEvent as N;
+        let nav = |e| SessionEvent::Navigation(e);
+        let plan = |power_w, charge_s, departure_wh| ChargerPlan {
+            power_w,
+            charge_s,
+            departure_wh,
+        };
+        let next = |charger| {
+            nav(N::State(NavigationStateUpdate {
+                next_destination: Some(NextDestination { charger }),
+                ..Default::default()
+            }))
+        };
+        let charger = next(Some(plan(Some(180_000), Some(1500), Some(77_400))));
+        let position = nav(N::Position(NavigationPositionUpdate {
+            destination_meters: Some(126_800),
+            time_to_arrival_seconds: Some(6371),
+            ..Default::default()
+        }));
+        let forecast = |charging| {
+            nav(N::EnergyForecast(EnergyForecastUpdate {
+                next_stop: Some(EnergyAtStop {
+                    arrival_wh: Some(-1500),
+                    distance_m: Some(5000),
+                    time_s: Some(300),
+                }),
+                charging,
+            }))
+        };
+        let maps = forecast(Some(plan(Some(400_000), Some(1200), Some(60_000))));
+        let stop = |power_w, distance_m, time_s, charge_s, departure_wh| ChargingStop {
+            power_w,
+            distance_m,
+            time_s,
+            charge_s,
+            departure_wh,
+            arrival_wh: Some(-1500),
+        };
+        let start = || nav(N::Start);
+        for (events, want) in [
+            (
+                vec![start(), charger.clone(), position.clone(), maps.clone()],
+                Some(stop(
+                    180_000,
+                    Some(126_800),
+                    Some(6371),
+                    Some(1500),
+                    Some(77_400),
+                )),
+            ),
+            (vec![start(), next(None), maps.clone()], None),
+            (
+                vec![start(), maps.clone()],
+                Some(stop(
+                    400_000,
+                    Some(5000),
+                    Some(300),
+                    Some(1200),
+                    Some(60_000),
+                )),
+            ),
+            (
+                vec![
+                    start(),
+                    next(Some(plan(Some(50_000), None, None))),
+                    maps.clone(),
+                ],
+                Some(stop(
+                    50_000,
+                    Some(5000),
+                    Some(300),
+                    Some(1200),
+                    Some(60_000),
+                )),
+            ),
+            (
+                vec![start(), next(Some(plan(None, None, None))), forecast(None)],
+                None,
+            ),
+            (vec![start(), forecast(None)], None),
+            (vec![charger.clone(), maps.clone()], None),
+            (
+                vec![start(), charger.clone(), maps.clone(), nav(N::Stop)],
+                None,
+            ),
+            (
+                vec![
+                    start(),
+                    charger.clone(),
+                    maps.clone(),
+                    nav(N::Status(NavigationState::Inactive)),
+                    nav(N::Status(NavigationState::Active)),
+                ],
+                None,
+            ),
+            (
+                vec![
+                    start(),
+                    charger.clone(),
+                    maps.clone(),
+                    SessionEvent::Disconnected("x".into()),
+                    start(),
+                ],
+                None,
+            ),
+        ] {
+            let mut b = Bridge::default();
+            let cfg = AaConfig::default();
+            let last = events
+                .clone()
+                .into_iter()
+                .flat_map(|e| reports(b.on_event(e, &cfg)))
+                .filter_map(|r| match r {
+                    Report::Navigation(n) => Some(n),
+                    _ => None,
+                })
+                .last();
+            assert_eq!(last.and_then(|n| n.charging_stop), want, "{events:?}");
+        }
     }
 
     #[test]

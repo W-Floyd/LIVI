@@ -329,12 +329,27 @@ pub struct Navigation {
     pub lane_guidance_shown: Option<bool>,
     pub source_supports_route_guidance: Option<bool>,
     pub destination_time_zone_offset_minutes: Option<i32>,
+    /// The route's next destination, when it is a charger: what a car needs to precondition for it.
+    pub charging_stop: Option<ChargingStop>,
     #[serde(default)]
     pub maneuvers: Vec<Maneuver>,
     #[serde(default)]
     pub current_maneuvers: Vec<u32>,
     #[serde(default)]
     pub lane_guidance: Vec<LaneGuidance>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChargingStop {
+    /// The charger's rated maximum.
+    pub power_w: u32,
+    pub distance_m: Option<u32>,
+    pub time_s: Option<u32>,
+    pub charge_s: Option<u32>,
+    pub departure_wh: Option<u32>,
+    /// Negative when the phone forecasts arriving short of the stop.
+    pub arrival_wh: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

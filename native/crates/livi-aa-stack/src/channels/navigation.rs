@@ -6,7 +6,10 @@ use crate::channels::text;
 use crate::log::detail;
 use crate::wire::{WIRE_LEN, WIRE_VARINT, decode_fields, decode_varint_value};
 use livi_aa_proto::consts::nav_msg;
-use livi_aa_proto::{EnergyAtDistance, VehicleEnergyForecast, VehicleEnergyForecastNotification};
+use livi_aa_proto::{
+    EnergyAtDistance, NavigationChargingStation, VehicleEnergyForecast,
+    VehicleEnergyForecastNotification,
+};
 use prost::Message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +140,47 @@ pub struct NavigationStateUpdate {
     pub road_name: Option<String>,
     pub cue: Option<String>,
     pub destination_address: Option<String>,
+    /// The route's next destination; `None` when the message lists none, as below protocol 1.6.
+    pub next_destination: Option<NextDestination>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NextDestination {
+    /// Present only when the destination is a charging stop.
+    pub charger: Option<ChargerPlan>,
+}
+
+/// The phone sends −1 for a value it has not planned; that reads as `None`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ChargerPlan {
+    pub power_w: Option<u32>,
+    pub charge_s: Option<u32>,
+    pub departure_wh: Option<u32>,
+}
+
+impl ChargerPlan {
+    fn of(power_w: Option<i32>, charge_s: Option<i32>, departure_wh: Option<i32>) -> Self {
+        let planned = |v: Option<i32>| v.and_then(|v| u32::try_from(v).ok());
+        Self {
+            power_w: planned(power_w),
+            charge_s: planned(charge_s),
+            departure_wh: planned(departure_wh),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EnergyAtStop {
+    /// Negative when Maps forecasts arriving short of the stop.
+    pub arrival_wh: Option<i32>,
+    pub distance_m: Option<u32>,
+    pub time_s: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EnergyForecastUpdate {
+    pub next_stop: Option<EnergyAtStop>,
+    pub charging: Option<ChargerPlan>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -161,6 +205,7 @@ pub enum NavigationEvent {
     Distance(NavigationDistanceUpdate),
     State(NavigationStateUpdate),
     Position(NavigationPositionUpdate),
+    EnergyForecast(EnergyForecastUpdate),
 }
 
 fn opt<T: std::fmt::Debug>(v: &Option<T>) -> String {
@@ -168,12 +213,33 @@ fn opt<T: std::fmt::Debug>(v: &Option<T>) -> String {
         .map_or_else(|| "undefined".to_string(), |v| format!("{v:?}"))
 }
 
+fn decode_forecast(payload: &[u8]) -> Option<VehicleEnergyForecast> {
+    VehicleEnergyForecastNotification::decode(payload)
+        .ok()
+        .and_then(|n| VehicleEnergyForecast::decode(n.serialized_forecast?.as_slice()).ok())
+}
+
+fn forecast_update(f: &VehicleEnergyForecast) -> EnergyForecastUpdate {
+    let unsigned = |v: Option<i32>| v.and_then(|v| u32::try_from(v).ok());
+    EnergyForecastUpdate {
+        next_stop: f.next_stop.as_ref().map(|e| EnergyAtStop {
+            arrival_wh: e.arrival_energy_wh,
+            distance_m: unsigned(e.distance_m),
+            time_s: unsigned(e.time_to_arrival_seconds),
+        }),
+        charging: f.next_charging_stop.as_ref().map(|c| {
+            ChargerPlan::of(
+                c.max_rated_power_w,
+                c.charging_seconds,
+                c.min_departure_energy_wh,
+            )
+        }),
+    }
+}
+
 /// Maps' own forecast for the route the energy model planned, as a log line.
 fn forecast_text(payload: &[u8]) -> String {
-    let forecast = VehicleEnergyForecastNotification::decode(payload)
-        .ok()
-        .and_then(|n| VehicleEnergyForecast::decode(n.serialized_forecast?.as_slice()).ok());
-    let Some(f) = forecast else {
+    let Some(f) = decode_forecast(payload) else {
         return format!("undecodable len={}", payload.len());
     };
     let at = |e: &Option<EnergyAtDistance>| {
@@ -278,7 +344,8 @@ impl NavigationChannel {
                     "[NavigationChannel] energy forecast {}",
                     forecast_text(payload)
                 );
-                None
+                decode_forecast(payload)
+                    .map(|f| NavigationEvent::EnergyForecast(forecast_update(&f)))
             }
             other => {
                 println!(
@@ -368,15 +435,34 @@ pub fn decode_state(payload: &[u8]) -> NavigationStateUpdate {
                     }
                 }
             }
-        } else if f.field == 2 && f.wire == WIRE_LEN && out.destination_address.is_none() {
-            for d in decode_fields(f.bytes) {
-                if d.field == 1 && d.wire == WIRE_LEN {
-                    out.destination_address = Some(text(d.bytes));
+        } else if f.field == 2 && f.wire == WIRE_LEN {
+            if out.next_destination.is_none() {
+                out.next_destination = Some(next_destination(f.bytes));
+            }
+            if out.destination_address.is_none() {
+                for d in decode_fields(f.bytes) {
+                    if d.field == 1 && d.wire == WIRE_LEN {
+                        out.destination_address = Some(text(d.bytes));
+                    }
                 }
             }
         }
     }
     out
+}
+
+fn next_destination(b: &[u8]) -> NextDestination {
+    let charger = decode_fields(b)
+        .find(|d| d.field == 2 && d.wire == WIRE_LEN)
+        .and_then(|d| NavigationChargingStation::decode(d.bytes).ok())
+        .map(|c| {
+            ChargerPlan::of(
+                c.max_rated_power_watts,
+                c.estimated_charging_time_seconds,
+                c.min_departure_energy_wh,
+            )
+        });
+    NextDestination { charger }
 }
 
 pub fn decode_position(payload: &[u8]) -> NavigationPositionUpdate {
@@ -465,6 +551,7 @@ fn next_turn(v: u32) -> NavigationTurnEvent {
 mod tests {
     use super::*;
     use crate::wire::{field_len_delim, field_varint};
+    use livi_aa_proto::ChargingStopEnergy;
 
     fn s(field: u32, v: &str) -> Vec<u8> {
         field_len_delim(field, v.as_bytes())
@@ -494,10 +581,48 @@ mod tests {
             "next_stop=undefined empty=undefined quality=undefined charging=undefined"
         );
         assert_eq!(forecast_text(&[0xff]), "undecodable len=1");
-        assert_eq!(
-            NavigationChannel.handle_message(nav_msg::VEHICLE_ENERGY_FORECAST, &[0x0a, 0x00]),
-            None
-        );
+
+        let charging = VehicleEnergyForecast {
+            next_charging_stop: Some(ChargingStopEnergy {
+                min_departure_energy_wh: Some(-1),
+                max_rated_power_w: Some(400_000),
+                charging_seconds: Some(1200),
+            }),
+            ..inner
+        };
+        let wrap = |f: &VehicleEnergyForecast| {
+            VehicleEnergyForecastNotification {
+                serialized_forecast: Some(f.encode_to_vec()),
+            }
+            .encode_to_vec()
+        };
+        for (payload, event) in [
+            (vec![0xff], None),
+            (
+                vec![0x0a, 0x00],
+                Some(NavigationEvent::EnergyForecast(Default::default())),
+            ),
+            (
+                wrap(&charging),
+                Some(NavigationEvent::EnergyForecast(EnergyForecastUpdate {
+                    next_stop: Some(EnergyAtStop {
+                        arrival_wh: Some(-1500),
+                        distance_m: Some(120_000),
+                        time_s: None,
+                    }),
+                    charging: Some(ChargerPlan {
+                        power_w: Some(400_000),
+                        charge_s: Some(1200),
+                        departure_wh: None,
+                    }),
+                })),
+            ),
+        ] {
+            assert_eq!(
+                NavigationChannel.handle_message(nav_msg::VEHICLE_ENERGY_FORECAST, &payload),
+                event
+            );
+        }
     }
 
     #[test]
@@ -588,8 +713,55 @@ mod tests {
                 road_name: Some("Ring".into()),
                 cue: Some("cue1".into()),
                 destination_address: Some("Home".into()),
+                next_destination: Some(NextDestination { charger: None }),
             }
         );
+        let charger = |departure: i64, power: i64, secs: i64| {
+            field_len_delim(
+                2,
+                &[
+                    field_varint(1, departure),
+                    field_varint(2, power),
+                    field_varint(3, secs),
+                ]
+                .concat(),
+            )
+        };
+        for (destinations, next) in [
+            (vec![], None),
+            (
+                vec![
+                    [s(1, "Ionna"), charger(77_400, 180_000, 1500)].concat(),
+                    s(1, "Home"),
+                ],
+                Some(ChargerPlan {
+                    power_w: Some(180_000),
+                    charge_s: Some(1500),
+                    departure_wh: Some(77_400),
+                }),
+            ),
+            (
+                vec![[s(1, "Ionna"), charger(-1, 50_000, -1)].concat()],
+                Some(ChargerPlan {
+                    power_w: Some(50_000),
+                    ..Default::default()
+                }),
+            ),
+            (
+                vec![s(1, "Home"), [s(1, "Ionna"), charger(1, 1, 1)].concat()],
+                None,
+            ),
+        ] {
+            let listed = !destinations.is_empty();
+            let payload: Vec<u8> = destinations
+                .iter()
+                .flat_map(|d| field_len_delim(2, d))
+                .collect();
+            assert_eq!(
+                decode_state(&payload).next_destination,
+                listed.then_some(NextDestination { charger: next })
+            );
+        }
         let distance =
             |m: i64, d: &str, u: i64| [field_varint(1, m), s(2, d), field_varint(3, u)].concat();
         let position = [

@@ -19,6 +19,8 @@ pub struct State {
     #[serde(default)]
     pub video_playback: Option<VideoPlayback>,
     pub navigation: Navigation,
+    #[serde(default)]
+    pub precondition: Precondition,
     pub system: System,
     pub devices: Vec<DeviceView>,
     pub cameras: Vec<CameraView>,
@@ -43,6 +45,7 @@ impl State {
             "nowPlaying" => self.now_playing = read(value)?,
             "videoPlayback" => self.video_playback = read(value)?,
             "navigation" => self.navigation = read(value)?,
+            "precondition" => self.precondition = read(value)?,
             "system" => self.system = read(value)?,
             "devices" => self.devices = read(value)?,
             "cameras" => self.cameras = read(value)?,
@@ -350,6 +353,14 @@ pub struct ChargingStop {
     pub departure_wh: Option<u32>,
     /// Negative when the phone forecasts arriving short of the stop.
     pub arrival_wh: Option<i32>,
+}
+
+/// The user's request to precondition the battery now. Runtime only: a restart forgets it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Precondition {
+    /// Unix seconds; none while no request stands.
+    pub manual_until: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

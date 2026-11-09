@@ -347,6 +347,18 @@ impl Telemetry {
     }
 }
 
+fn navigation_api(s: &State) -> Value {
+    let mut nav = match serde_json::to_value(&s.navigation) {
+        Ok(Value::Object(nav)) => nav,
+        _ => Map::new(),
+    };
+    nav.insert(
+        "precondition".into(),
+        crate::precondition::api(&s.config, s.precondition.manual_until),
+    );
+    Value::Object(nav)
+}
+
 pub fn socket(
     state: watch::Receiver<State>,
 ) -> (axum::Router, SocketIo, mpsc::UnboundedReceiver<Value>) {
@@ -355,7 +367,7 @@ pub fn socket(
     let over_http = pushes.clone();
     let guidance = state.clone();
     let navigation = move || {
-        let nav = guidance.borrow().navigation.clone();
+        let nav = navigation_api(&guidance.borrow());
         async move { axum::Json(nav) }
     };
     io.ns("/", move |socket: SocketRef| {
@@ -461,6 +473,7 @@ mod tests {
             video_playback: None,
             telemetry,
             navigation: Default::default(),
+            precondition: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),
@@ -871,7 +884,13 @@ mod tests {
         let nav = get().await;
         assert_eq!(nav["active"], Value::Null);
         assert_eq!(nav["chargingStop"], Value::Null);
+        assert_eq!(
+            nav["precondition"],
+            json!({ "mode": "auto", "manual": false, "manualUntil": null }),
+            "present without a route"
+        );
         tx.send_modify(|s| {
+            s.precondition.manual_until = Some(1_762_700_000);
             s.navigation.active = Some(true);
             s.navigation.maneuver_type = Some(2);
             s.navigation.remain_distance = Some(300.0);
@@ -898,6 +917,18 @@ mod tests {
                 "departureWh": 77_400,
                 "arrivalWh": -1500,
             })
+        );
+        assert_eq!(
+            nav["precondition"],
+            json!({ "mode": "auto", "manual": true, "manualUntil": 1_762_700_000 })
+        );
+        tx.send_modify(|s| {
+            s.config.battery_preconditioning = livi_core_proto::config::BatteryPreconditioning::Off;
+            s.precondition.manual_until = None;
+        });
+        assert_eq!(
+            get().await["precondition"],
+            json!({ "mode": "off", "manual": false, "manualUntil": null })
         );
     }
 

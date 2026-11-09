@@ -116,6 +116,7 @@ pub enum CustomPage {
     IconUploader,
     MfiCertificate,
     PowerOff,
+    Precondition,
     Restart,
     SoftwareUpdate,
     Touch(Screen),

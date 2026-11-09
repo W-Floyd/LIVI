@@ -163,6 +163,9 @@ pub enum Action {
         radio: Radio,
         on: bool,
     },
+    PreconditionBattery {
+        on: bool,
+    },
     Quit,
     Restart,
 }

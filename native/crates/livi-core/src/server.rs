@@ -320,6 +320,17 @@ impl Core {
             Action::DownloadUpdate => self.ask_update(UpdateAsk::Download),
             Action::InstallUpdate => self.ask_update(UpdateAsk::Install),
             Action::AbortUpdate => self.ask_update(UpdateAsk::Abort),
+            Action::PreconditionBattery { on } => {
+                let until = match on {
+                    true => Some(crate::precondition::request(
+                        &self.hub.config(),
+                        crate::precondition::now_s(),
+                    )?),
+                    false => None,
+                };
+                self.hub.update(|s| s.precondition.manual_until = until);
+                Ok(())
+            }
         }
     }
 }
@@ -536,6 +547,7 @@ mod tests {
             video_playback: None,
             telemetry: Default::default(),
             navigation: Default::default(),
+            precondition: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),

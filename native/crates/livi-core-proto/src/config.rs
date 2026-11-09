@@ -102,6 +102,10 @@ pub struct Config {
     /// energy model. Linear between the pairs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ev_charge_curve: Option<Vec<[f64; 2]>>,
+    /// Whether a car integration may precondition the battery, read from GET /navigation.
+    pub battery_preconditioning: BatteryPreconditioning,
+    /// How long a manual preconditioning request lasts.
+    pub battery_preconditioning_manual_minutes: u32,
     pub max_speed_kph: u32,
     pub speed_scale_step: u32,
     pub max_rpm: u32,
@@ -235,6 +239,13 @@ impl AppearanceMode {
             AppearanceMode::Auto => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BatteryPreconditioning {
+    Auto,
+    Off,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -526,6 +537,8 @@ pub fn defaults() -> Config {
         ev_max_discharge_power_kw: None,
         ev_road_load: None,
         ev_charge_curve: None,
+        battery_preconditioning: BatteryPreconditioning::Auto,
+        battery_preconditioning_manual_minutes: 30,
         max_speed_kph: 200,
         speed_scale_step: 40,
         max_rpm: 5000,

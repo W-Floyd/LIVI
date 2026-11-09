@@ -2,16 +2,65 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Additional terms: see NOTICE
 
-use livi_core_proto::config::{CarType, EvConnectorType};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use livi_core_proto::config::{BatteryPreconditioning, CarType, EvConnectorType};
 use livi_core_proto::message::Action;
 use serde_json::Value;
 
 use super::info;
 use crate::i18n::Strings;
-use crate::settings::view::{Row, RowKind, Tool};
+use crate::icons::settings_icon;
+use crate::settings::view::{Change, Row, RowKind, Tool};
 
 fn finite(v: &Value) -> Option<f64> {
     v.as_f64().filter(|f| f.is_finite())
+}
+
+pub fn now_s() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// The manual request's switch, and what the car reports of its own conditioning.
+pub fn precondition(state: &Value, t: &Strings, now: u64) -> Vec<Row> {
+    let mode = serde_json::from_value(state["config"]["batteryPreconditioning"].clone())
+        .unwrap_or(BatteryPreconditioning::Auto);
+    let until = state["precondition"]["manualUntil"].as_u64();
+    let left = until.map(|u| u.saturating_sub(now).div_ceil(60).to_string());
+    let conditioning = match state["telemetry"]["batteryConditioning"].as_bool() {
+        Some(true) => t.t("settings.conditioningOn", "On"),
+        Some(false) => t.t("settings.conditioningOff", "Off"),
+        None => t.t("settings.conditioningUnknown", "Unknown"),
+    };
+    vec![
+        Row {
+            kind: RowKind::Switch,
+            label: t.t("settings.preconditionNow", "Precondition Battery"),
+            icon: settings_icon("preconditionNow"),
+            value: left
+                .map(|m| {
+                    t.with(
+                        "settings.minutesLeft",
+                        "{{minutes}} min left",
+                        &[("minutes", &m)],
+                    )
+                })
+                .unwrap_or_default(),
+            checked: until.is_some(),
+            enabled: mode == BatteryPreconditioning::Auto,
+            change: Some(Change::Act(Action::PreconditionBattery {
+                on: until.is_none(),
+            })),
+            ..Row::default()
+        },
+        info(
+            t.t("settings.batteryConditioning", "Conditioning"),
+            Some("batteryConditioning"),
+            conditioning,
+        ),
+    ]
 }
 
 pub fn readings(state: &Value, t: &Strings) -> Vec<Row> {
@@ -143,5 +192,39 @@ mod tests {
         assert_eq!(rows[1].label, "x.two");
         assert!(rows[0].tools[0].switch && rows[0].tools[0].on);
         assert!(!rows[0].tools[1].enabled && !rows[1].tools[2].enabled);
+    }
+
+    #[test]
+    fn the_precondition_switch_shows_its_request_and_the_car() {
+        // (state, on, enabled, time left, conditioning)
+        for (s, on, enabled, left, car) in [
+            (json!({}), false, true, "", "Unknown"),
+            (
+                json!({ "precondition": { "manualUntil": 1601 }, "telemetry": { "batteryConditioning": true } }),
+                true,
+                true,
+                "11 min left",
+                "On",
+            ),
+            (
+                json!({ "config": { "batteryPreconditioning": "off" }, "telemetry": { "batteryConditioning": false } }),
+                false,
+                false,
+                "",
+                "Off",
+            ),
+        ] {
+            let rows = precondition(&s, &Strings::new("en"), 1000);
+            assert_eq!(
+                (rows[0].checked, rows[0].enabled, rows[0].value.as_str()),
+                (on, enabled, left),
+                "{s}"
+            );
+            assert_eq!(
+                rows[0].change,
+                Some(Change::Act(Action::PreconditionBattery { on: !on }))
+            );
+            assert_eq!(rows[1].value, car, "{s}");
+        }
     }
 }

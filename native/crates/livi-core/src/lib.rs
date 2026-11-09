@@ -46,6 +46,7 @@ mod nav_text;
 mod nmea;
 pub mod paths;
 pub mod power;
+mod precondition;
 mod privileged;
 mod projection;
 mod radio;
@@ -144,6 +145,7 @@ pub async fn run(
         video_playback: None,
         telemetry: Default::default(),
         navigation: Default::default(),
+        precondition: Default::default(),
         system: livi_core_proto::state::System {
             start_page: start,
             ..Default::default()
@@ -175,6 +177,7 @@ pub async fn run(
 
     tokio::spawn(dongle::run(core.hub.clone(), dongle_asks));
     tokio::spawn(wifi_options::follow(core.clone()));
+    tokio::spawn(precondition::follow(core.clone()));
     let (inside, inside_rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(telemetry::run(core.clone(), inside_rx, saved));
     tokio::spawn(gnss::run(core.clone(), inside.clone()));

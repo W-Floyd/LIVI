@@ -44,6 +44,7 @@ pub fn rows(page: CustomPage, state: &Value, t: &Strings, facts: &Facts) -> Opti
         CustomPage::Restart | CustomPage::PowerOff => Vec::new(),
         CustomPage::WifiLinkInfo => system::link_speed(state, t),
         CustomPage::CarReadings => car::readings(state, t),
+        CustomPage::Precondition => car::precondition(state, t, car::now_s()),
         CustomPage::DashboardLayouts => car::layouts(state, t),
         CustomPage::GpsInfo => gps::data(state, t),
         CustomPage::GpsHwInfo => gps::hardware(state, t),

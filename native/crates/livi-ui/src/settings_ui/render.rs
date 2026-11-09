@@ -142,6 +142,7 @@ pub(super) fn custom_name(page: CustomPage) -> &'static str {
         CustomPage::IconUploader => "UI icon",
         CustomPage::MfiCertificate => "MFi certificate",
         CustomPage::PowerOff => "Power off",
+        CustomPage::Precondition => "Battery preconditioning",
         CustomPage::Restart => "Restart",
         CustomPage::SoftwareUpdate => "Software update",
         CustomPage::Touch(_) => "Touch",

@@ -913,6 +913,7 @@ mod tests {
             video_playback: None,
             telemetry: Default::default(),
             navigation: Default::default(),
+            precondition: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),

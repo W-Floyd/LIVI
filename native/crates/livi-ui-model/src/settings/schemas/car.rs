@@ -164,8 +164,52 @@ pub fn schema() -> Node {
                 "carType",
                 CustomPage::CarReadings,
             ),
+            preconditioning(),
             carplay(),
         ],
     )
     .icon("car")
+}
+
+fn preconditioning() -> Node {
+    let title = Label::new("settings.batteryPreconditioning", "Battery Preconditioning");
+    let minutes = Label::new(
+        "settings.batteryPreconditioningManualMinutes",
+        "Manual Duration",
+    );
+    Node::route(
+        "preconditioning",
+        title,
+        vec![
+            Node::custom(
+                Label::new("settings.preconditionNow", "Precondition Battery"),
+                "",
+                CustomPage::Precondition,
+            ),
+            Node::select(
+                title,
+                "batteryPreconditioning",
+                vec![
+                    choice(
+                        Label::new("settings.batteryPreconditioningAuto", "Automatic"),
+                        OptionValue::Text("auto"),
+                    ),
+                    choice(
+                        Label::new("settings.batteryPreconditioningOff", "Off"),
+                        OptionValue::Text("off"),
+                    ),
+                ],
+            )
+            .icon("batteryPreconditioning")
+            .display_value()
+            .page(title),
+            Node::number(minutes, "batteryPreconditioningManualMinutes")
+                .icon("preconditionMinutes")
+                .range(Some(5.0), Some(120.0), Some(5.0))
+                .display_value()
+                .shown(Shown::Suffix(" min"))
+                .page(minutes),
+        ],
+    )
+    .icon("batteryPreconditioning")
 }

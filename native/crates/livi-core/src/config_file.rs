@@ -352,6 +352,7 @@ pub fn apply_patch(current: &Config, patch: &Value) -> Result<Config, String> {
 pub mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
+    use livi_core_proto::config::BatteryPreconditioning;
     use livi_core_proto::state::PerScreen;
     use serde_json::json;
 
@@ -397,7 +398,8 @@ pub mod tests {
             json!({
                 "wifiInterface": "wlan0", "carName": "Device", "bindings": { "home": "Home" },
                 "evRoadLoad": { "aN": 106.72, "bNPerMps": 2.2776, "cNPerMps2": 0.4655 },
-                "evChargeCurve": [[1, 205], [100, 12]]
+                "evChargeCurve": [[1, 205], [100, 12]],
+                "batteryPreconditioning": "off", "batteryPreconditioningManualMinutes": 45
             })
             .to_string(),
         )
@@ -434,6 +436,13 @@ pub mod tests {
             fresh.ev_charge_curve,
             Some(vec![[1.0, 205.0], [100.0, 12.0]])
         );
+        assert_eq!(
+            (
+                fresh.battery_preconditioning,
+                fresh.battery_preconditioning_manual_minutes
+            ),
+            (BatteryPreconditioning::Off, 45)
+        );
 
         // The user's file wins over every preset.
         let mut mine = written(&dir, "LIVI/config.json");
@@ -454,6 +463,8 @@ pub mod tests {
         let live = written(&dir, "LIVI/config.json");
         assert_eq!(live, written(&dir, "backup/config.json"));
         assert_eq!(live["carName"], "LIVI");
+        assert_eq!(live["batteryPreconditioning"], "auto");
+        assert_eq!(live["batteryPreconditioningManualMinutes"], 30);
         assert!(live.get("carplayIcon120").is_none());
     }
 
@@ -709,6 +720,7 @@ pub mod tests {
         let current = defaults();
         assert!(apply_patch(&current, &json!({ "huVolume": "loud" })).is_err());
         assert!(apply_patch(&current, &json!({ "wifiChannel": 36.5 })).is_err());
+        assert!(apply_patch(&current, &json!({ "batteryPreconditioning": "on" })).is_err());
         assert_eq!(
             apply_patch(&current, &json!({ "nightMode": true })),
             Err("unknown setting nightMode".into())

@@ -1,5 +1,5 @@
 //! livi-shell-test-client [--app-id ID] [--title T] [--size WxH] [--pattern grid|bars]
-//!     [--animate FRAMES]
+//!     [--animate FRAMES] [--buffer shm|dmabuf]
 //! Connects to WAYLAND_DISPLAY and shows a known picture; see test_client.rs.
 
 #[cfg(target_os = "linux")]
@@ -12,10 +12,11 @@ fn main() {
         height: 360,
         pattern: Pattern::Grid,
         animate: None,
+        dmabuf: false,
     };
     let mut args = std::env::args().skip(1);
     let usage = || -> ! {
-        eprintln!("usage: livi-shell-test-client [--app-id ID] [--title T] [--size WxH] [--pattern grid|bars] [--animate N]");
+        eprintln!("usage: livi-shell-test-client [--app-id ID] [--title T] [--size WxH] [--pattern grid|bars] [--animate N] [--buffer shm|dmabuf]");
         std::process::exit(2)
     };
     while let Some(a) = args.next() {
@@ -30,6 +31,13 @@ fn main() {
             }
             "--pattern" => opts.pattern = Pattern::parse(&v).unwrap_or_else(|| usage()),
             "--animate" => opts.animate = Some(v.parse().unwrap_or_else(|_| usage())),
+            "--buffer" => {
+                opts.dmabuf = match v.as_str() {
+                    "shm" => false,
+                    "dmabuf" => true,
+                    _ => usage(),
+                }
+            }
             _ => usage(),
         }
     }

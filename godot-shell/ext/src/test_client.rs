@@ -3,9 +3,9 @@
 
 use std::fs::File;
 use std::io;
-use std::os::fd::{AsFd, FromRawFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 
-use wayland_client::protocol::wl_buffer::WlBuffer;
+use wayland_client::protocol::wl_buffer::{self, WlBuffer};
 use wayland_client::protocol::wl_callback::{self, WlCallback};
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
@@ -13,6 +13,8 @@ use wayland_client::protocol::wl_shm::{self, WlShm};
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, Dispatch, QueueHandle, delegate_noop};
+use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1};
+use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1;
 use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
 use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
@@ -67,6 +69,8 @@ pub struct Opts {
     /// Redraw on every frame callback with a white column at `frame % width`; stop after this
     /// many frames. Without it, one frame and then idle until closed.
     pub animate: Option<u32>,
+    /// Send linear XRGB dmabufs (from /dev/udmabuf) instead of shm.
+    pub dmabuf: bool,
 }
 
 #[derive(Default)]
@@ -74,9 +78,12 @@ struct App {
     compositor: Option<WlCompositor>,
     shm: Option<WlShm>,
     wm_base: Option<XdgWmBase>,
+    dmabuf: Option<ZwpLinuxDmabufV1>,
     configured: bool,
     closed: bool,
     frame_due: bool,
+    /// Per buffer: attached and not yet released.
+    busy: Vec<bool>,
 }
 
 /// Runs until the compositor closes the window or goes away, or the animation ends. Returns
@@ -105,31 +112,62 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<u32> {
     }
 
     let (w, h) = (opts.width, opts.height);
-    let size = (w * h * 4) as usize;
-    let file = memfd(size)?;
-    // SAFETY: a fresh memfd of `size` bytes, mapped shared for the pool's lifetime.
-    let map = unsafe {
-        libc::mmap(
-            std::ptr::null_mut(),
-            size,
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_SHARED,
-            std::os::fd::AsRawFd::as_raw_fd(&file),
-            0,
-        )
+    let stride = w * 4;
+    // udmabuf takes whole pages.
+    let size = ((stride * h) as usize).next_multiple_of(4096);
+    let dmabuf = match (opts.dmabuf, app.dmabuf.clone()) {
+        (false, _) => None,
+        (true, Some(d)) => Some(d),
+        (true, None) => return Err(io::Error::other("compositor lacks zwp_linux_dmabuf_v1")),
     };
-    if map == libc::MAP_FAILED {
-        return Err(io::Error::last_os_error());
+    // Three buffers, each reused only once the compositor has released it, as Mesa's clients
+    // do: a dmabuf comes back a frame after its successor is shown, so two would halve the rate.
+    let mut slots = Vec::new();
+    for i in 0..3 {
+        let file = memfd(size, dmabuf.is_some())?;
+        // SAFETY: a fresh memfd of `size` bytes, mapped shared until the end of this function.
+        let map = unsafe {
+            libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, file.as_raw_fd(), 0)
+        };
+        if map == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        let (buffer, pool) = match &dmabuf {
+            Some(d) => {
+                let fd = udmabuf(&file, size)?;
+                let params = d.create_params(&qh, ());
+                // LINEAR: modifier 0.
+                params.add(fd.as_fd(), 0, 0, stride, 0, 0);
+                let buffer = params.create_immed(w as i32, h as i32, XRGB8888, zwp_linux_buffer_params_v1::Flags::empty(), &qh, i);
+                params.destroy();
+                (buffer, None)
+            }
+            None => {
+                let pool = shm.create_pool(file.as_fd(), size as i32, &qh, ());
+                let buffer = pool.create_buffer(0, w as i32, h as i32, stride as i32, wl_shm::Format::Xrgb8888, &qh, i);
+                (buffer, Some(pool))
+            }
+        };
+        app.busy.push(false);
+        slots.push((buffer, pool, map, file));
     }
-    // SAFETY: the mapping above, which outlives this function's use of it.
-    let pixels = unsafe { std::slice::from_raw_parts_mut(map as *mut u8, size) };
-    let pool = shm.create_pool(file.as_fd(), size as i32, &qh, ());
-    let buffer = pool.create_buffer(0, w as i32, h as i32, (w * 4) as i32, wl_shm::Format::Xrgb8888, &qh, ());
 
     let mut drawn = 0;
     loop {
+        let i = loop {
+            if let Some(i) = app.busy.iter().position(|b| !b) {
+                break Some(i);
+            }
+            if app.closed || queue.blocking_dispatch(&mut app).is_err() {
+                break None;
+            }
+        };
+        let Some(i) = i else { break };
+        // SAFETY: slot i's mapping, which the compositor has released.
+        let pixels = unsafe { std::slice::from_raw_parts_mut(slots[i].2 as *mut u8, (stride * h) as usize) };
         draw(pixels, opts, drawn);
-        surface.attach(Some(&buffer), 0, 0);
+        app.busy[i] = true;
+        surface.attach(Some(&slots[i].0), 0, 0);
         surface.damage_buffer(0, 0, w as i32, h as i32);
         if opts.animate.is_some() {
             surface.frame(&qh, ());
@@ -153,12 +191,41 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<u32> {
     toplevel.destroy();
     xdg.destroy();
     surface.destroy();
-    buffer.destroy();
-    pool.destroy();
+    for (buffer, pool, map, _file) in slots {
+        buffer.destroy();
+        if let Some(p) = pool {
+            p.destroy();
+        }
+        // SAFETY: unmapping a mapping made above; nothing reads it after this.
+        unsafe { libc::munmap(map, size) };
+    }
     let _ = queue.roundtrip(&mut app);
-    // SAFETY: unmapping the mapping made above; `pixels` is not used after this.
-    unsafe { libc::munmap(map, size) };
     Ok(drawn)
+}
+
+const XRGB8888: u32 = 0x3432_5258;
+
+/// A dmabuf over the memfd's pages, through /dev/udmabuf: CPU memory any importer can take,
+/// which needs no GPU allocator in the client.
+fn udmabuf(memfd: &File, size: usize) -> io::Result<OwnedFd> {
+    #[repr(C)]
+    struct Create {
+        memfd: u32,
+        flags: u32,
+        offset: u64,
+        size: u64,
+    }
+    const UDMABUF_CREATE: libc::c_ulong = 0x4018_7542; // _IOW('u', 0x42, struct udmabuf_create)
+    const UDMABUF_FLAGS_CLOEXEC: u32 = 1;
+    let dev = std::fs::OpenOptions::new().read(true).write(true).open("/dev/udmabuf")?;
+    let create = Create { memfd: memfd.as_raw_fd() as u32, flags: UDMABUF_FLAGS_CLOEXEC, offset: 0, size: size as u64 };
+    // SAFETY: the ioctl reads `create` and returns a new fd or -1.
+    let fd = unsafe { libc::ioctl(dev.as_raw_fd(), UDMABUF_CREATE as _, &create) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a fresh fd, owned from here on.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
 fn draw(px: &mut [u8], opts: &Opts, frame: u32) {
@@ -176,14 +243,19 @@ fn draw(px: &mut [u8], opts: &Opts, frame: u32) {
     }
 }
 
-fn memfd(size: usize) -> io::Result<File> {
+/// `sealed`: udmabuf refuses a memfd that could still shrink.
+fn memfd(size: usize, sealed: bool) -> io::Result<File> {
+    let flags = libc::MFD_CLOEXEC | if sealed { libc::MFD_ALLOW_SEALING } else { 0 };
     // SAFETY: plain syscall with a static name; the fd is owned by the File from here on.
-    let fd = unsafe { libc::memfd_create(c"livi-shell-test".as_ptr(), libc::MFD_CLOEXEC) };
+    let fd = unsafe { libc::memfd_create(c"livi-shell-test".as_ptr(), flags) };
     if fd < 0 {
         return Err(io::Error::last_os_error());
     }
     let file = unsafe { File::from_raw_fd(fd) };
     file.set_len(size as u64)?;
+    if sealed && unsafe { libc::fcntl(fd, libc::F_ADD_SEALS, libc::F_SEAL_SHRINK) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
     Ok(file)
 }
 
@@ -203,6 +275,7 @@ impl Dispatch<WlRegistry, ()> for App {
             "wl_compositor" => app.compositor = Some(registry.bind(name, version.min(4), qh, ())),
             "wl_shm" => app.shm = Some(registry.bind(name, 1, qh, ())),
             "xdg_wm_base" => app.wm_base = Some(registry.bind(name, 1, qh, ())),
+            "zwp_linux_dmabuf_v1" => app.dmabuf = Some(registry.bind(name, version.min(3), qh, ())),
             _ => {}
         }
     }
@@ -241,8 +314,17 @@ impl Dispatch<WlCallback, ()> for App {
     }
 }
 
+impl Dispatch<WlBuffer, usize> for App {
+    fn event(app: &mut Self, _: &WlBuffer, event: wl_buffer::Event, i: &usize, _: &Connection, _: &QueueHandle<Self>) {
+        if let wl_buffer::Event::Release = event {
+            app.busy[*i] = false;
+        }
+    }
+}
+
 delegate_noop!(App: WlCompositor);
 delegate_noop!(App: WlShmPool);
 delegate_noop!(App: ignore WlShm);
-delegate_noop!(App: ignore WlBuffer);
 delegate_noop!(App: ignore WlSurface);
+delegate_noop!(App: ignore ZwpLinuxDmabufV1);
+delegate_noop!(App: ignore ZwpLinuxBufferParamsV1);

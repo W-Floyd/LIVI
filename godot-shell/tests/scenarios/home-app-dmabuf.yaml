@@ -1,0 +1,18 @@
+name: home-app-dmabuf
+# The same client as home-app, sending dmabufs: imported into Godot's GL context with no copy,
+# it must look exactly like the shm copy, so both share one golden.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: org.livi.test.bars, pattern: bars, size: 640x360, buffer: dmabuf }
+steps:
+  - gdscript: |
+      if Wayland.dmabuf_status() != "":
+          return "dmabuf is off: %s" % Wayland.dmabuf_status()
+  - wait: { window: org.livi.test.bars }
+  - gdscript: |
+      var s: Dictionary = Wayland.stats()
+      if s.imports == 0 or s.uploads != 0:
+          return "expected dmabuf imports and no shm uploads, got %s" % s
+  - screenshot: { name: home-app, tolerance: 0 }

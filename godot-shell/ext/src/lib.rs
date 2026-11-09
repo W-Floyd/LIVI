@@ -3,6 +3,8 @@
 #[cfg(target_os = "linux")]
 pub mod compositor;
 pub mod fake_core;
+#[cfg(target_os = "linux")]
+mod gl_import;
 pub mod golden;
 pub mod scenario;
 #[cfg(target_os = "linux")]

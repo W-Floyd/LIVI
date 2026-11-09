@@ -1,17 +1,22 @@
 //! The Wayland server the shell embeds, with no Godot types: Godot's main thread calls
 //! `dispatch` once a frame, takes each window's newest frame, and calls `frame_done` after.
 
+use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::Instant;
 
+use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::allocator::{Format as DrmFormat, Fourcc, Modifier};
 use smithay::delegate_compositor;
+use smithay::delegate_dmabuf;
 use smithay::delegate_seat;
 use smithay::delegate_shm;
 use smithay::delegate_xdg_shell;
 use smithay::input::{Seat, SeatHandler, SeatState};
-use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason};
+use smithay::reexports::wayland_server::Resource;
+use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason, ObjectId};
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_shm::Format;
@@ -27,6 +32,9 @@ use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
     XdgToplevelSurfaceData,
 };
+use smithay::wayland::dmabuf::{
+    DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier, get_dmabuf,
+};
 use smithay::wayland::shm::{ShmHandler, ShmState, with_buffer_contents};
 
 /// A client's newest picture, as straight RGBA8 rows with no padding.
@@ -37,14 +45,24 @@ pub struct Frame {
     pub rgba: Vec<u8>,
 }
 
+/// What a commit brought: shm is copied out at once; a dmabuf is handed over as it is, with a
+/// key that stays the same while the client reuses the buffer, so imports can be cached.
+#[derive(Debug, Clone)]
+pub enum Content {
+    Pixels(Frame),
+    Dmabuf { key: u64, dmabuf: Dmabuf },
+}
+
 pub struct Window {
     pub id: u64,
     toplevel: ToplevelSurface,
     pub app_id: String,
     pub title: String,
     /// Set by each commit with a new buffer; the embedder takes it.
-    pub frame: Option<Frame>,
+    pub frame: Option<Content>,
     pub mapped: bool,
+    /// The dmabuf on screen, held until a frame has been drawn without it.
+    shown: Option<WlBuffer>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,9 +78,18 @@ pub struct State {
     shm: ShmState,
     seat_state: SeatState<State>,
     _seat: Seat<State>,
+    dmabuf: DmabufState,
+    dmabuf_global: Option<DmabufGlobal>,
     pub windows: Vec<Window>,
     pub events: Vec<WindowEvent>,
     next_id: u64,
+    buffer_keys: HashMap<ObjectId, u64>,
+    next_key: u64,
+    /// Keys of dmabufs the client destroyed; the embedder frees what it imported for them.
+    pub gone_buffers: Vec<u64>,
+    /// Released at the next frame_done, then the one after: one drawn frame later.
+    release_next: Vec<WlBuffer>,
+    release_now: Vec<WlBuffer>,
 }
 
 pub struct Server {
@@ -95,9 +122,16 @@ impl Server {
             shm: ShmState::new::<State>(&dh, vec![]),
             seat_state,
             _seat: seat,
+            dmabuf: DmabufState::new(),
+            dmabuf_global: None,
             windows: Vec::new(),
             events: Vec::new(),
             next_id: 1,
+            buffer_keys: HashMap::new(),
+            next_key: 1,
+            gone_buffers: Vec::new(),
+            release_next: Vec::new(),
+            release_now: Vec::new(),
         };
         Ok(Server {
             display,
@@ -128,6 +162,33 @@ impl Server {
         &self.socket_name
     }
 
+    /// Offers linux-dmabuf with these (fourcc, modifier) pairs. With a render node it also
+    /// sends v4 feedback, which Mesa's EGL clients need to pick the device.
+    pub fn enable_dmabuf(&mut self, formats: &[(u32, u64)], main_device: Option<libc::dev_t>) -> io::Result<()> {
+        let formats: Vec<DrmFormat> = formats
+            .iter()
+            .filter_map(|&(code, modifier)| {
+                Some(DrmFormat {
+                    code: Fourcc::try_from(code).ok()?,
+                    modifier: Modifier::from(modifier),
+                })
+            })
+            .collect();
+        if formats.is_empty() {
+            return Err(io::Error::other("no dmabuf formats to offer"));
+        }
+        let dh = self.display.handle();
+        let global = match main_device {
+            Some(dev) => {
+                let feedback = DmabufFeedbackBuilder::new(dev, formats).build().map_err(io::Error::other)?;
+                self.state.dmabuf.create_global_with_default_feedback::<State>(&dh, &feedback)
+            }
+            None => self.state.dmabuf.create_global::<State>(&dh, formats),
+        };
+        self.state.dmabuf_global = Some(global);
+        Ok(())
+    }
+
     /// Takes in new clients and handles every request that has arrived, without blocking.
     pub fn dispatch(&mut self) -> io::Result<()> {
         while let Some(stream) = self.socket.as_ref().map(|s| s.accept()).transpose()?.flatten() {
@@ -144,8 +205,13 @@ impl Server {
             .insert_client(stream, Arc::new(ClientState::default()))
     }
 
-    /// Tells every window its frame was shown, so it may draw the next one.
+    /// Tells every window its frame was shown, so it may draw the next one, and hands back the
+    /// dmabufs a frame has since been drawn without.
     pub fn frame_done(&mut self) {
+        for b in self.state.release_now.drain(..) {
+            b.release();
+        }
+        self.state.release_now = std::mem::take(&mut self.state.release_next);
         let ms = self.started.elapsed().as_millis() as u32;
         for w in &self.state.windows {
             with_states(w.toplevel.wl_surface(), |states| {
@@ -163,13 +229,6 @@ impl Server {
     }
 }
 
-impl State {
-    fn window_of(&mut self, surface: &WlSurface) -> Option<&mut Window> {
-        self.windows
-            .iter_mut()
-            .find(|w| w.toplevel.wl_surface() == surface)
-    }
-}
 
 /// shm's ARGB and XRGB are little-endian words, so B, G, R, A in memory.
 fn to_rgba(src: &[u8], width: u32, height: u32, stride: usize, format: Format) -> Option<Vec<u8>> {
@@ -221,11 +280,11 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        let Some(window) = self.window_of(surface) else {
+        let Some(i) = self.windows.iter().position(|w| w.toplevel.wl_surface() == surface) else {
             return;
         };
-        if !window.toplevel.is_initial_configure_sent() {
-            window.toplevel.send_configure();
+        if !self.windows[i].toplevel.is_initial_configure_sent() {
+            self.windows[i].toplevel.send_configure();
             return;
         }
         let assignment = with_states(surface, |states| {
@@ -238,10 +297,28 @@ impl CompositorHandler for State {
         });
         match assignment {
             Some(BufferAssignment::NewBuffer(buffer)) => {
-                let frame = read_shm(&buffer);
-                // Copied out, so the client may reuse it at once.
-                buffer.release();
-                let Some(frame) = frame else { return };
+                let content = if let Ok(dmabuf) = get_dmabuf(&buffer) {
+                    let dmabuf = dmabuf.clone();
+                    let key = *self.buffer_keys.entry(buffer.id()).or_insert_with(|| {
+                        self.next_key += 1;
+                        self.next_key
+                    });
+                    // Read by the GPU until a frame is drawn with its successor.
+                    if let Some(old) = self.windows[i].shown.replace(buffer) {
+                        self.release_next.push(old);
+                    }
+                    Content::Dmabuf { key, dmabuf }
+                } else {
+                    let frame = read_shm(&buffer);
+                    // Copied out, so the client may reuse it at once.
+                    buffer.release();
+                    if let Some(old) = self.windows[i].shown.take() {
+                        self.release_next.push(old);
+                    }
+                    let Some(frame) = frame else { return };
+                    Content::Pixels(frame)
+                };
+                let window = &mut self.windows[i];
                 let (app_id, title) = with_states(surface, |states| {
                     let data = states
                         .data_map
@@ -257,21 +334,37 @@ impl CompositorHandler for State {
                 });
                 window.app_id = app_id;
                 window.title = title;
-                window.frame = Some(frame);
+                window.frame = Some(content);
                 if !window.mapped {
                     window.mapped = true;
                     let id = window.id;
                     self.events.push(WindowEvent::Mapped(id));
                 }
             }
-            Some(BufferAssignment::Removed) if window.mapped => {
+            Some(BufferAssignment::Removed) if self.windows[i].mapped => {
+                let window = &mut self.windows[i];
                 window.mapped = false;
                 window.frame = None;
                 let id = window.id;
+                if let Some(old) = window.shown.take() {
+                    self.release_next.push(old);
+                }
                 self.events.push(WindowEvent::Unmapped(id));
             }
             _ => {}
         }
+    }
+}
+
+impl DmabufHandler for State {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf
+    }
+
+    /// Accepted as offered: the formats came from what Godot's EGL can import, and an import
+    /// that still fails shows up when the embedder takes the frame.
+    fn dmabuf_imported(&mut self, _: &DmabufGlobal, _: Dmabuf, notifier: ImportNotifier) {
+        let _ = notifier.successful::<State>();
     }
 }
 
@@ -290,6 +383,7 @@ impl XdgShellHandler for State {
             title: String::new(),
             frame: None,
             mapped: false,
+            shown: None,
         });
     }
 
@@ -317,7 +411,11 @@ impl ShmHandler for State {
 }
 
 impl BufferHandler for State {
-    fn buffer_destroyed(&mut self, _: &WlBuffer) {}
+    fn buffer_destroyed(&mut self, buffer: &WlBuffer) {
+        if let Some(key) = self.buffer_keys.remove(&buffer.id()) {
+            self.gone_buffers.push(key);
+        }
+    }
 }
 
 impl SeatHandler for State {
@@ -334,6 +432,7 @@ delegate_compositor!(State);
 delegate_xdg_shell!(State);
 delegate_shm!(State);
 delegate_seat!(State);
+delegate_dmabuf!(State);
 
 #[cfg(test)]
 mod tests {
@@ -359,13 +458,22 @@ mod tests {
         false
     }
 
+    const XRGB8888: u32 = 0x3432_5258;
+    const LINEAR: u64 = 0;
+
+    fn server() -> Server {
+        let mut server = Server::new().unwrap();
+        server.enable_dmabuf(&[(XRGB8888, LINEAR)], None).unwrap();
+        server
+    }
+
     fn client(server: &mut Server, opts: Opts) -> thread::JoinHandle<u32> {
         let (ours, theirs) = UnixStream::pair().unwrap();
         server.insert_client(ours).unwrap();
         thread::spawn(move || test_client::run(Connection::from_socket(theirs).unwrap(), &opts).unwrap())
     }
 
-    fn opts(pattern: Pattern, animate: Option<u32>) -> Opts {
+    fn opts(pattern: Pattern, animate: Option<u32>, dmabuf: bool) -> Opts {
         Opts {
             app_id: "org.test.app".into(),
             title: "test".into(),
@@ -373,31 +481,62 @@ mod tests {
             height: 64,
             pattern,
             animate,
+            dmabuf,
+        }
+    }
+
+    /// A frame's pixels whichever way they came; a dmabuf is read through a CPU mapping.
+    fn pixels(content: &Content) -> Frame {
+        match content {
+            Content::Pixels(f) => f.clone(),
+            Content::Dmabuf { dmabuf, .. } => {
+                use smithay::backend::allocator::Buffer;
+                use std::os::fd::AsRawFd;
+                let size = dmabuf.size();
+                let stride = dmabuf.strides().next().unwrap() as usize;
+                let len = stride * size.h as usize;
+                let fd = dmabuf.handles().next().unwrap().as_raw_fd();
+                // SAFETY: a read-only mapping of the client's buffer, unmapped below.
+                let map = unsafe { libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ, libc::MAP_SHARED, fd, 0) };
+                assert_ne!(map, libc::MAP_FAILED, "mmap of the dmabuf");
+                let src = unsafe { std::slice::from_raw_parts(map as *const u8, len) };
+                let rgba = to_rgba(src, size.w as u32, size.h as u32, stride, Format::Xrgb8888).unwrap();
+                unsafe { libc::munmap(map, len) };
+                Frame { width: size.w as u32, height: size.h as u32, rgba }
+            }
         }
     }
 
     #[test]
     fn a_client_buffer_becomes_its_window_frame() {
-        let mut server = Server::new().unwrap();
-        let _client = client(&mut server, opts(Pattern::Grid, None));
-        assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))));
-        let w = &server.state.windows[0];
-        assert_eq!((w.app_id.as_str(), w.title.as_str()), ("org.test.app", "test"));
-        let f = w.frame.as_ref().unwrap();
-        assert_eq!((f.width, f.height, f.rgba.len()), (96, 64, 96 * 64 * 4));
-        let at = |x: u32, y: u32| &f.rgba[((y * 96 + x) * 4) as usize..][..4];
-        for (x, y) in [(0, 0), (70, 0), (70, 63), (95, 63)] {
-            assert_eq!(at(x, y), Pattern::Grid.pixel(x, y, 96), "({x}, {y})");
+        for dmabuf in [false, true] {
+            let mut server = server();
+            let _client = client(&mut server, opts(Pattern::Grid, None, dmabuf));
+            assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))), "dmabuf={dmabuf}");
+            let w = &server.state.windows[0];
+            assert_eq!((w.app_id.as_str(), w.title.as_str()), ("org.test.app", "test"));
+            let content = w.frame.as_ref().unwrap();
+            assert_eq!(matches!(content, Content::Dmabuf { .. }), dmabuf);
+            let f = pixels(content);
+            assert_eq!((f.width, f.height, f.rgba.len()), (96, 64, 96 * 64 * 4));
+            let at = |x: u32, y: u32| &f.rgba[((y * 96 + x) * 4) as usize..][..4];
+            for (x, y) in [(0, 0), (70, 0), (70, 63), (95, 63)] {
+                assert_eq!(at(x, y), Pattern::Grid.pixel(x, y, 96), "dmabuf={dmabuf} ({x}, {y})");
+            }
         }
     }
 
+    /// For dmabuf this also checks releases: the client has three buffers, so it stalls unless
+    /// each is handed back after a frame drawn with the other.
     #[test]
     fn frame_callbacks_pace_the_client_and_it_unmaps_when_done() {
-        let mut server = Server::new().unwrap();
-        let client = client(&mut server, opts(Pattern::Bars, Some(5)));
-        assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Unmapped(1))));
-        assert_eq!(client.join().unwrap(), 5);
-        assert!(server.state.windows.is_empty());
+        for dmabuf in [false, true] {
+            let mut server = server();
+            let client = client(&mut server, opts(Pattern::Bars, Some(5), dmabuf));
+            assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Unmapped(1))), "dmabuf={dmabuf}");
+            assert_eq!(client.join().unwrap(), 5);
+            assert!(server.state.windows.is_empty());
+        }
     }
 
     #[test]

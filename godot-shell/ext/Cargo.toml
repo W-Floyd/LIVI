@@ -22,4 +22,4 @@ serde_norway = "0.9.42"
 libc = "0.2"
 smithay = { version = "0.7", default-features = false, features = ["wayland_frontend"] }
 wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }

@@ -1,0 +1,15 @@
+name: perf-app-dmabuf
+# perf-app's client sending dmabufs: what a zero-copy client costs, as LIVI's video will.
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: org.livi.test.anim, pattern: grid, size: 1280x720, animate: 100000, buffer: dmabuf }
+steps:
+  - wait: { window: org.livi.test.anim }
+  - measure:
+      name: anim-1280x720-dmabuf
+      frames: 240
+      expect:
+        # Regression limits for llvmpipe in the VM, about twice what it measured (frame p95
+        # 11.7 ms, dispatch 0.04 ms, import 0.02 ms, against shm's 2.0 and 1.4 ms).
+        vm: { frame_ms_p95: 25, dispatch_ms: 0.2, import_ms: 0.2, rss_mb: 800 }

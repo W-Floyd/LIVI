@@ -57,7 +57,7 @@ func run(args: PackedStringArray) -> void:
 		var e := await _run_one(f)
 		if e != "":
 			_fail(_scenario, "", e)
-		_teardown()
+		await _teardown()
 	_write_report()
 	print("%d scenario(s), %d failure(s); report: %s" % [files.size(), _failed, _out.path_join("report.html")])
 	get_tree().quit(1 if _failed > 0 else 0)
@@ -147,6 +147,8 @@ func _spawn(c: Dictionary) -> String:
 				args.append_array(["--title", c.title])
 			if c.has("animate"):
 				args.append_array(["--animate", str(int(c.animate))])
+			if c.has("buffer"):
+				args.append_array(["--buffer", c.buffer])
 		"command":
 			var run: Array = c.get("run", [])
 			if run.is_empty():
@@ -163,11 +165,18 @@ func _spawn(c: Dictionary) -> String:
 	return ""
 
 
+## Waits until the killed clients' windows are gone, so the next scenario starts with an empty
+## compositor: a stale window would satisfy its wait-for-window.
 func _teardown() -> void:
 	_record_stop()
 	for pid in _clients:
 		OS.kill(pid)
 	_clients.clear()
+	var until := Time.get_ticks_msec() + WINDOW_TIMEOUT_MS
+	while Wayland.window_count() > 0 and Time.get_ticks_msec() < until:
+		await _frames(1)
+	if Wayland.window_count() > 0:
+		push_error("windows outlived their clients: %d" % Wayland.window_count())
 	if _vp:
 		_vp.queue_free()
 		_vp = null

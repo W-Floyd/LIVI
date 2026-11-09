@@ -236,9 +236,9 @@ same launcher.
   - `X-LIVI-Hidden`.
 - A file watch picks up installs and removals while the shell runs, so
   there's no rescan or restart.
-- X11-only apps are left out, as the compositor has no XWayland. An entry
-  can be marked `X-LIVI-Wayland=false`, or is found out after its first
-  failed launch.
+- X11-only apps run through XWayland (see "XWayland") when the quality
+  profile allows it. Otherwise they are hidden. An entry can be marked
+  `X-LIVI-Wayland=false`, or is found to be X11-only by its first launch.
 
 **Icons:**
 - Icons are looked up by the freedesktop icon theme rules: inherited
@@ -312,6 +312,47 @@ child it starts):
 - `measure` records the time from tap to first frame for each app, and each
   app's cgroup CPU and memory, against limits for each profile.
 
+## XWayland
+
+Optional, for the X11-only apps (some games, older tools, Wine). Most apps
+on pmOS are GTK or Qt and run on Wayland natively.
+
+**How:** smithay's `xwayland` feature starts Alpine's `Xwayland`, and its
+`X11Wm` is the X11 window manager (smithay's `anvil` compositor is the
+reference).
+- An X11 window arrives as a `wl_surface` from Xwayland. It takes the same
+  texture path and the same `wl_seat` as any other client, so input and
+  rendering need nothing new.
+- **Started lazily:** the shell listens on the X display socket and starts
+  Xwayland when the first X client connects. It stops Xwayland after a
+  quiet period with no X clients, so nothing is paid until an X app runs.
+- **Window matching:** X11 has no `app_id`, so `WM_CLASS` is matched against
+  the desktop entry's `StartupWMClass`, with the PID as a fallback, as the
+  launcher already does.
+- **Override-redirect windows** (menus, tooltips) are placed from X root
+  coordinates into their app's hosting region. Focus and stacking are kept
+  in step with X.
+- **Clipboard:** X and Wayland selections are bridged with smithay's
+  selection helpers.
+- **Scaling:** X11 apps don't know about DPI and render at scale 1. On a
+  display scaled above 1 they're stretched; that's accepted, as
+  1920×720 is scale 1.
+- **Buffers:** Xwayland sends dmabufs (glamor), so it follows the dmabuf
+  step of milestone 2, with shm as a fallback.
+
+**Cost:** an Xwayland server takes on the order of tens of MB. It's allowed
+by the `vm` and `desktop` profiles and off in `low`. Whether `unit` allows
+it is decided by its memory on the unit.
+
+**Tests:**
+- A scenario launches an X11 test client (`xeyes`, or our test client built
+  for X11). It waits for the window by `WM_CLASS`, then takes a screenshot,
+  taps the window and checks the input arrives.
+- Another checks that a menu opens at the right place in the hosting region.
+- Another checks that Xwayland starts on the first X client and stops when
+  the last one has gone.
+- `measure` records Xwayland's RSS and its time to first frame.
+
 ## Milestones
 
 1. **Toolchain and test harness.**
@@ -347,6 +388,7 @@ child it starts):
      - first discovery, icons, launching in its own scope, and matching
        windows to launches;
      - then lifecycle, the driving limits and per-driver arrangement.
+   - XWayland (see "XWayland"), lazily started, for X11-only apps.
 6. **Pages.** Home, side panel (drive stats, the preconditioning toggle from
    the core's `PreconditionBattery` and status), stats and graphs (from the
    core's telemetry). Built-in pages are launcher entries too.

@@ -1,0 +1,13 @@
+# Alpine ships qemu-ga with an OpenRC service only. run.sh --stop uses it:
+# GNOME holds logind's power-key inhibitor, so ACPI powerdown does nothing.
+[Unit]
+Description=QEMU guest agent
+BindsTo=dev-virtio\x2dports-org.qemu.guest_agent.0.device
+After=dev-virtio\x2dports-org.qemu.guest_agent.0.device
+
+[Service]
+ExecStart=/usr/bin/qemu-ga -m virtio-serial -p /dev/virtio-ports/org.qemu.guest_agent.0
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+*.img
+*.qcow2
+*.fd
+*.log
+*.sock
+*.pid
+*.ppm
+build.start
+build.end

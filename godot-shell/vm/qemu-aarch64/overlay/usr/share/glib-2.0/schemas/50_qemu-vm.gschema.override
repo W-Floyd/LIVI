@@ -1,0 +1,22 @@
+# The session stays up for nested-compositor testing over ssh: no lock, no
+# blanking or dimming, no suspend on idle (keys from device-mobis-g5w).
+[org.gnome.desktop.screensaver]
+lock-enabled=false
+idle-activation-enabled=false
+
+[org.gnome.desktop.lockdown]
+disable-lock-screen=true
+
+[org.gnome.desktop.session]
+idle-delay=uint32 0
+
+[org.gnome.settings-daemon.plugins.power]
+idle-dim=false
+sleep-inactive-ac-type='nothing'
+sleep-inactive-battery-type='nothing'
+# pmOS's default is suspend; run.sh --stop uses the guest agent instead.
+power-button-action='nothing'
+
+# No "Welcome / Take Tour" dialog over the first session.
+[org.gnome.shell]
+welcome-dialog-last-shown-version='999'

@@ -1,0 +1,12 @@
+[configuration]
+
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.7
+reloadable = false
+
+[libraries]
+
+linux.arm64 = "res://bin/linux-arm64/liblivi_godot_shell.so"
+linux.arm32 = "res://bin/linux-arm32/liblivi_godot_shell.so"
+linux.x86_64 = "res://bin/linux-x86_64/liblivi_godot_shell.so"
+macos = "res://bin/macos/liblivi_godot_shell.dylib"

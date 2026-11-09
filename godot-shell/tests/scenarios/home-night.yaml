@@ -1,0 +1,8 @@
+name: home-night
+appearance: night
+clock: 2026-11-09T22:05:00
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - wait: { frames: 2 }
+  - screenshot: home-night

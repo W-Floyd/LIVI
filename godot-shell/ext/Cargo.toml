@@ -1,0 +1,19 @@
+[package]
+name = "livi-godot-shell"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Its own workspace: native/'s pins a beta toolchain and builds LIVI's whole tree.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+godot = { version = "0.5.5", features = ["api-4-7"] }
+livi-core-client = { path = "../../native/crates/livi-core-client" }
+livi-core-proto = { path = "../../native/crates/livi-core-proto" }
+serde_json = "1.0.154"
+serde_norway = "0.9.42"

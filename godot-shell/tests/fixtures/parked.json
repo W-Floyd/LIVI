@@ -1,0 +1,9 @@
+{
+  "telemetry": {
+    "fuelPct": 64.0,
+    "rangeKm": 312.0,
+    "batteryCapacityKwh": 77.4,
+    "batteryLevelKwh": 49.5
+  },
+  "precondition": { "manualUntil": null }
+}

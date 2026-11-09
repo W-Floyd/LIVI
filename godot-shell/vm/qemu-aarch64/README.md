@@ -12,7 +12,7 @@ calls itself "Nura edge".
 ./run.sh --headless           # no window, daemonized (pid in qemu.pid)
 ./run.sh --headless --vnc 1   # headless, plus VNC on 127.0.0.1:5901
 ./run.sh --stop               # clean shutdown
-ssh -p 2222 user@localhost    # password: nura (sudo uses it too)
+ssh -p 2222 user@localhost    # key from SSH_PUBKEY at build; password nura (sudo too)
 ```
 
 `CPUS` (6) and `MEM` (8G) override the defaults, and arguments after the
@@ -80,7 +80,9 @@ are not touched. The work dir and package caches are shared.
 The steps:
 
 1. `pmbootstrap install --no-image` builds the rootfs.
-2. `overlay/` is untarred into it, and `glib-compile-schemas` runs.
+2. `overlay/` is untarred into it, and `glib-compile-schemas` runs. The Mac's
+   `SSH_PUBKEY` (default `~/.ssh/id_ed25519.pub`) becomes `user`'s
+   `authorized_keys`.
 3. `pmbootstrap install --no-split` writes the image.
 4. The raw image is streamed to the Mac, converted to qcow2 and grown to `SIZE`
    (20G).

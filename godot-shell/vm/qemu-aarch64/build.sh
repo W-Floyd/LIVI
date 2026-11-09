@@ -10,6 +10,7 @@ cd "$(dirname "$0")"
 NURA_DIR=${NURA_DIR:-/Users/william/Documents/Personal/git/nura-G5W-Android}
 NURA=$NURA_DIR/nura
 SIZE=${SIZE:-20G}
+SSH_PUBKEY=${SSH_PUBKEY:-$HOME/.ssh/id_ed25519.pub}
 CFG=/home/pmos/.config/pmbootstrap-qemu-aarch64.cfg
 WORK=/home/pmos/.local/var/pmbootstrap
 IMG=$WORK/chroot_native/home/pmos/rootfs/qemu-aarch64.img
@@ -41,6 +42,11 @@ pmb shutdown
 pmb install --password nura --no-image
 COPYFILE_DISABLE=1 tar -C overlay -cf - . |
     "$NURA" exec sudo tar -xof - -C "$ROOTFS"
+# The Mac's key, so ssh needs no password. Read here, not kept in overlay/.
+"$NURA" exec sudo sh -c 'd=$1/home/user/.ssh &&
+    install -d -m 700 -o 10000 -g 10000 "$d" &&
+    cat > "$d/authorized_keys" && chown 10000:10000 "$d/authorized_keys" &&
+    chmod 600 "$d/authorized_keys"' sh "$ROOTFS" < "$SSH_PUBKEY"
 pmb chroot -r -- glib-compile-schemas /usr/share/glib-2.0/schemas
 pmb install --password nura --no-split
 pmb shutdown

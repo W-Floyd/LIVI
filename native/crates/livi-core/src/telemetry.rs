@@ -24,6 +24,8 @@ pub const PORT: u16 = 4000;
 const UPDATE: &str = "telemetry:update";
 const PUSH: &str = "telemetry:push";
 pub const HTTP_PUSH: &str = "/telemetry";
+/// The phone's route guidance as LIVI shows it, read-only, for a car's own cluster.
+pub const HTTP_NAVIGATION: &str = "/navigation";
 pub const CLIMATE: &str = "climate";
 pub const NOTIFICATION: &str = "notification";
 pub const SOURCE: &str = "source";
@@ -308,6 +310,11 @@ pub fn socket(
     let (service, io) = SocketIo::new_svc();
     let (pushes, pushed) = mpsc::unbounded_channel();
     let over_http = pushes.clone();
+    let guidance = state.clone();
+    let navigation = move || {
+        let nav = guidance.borrow().navigation.clone();
+        async move { axum::Json(nav) }
+    };
     io.ns("/", move |socket: SocketRef| {
         let snap = state.borrow().telemetry.clone();
         if !snap.is_empty() {
@@ -334,6 +341,7 @@ pub fn socket(
     };
     let app = axum::Router::new()
         .route(HTTP_PUSH, axum::routing::post(http_push))
+        .route(HTTP_NAVIGATION, axum::routing::get(navigation))
         .fallback_service(service)
         .layer(CorsLayer::permissive());
     (app, io, pushed)
@@ -761,6 +769,39 @@ mod tests {
             tokio::task::spawn_blocking(move || crate::telemetry_cli::post(&posted, &json!([1])));
         assert!(refused.await.unwrap().unwrap_err().contains("400"));
         assert!(pushed.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn the_route_guidance_reads_over_plain_http() {
+        let (tx, rx) = watch::channel(state(defaults(), Snapshot::new()));
+        let (app, _io, _pushed) = socket(rx);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        let get = || async move {
+            let mut s = TcpStream::connect(addr).await.unwrap();
+            let req =
+                format!("GET {HTTP_NAVIGATION} HTTP/1.1\r\nHost: livi\r\nConnection: close\r\n\r\n");
+            s.write_all(req.as_bytes()).await.unwrap();
+            let mut out = String::new();
+            tokio::time::timeout(Duration::from_secs(5), s.read_to_string(&mut out))
+                .await
+                .unwrap()
+                .unwrap();
+            let body = out.split("\r\n\r\n").nth(1).unwrap_or_default().to_string();
+            serde_json::from_str::<Value>(&body).unwrap()
+        };
+
+        assert_eq!(get().await["active"], Value::Null);
+        tx.send_modify(|s| {
+            s.navigation.active = Some(true);
+            s.navigation.maneuver_type = Some(2);
+            s.navigation.remain_distance = Some(300.0);
+        });
+        let nav = get().await;
+        assert_eq!(nav["active"], json!(true));
+        assert_eq!(nav["maneuverType"], json!(2));
+        assert_eq!(nav["remainDistance"], json!(300.0));
     }
 
     #[tokio::test]

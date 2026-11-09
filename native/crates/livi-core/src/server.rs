@@ -328,6 +328,10 @@ impl Core {
                     )?),
                     false => None,
                 };
+                match until {
+                    Some(u) => println!("[core] battery preconditioning requested, until {u}"),
+                    None => println!("[core] battery preconditioning request switched off"),
+                }
                 self.hub.update(|s| s.precondition.manual_until = until);
                 Ok(())
             }

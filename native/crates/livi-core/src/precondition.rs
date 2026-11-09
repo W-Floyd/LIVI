@@ -58,12 +58,17 @@ pub async fn follow(core: Arc<Core>) {
         session = active;
         if until.is_some() {
             core.hub.update(|s| {
-                s.precondition.manual_until = kept(
-                    s.precondition.manual_until,
-                    s.config.battery_preconditioning,
-                    now_s(),
-                    ended,
-                );
+                let mode = s.config.battery_preconditioning;
+                let now = now_s();
+                s.precondition.manual_until = kept(s.precondition.manual_until, mode, now, ended);
+                if s.precondition.manual_until.is_none() {
+                    let why = match () {
+                        _ if mode == BatteryPreconditioning::Off => "the setting is off",
+                        _ if ended => "the session ended",
+                        _ => "its time ran out",
+                    };
+                    println!("[core] battery preconditioning request ended: {why}");
+                }
             });
         }
         let wait = until.map(|u| Duration::from_secs(u.saturating_sub(now_s())));

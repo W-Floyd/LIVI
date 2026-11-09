@@ -93,11 +93,14 @@ media pages until (if ever) they are rewritten.
 
 ## Milestones
 
-1. **Toolchain.**
+1. **Toolchain and test harness.**
    - Build gdext for the arm64 VM and for armv7-musl (cross, as livi-headunit
      does).
    - Load it in Alpine's Godot 4.7 (`godot` and `godot-templates`).
    - Check that `livi-core-client` links from the extension.
+   - Stand up the test harness (see "Testing") before any UI work: the fake
+     core, the scenario runner, one golden screenshot, and the runner in the
+     VM. Every later milestone lands with its scenarios.
 2. **Compositor in Godot.**
    - A minimal smithay server in the extension, with `xdg_shell` and shm.
      Show `weston-terminal` as a `TextureRect`.
@@ -123,6 +126,93 @@ Go or no-go after 7: if the Mali can't composite the projection and Godot at a
 usable rate, stop; the work up to 6 is still usable as hosted pages under
 `livi-compositor`.
 
+## Testing
+
+Regression tests and screenshots come from the same scenarios, written in YAML
+and run headless, in the VM and in CI. No test needs a phone, a car or a GPU.
+
+**Layers:**
+- **Rust unit tests** (`cargo test`) for the extension's logic: the control
+  protocol, `VideoCfg` layout maths, touch mapping to `Input::Pointer`'s 0–1
+  coordinates, and the core client's state handling. Table-driven, like the
+  rest of LIVI.
+- **Compositor tests:**
+  - smithay's server under a test client (`wayland-client` in the test, or
+    `weston-simple-shm`/`-egl`);
+  - checks that a buffer becomes a texture of the right size, damage is
+    tracked, frame callbacks pace, and input reaches the focused surface at the
+    right surface-local coordinates.
+- **Godot scene tests** with gdUnit4 (GDScript and C#, a scene runner,
+  simulated input): node state, signals, and actions sent to the fake core.
+- **Scenario and screenshot tests:** the YAML-driven runner below. These are
+  the regression net and the source of every screenshot in the docs.
+- **On the unit:** a smoke run of the same scenarios, recording frame times,
+  CPU, GPU and memory against thresholds. On-device runs check performance,
+  not pixels.
+
+**Determinism:**
+- **The fake core:** an in-process stand-in for `livi-core` that speaks
+  `livi-core-proto`. It replays fixture state (telemetry, `/navigation`
+  including `chargingStop` and `precondition`, settings) and records every
+  action and `Input` the shell sends, for assertions. Fixtures come from real
+  captures (micom-livi's posts, LIVI's state), checked in as JSON.
+- **Fake clients:** test Wayland clients that draw known frames, a test
+  pattern with a frame counter, stand in for the Android Auto video
+  (`waylandsink`) and for hosted apps. They're tagged through the same control
+  protocol.
+- **Time:** run Godot with a fixed frame rate (`--fixed-fps`, Movie Maker
+  timing) and an injected clock, so animations, the clock and "N min left" are
+  identical on every run. Waits are counted in frames, not seconds.
+- **Rendering:** goldens are rendered with Mesa llvmpipe at 1920×720 with the
+  bundled fonts. Keep one golden set per renderer, and regenerate only on
+  purpose.
+
+**Scenario file** (`tests/scenarios/*.yaml`):
+
+```yaml
+name: split-precondition
+viewport: { width: 1920, height: 720 }
+appearance: night            # day | night | auto (follows the fixture)
+fixtures:
+  core: fixtures/driving-to-charger.json   # telemetry, navigation, chargingStop
+  clients:
+    - { role: projection, tag: aa-main, pattern: grid }
+    - { role: app, app_id: org.godot.maps, pattern: bars }
+steps:
+  - layout: split                         # full | split | apps
+  - wait: { frames: 30 }
+  - screenshot: split-idle                # golden: goldens/split-idle.png
+  - tap: { node: SidePanel/Precondition }  # or { x: 1700, y: 420 }
+  - expect_action: { PreconditionBattery: { on: true } }
+  - set: { core: { telemetry: { batteryConditioning: true } } }
+  - wait: { frames: 10 }
+  - screenshot: split-conditioning
+  - tap: { x: 640, y: 360 }               # on the projection
+  - expect_input: { pointer: { screen: main, x: 0.5, y: 0.5, phase: down } }
+```
+
+- Steps are tap or drag (by node path or coordinates), key, wait (frames or a
+  condition), `set` (change fixture state mid-run), `expect_action`,
+  `expect_input`, `expect_node` (property checks), and `screenshot`.
+- Coordinates are the panel's, the same as touch on the unit.
+
+**Runner:**
+- `godot-shell --test tests/scenarios/` runs every scenario, or one by name.
+- It compares each screenshot with its golden, per pixel with a tolerance and
+  a maximum differing area, or with a mask for regions that may vary.
+- It writes `out/<scenario>/<shot>.png`, a diff image for each mismatch, and
+  one HTML report with golden, new and diff side by side.
+- `--update-goldens` rewrites the goldens on purpose; the golden PNGs are
+  reviewed in the diff like code.
+- `--shots-only` renders screenshots without comparing, for docs and review
+  (day and night, every page).
+
+**Where it runs:**
+- In the VM, under its GNOME session or a headless compositor (`weston
+  --backend=headless`, or the shell's own compositor with no output).
+- In CI in a Linux container: the same, with llvmpipe and no display.
+- Before each merge: `cargo test`, gdUnit4, and all scenarios.
+
 ## Open questions
 
 - gst-host's toplevels: what `app_id` and title they carry, and how the control
@@ -141,8 +231,10 @@ usable rate, stop; the work up to 6 is still usable as hosted pages under
 ## Dev environment
 
 An arm64 postmarketOS GNOME VM on the Mac, running in QEMU with HVF, Mesa
-llvmpipe and ssh. Scripts and image are in nura-G5W-Android `vm/qemu-aarch64/`;
-see its README. The shell runs nested inside the VM's GNOME. The VM is for
+llvmpipe and ssh. Scripts are in [vm/qemu-aarch64/](vm/qemu-aarch64/), with
+the image beside them (not in git); see its README. The image is built with
+nura-G5W-Android's pmbootstrap container, under a separate config that leaves
+the unit's untouched. The shell runs nested inside the VM's GNOME. The VM is for
 functional work only; performance is measured on the unit.
 
 ## References

@@ -111,11 +111,16 @@ func _run_one(path: String) -> String:
 	_vp.size = Vector2i(vp.width, vp.height)
 	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(_vp)
+	# Each scenario starts from the default look, then its own `theme:`.
+	ThemeManager.defaults()
+	var look: Dictionary = sc.get("theme", {})
+	if sc.has("appearance"):
+		look.appearance = sc.appearance
+	var bad := _look_error(look)
+	if bad != "":
+		return bad
+	ThemeManager.set_look(look)
 	_shell = SHELL.instantiate()
-	match sc.get("appearance", "day"):
-		"day": _shell.night = false
-		"night": _shell.night = true
-		var a: return "appearance %s: day or night" % a
 	_vp.add_child(_shell)
 	await _frames(1)
 	for c in fixtures.get("clients", []):
@@ -227,6 +232,13 @@ func _step(step: Dictionary) -> String:
 			return await _screenshot(arg if arg is Dictionary else {name = arg})
 		"measure":
 			return await _measure(arg)
+		"theme":
+			var bad := _look_error(arg)
+			if bad != "":
+				return bad
+			ThemeManager.set_look(arg)
+			# A frame to restyle, one to lay out.
+			await _frames(2)
 		"gdscript":
 			return await _gdscript(str(arg))
 		_:
@@ -437,6 +449,20 @@ func _touch(at: Vector2) -> void:
 		ev.pressed = pressed
 		_vp.push_input(ev)
 		await _frames(1)
+
+
+## `{ theme_name, appearance, hand, near, text_scale }`, any of them.
+func _look_error(look: Dictionary) -> String:
+	const KEYS := {
+		theme_name = ["instrument", "calm", "charge", "studio"], appearance = ["day", "night"],
+		hand = ["lhd", "rhd"], near = ["projection", "panel"], text_scale = null,
+		material = ["solid", "frosted", "glass"]}
+	for k in look:
+		if not KEYS.has(k):
+			return "theme: unknown key %s" % k
+		if KEYS[k] != null and not look[k] in KEYS[k]:
+			return "theme: %s is one of %s" % [k, KEYS[k]]
+	return ""
 
 
 ## `{ app_id, lines: [...] }`: the client logged these input events, in this order (others may

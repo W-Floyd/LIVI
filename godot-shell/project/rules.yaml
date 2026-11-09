@@ -1,0 +1,9 @@
+# The sizes and limits every component is built from. Sources: docs/car-ux.md.
+touch_mm: 10          # Euro NCAP 2026: 10 × 10 mm targets
+touch_gap_mm: 4       # Euro NCAP 2026: 4 mm between targets
+char_arcmin: 20       # ISO 15008: 20′ recommended (16′ acceptable)
+view_mm: 750          # eye to panel; assumed until measured in the EV6
+contrast: 4.5         # Android Auto, text and icons
+contrast_night: 5.0   # ISO 15008, night
+list_rows_driving: 12 # CarPlay
+chars_driving: 30     # JAMA

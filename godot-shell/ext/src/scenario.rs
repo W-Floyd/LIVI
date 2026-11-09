@@ -24,6 +24,22 @@ pub fn action_from_scenario(v: &Value) -> Result<Value, String> {
     Ok(Value::Object(out))
 }
 
+/// Godot's JSON makes every number a float; the core's types want integers where they are
+/// integers (`13900.0` fails an `i32`). Whole floats become integers; serde still reads an
+/// integer into an `f64`, so nothing that wants a float breaks.
+pub fn whole_floats_to_ints(v: &mut Value) {
+    match v {
+        Value::Number(n) => {
+            if let Some(f) = n.as_f64().filter(|f| f.fract() == 0.0 && f.abs() < 9.0e15) {
+                *v = Value::from(f as i64);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(whole_floats_to_ints),
+        Value::Object(o) => o.values_mut().for_each(whole_floats_to_ints),
+        _ => {}
+    }
+}
+
 /// Whether every field in `want` is in `got` with the same value; arrays match element-wise.
 pub fn subset(want: &Value, got: &Value) -> bool {
     match (want, got) {
@@ -73,6 +89,20 @@ mod tests {
         ];
         for (want, ok) in cases {
             assert_eq!(subset(&want, &got), ok, "{want}");
+        }
+    }
+
+    #[test]
+    fn whole_floats_become_ints() {
+        let cases = [
+            (json!(13900.0), json!(13900)),
+            (json!(-2.0), json!(-2)),
+            (json!(31.5), json!(31.5)),
+            (json!({ "a": [1.0, 0.25], "b": "x" }), json!({ "a": [1, 0.25], "b": "x" })),
+        ];
+        for (mut input, want) in cases {
+            whole_floats_to_ints(&mut input);
+            assert_eq!(input, want);
         }
     }
 

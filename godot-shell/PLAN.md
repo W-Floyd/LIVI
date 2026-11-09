@@ -146,6 +146,12 @@ changes.
   units and language from the core's config. Preferences that only the shell
   uses are kept per driver profile in the shell's own settings.
 - **Branding:** the OEM and car name and logo, the boot splash and the accent.
+- **Powertrain:** from the core's `carType` (gasoline, the diesels, LPG, CNG, LNG, E85,
+  hydrogen, electric, hybrids); with none set, battery telemetry means electric.
+  - Combustion cars show fuel instead of charge, and have no preconditioning and no charging
+    stop.
+  - Hybrids show fuel plus electric range.
+  - Pages, components and scenarios cover both kinds (`tests/fixtures/gasoline.json`).
 - **Materials:** each surface role (panels floating over the map, the status
   bar, sheets, the parked-only cover) has a material:
   - `solid`;

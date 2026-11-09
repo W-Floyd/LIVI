@@ -41,7 +41,9 @@ fn to_variant(v: &Value) -> Variant {
 }
 
 fn from_variant(v: &Variant) -> Result<Value, String> {
-    serde_json::from_str(&Json::stringify(v).to_string()).map_err(|e| e.to_string())
+    let mut v: Value = serde_json::from_str(&Json::stringify(v).to_string()).map_err(|e| e.to_string())?;
+    scenario::whole_floats_to_ints(&mut v);
+    Ok(v)
 }
 
 /// Events cross from the client's reader thread; `count` lets the fake wait for its own.
@@ -257,6 +259,25 @@ impl CoreLink {
                 }
                 Event::Spectrum(_) | Event::OpenPage(_) => {}
             }
+        }
+    }
+}
+
+/// YAML for the shell's own data files (themes, rules), which GDScript cannot parse.
+#[derive(GodotClass)]
+#[class(base = RefCounted, init)]
+pub struct Yaml {
+    base: Base<RefCounted>,
+}
+
+#[godot_api]
+impl Yaml {
+    /// The document as Godot values; a String with the error when it does not parse.
+    #[func]
+    fn parse(text: GString) -> Variant {
+        match scenario::yaml_to_json(&text.to_string()) {
+            Ok(v) => to_variant(&v),
+            Err(e) => e.to_variant(),
         }
     }
 }

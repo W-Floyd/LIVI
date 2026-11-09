@@ -1,27 +1,27 @@
 name: window-input
-# A hosted window gets the pointer, touch and keys, at its own surface positions. The view is
-# 1152×480 at (720, 40) and the window 640×360, so it's drawn at 4/3 and centered: x from 869.3
-# to 1722.7. Its center (1296, 280) is (320, 180) on the surface, and (900, 100) is (23.0, 45.0).
+# A hosted window gets the pointer, touch and keys, at its own surface positions. It shows in
+# the projection area, letterboxed and centered, so the area's center is the surface's center,
+# (320, 180) on a 640×360 window, and the area's left edge is letterbox.
 fixtures:
   core: fixtures/parked.json
   clients:
     - { role: app, app_id: org.livi.test.input, pattern: grid, size: 640x360, events: true }
 steps:
   - wait: { window: org.livi.test.input }
-  - tap: { node: Home/App }
+  - tap: { node: Projection/Window }
   - expect_client:
       app_id: org.livi.test.input
       lines: ["pointer enter 320.0 180.0", "keyboard enter", "pointer button 272 pressed", "pointer button 272 released"]
-  - tap: { x: 900, y: 100, with: touch }
+  - tap: { node: Projection/Window, with: touch }
   - expect_client:
       app_id: org.livi.test.input
-      lines: ["touch down 0 23.0 45.0", "touch up 0"]
+      lines: ["touch down 0 320.0 180.0", "touch up 0"]
   - key: A
   - expect_client:
       app_id: org.livi.test.input
       lines: ["key 30 pressed", "key 30 released"]
-  # Left of the picture, inside the view: the letterbox, not the window.
-  - tap: { x: 800, y: 280 }
+  # Inside the area, left of the picture: the letterbox, not the window.
+  - tap: { x: 12, y: 400 }
   - expect_client:
       app_id: org.livi.test.input
       lines: ["pointer leave"]

@@ -1,0 +1,43 @@
+name: gallery
+# Every theme option in day and night, plus the drive side, the "nearer" choice and a larger
+# text scale, switched live on one running shell. Shots for review; not compared yet.
+clock: 2026-11-09T17:42:00
+fixtures:
+  core: fixtures/to-charger.json
+steps:
+  - theme: { theme_name: instrument, appearance: night }
+  - screenshot: { name: instrument-night, compare: false }
+  - theme: { appearance: day }
+  - screenshot: { name: instrument-day, compare: false }
+  - theme: { theme_name: calm, appearance: day }
+  - screenshot: { name: calm-day, compare: false }
+  - theme: { appearance: night }
+  - screenshot: { name: calm-night, compare: false }
+  - theme: { theme_name: charge, appearance: night }
+  - screenshot: { name: charge-night, compare: false }
+  - theme: { appearance: day }
+  - screenshot: { name: charge-day, compare: false }
+  - theme: { theme_name: instrument, appearance: night, hand: rhd }
+  - screenshot: { name: instrument-night-rhd, compare: false }
+  - theme: { hand: lhd, near: panel }
+  - screenshot: { name: instrument-night-panel-nearer, compare: false }
+  - theme: { near: projection, text_scale: 1.4 }
+  - screenshot: { name: instrument-night-text-1.4, compare: false }
+  - theme: { theme_name: calm, appearance: day, text_scale: 1.4 }
+  - screenshot: { name: calm-day-text-1.4, compare: false }
+  # Surfaces over the map.
+  - theme: { theme_name: instrument, appearance: night, text_scale: 1.0, material: frosted }
+  - screenshot: { name: instrument-night-frosted, compare: false }
+  - theme: { material: glass }
+  - screenshot: { name: instrument-night-glass, compare: false }
+  - theme: { theme_name: calm, appearance: day, material: frosted }
+  - screenshot: { name: calm-day-frosted, compare: false }
+  - theme: { material: glass }
+  - screenshot: { name: calm-day-glass, compare: false }
+  - theme: { theme_name: charge, appearance: night, material: glass }
+  - screenshot: { name: charge-night-glass, compare: false }
+  # The scene theme.
+  - theme: { theme_name: studio, appearance: night, material: solid }
+  - screenshot: { name: studio-night, compare: false }
+  - theme: { appearance: day }
+  - screenshot: { name: studio-day, compare: false }

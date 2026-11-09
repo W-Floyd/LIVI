@@ -1,0 +1,20 @@
+name: Instrument
+about: >-
+  Night-first. Amber on graphite, like instrument lighting. Condensed numerals, hairline
+  dividers instead of cards, a tight radius, almost no motion.
+fonts:
+  display: { file: SairaSemiCondensed-SemiBold.ttf }
+  body: { file: AtkinsonHyperlegibleNext.ttf, weight: 400 }
+  strong: { file: AtkinsonHyperlegibleNext.ttf, weight: 700 }
+shape:
+  radius_mm: 1
+  gap_mm: 2
+  cards: flat          # flat: hairline borders | soft: shadow | edge: accent edge
+  display_ratio: 2.3   # display numerals over the minimum text size
+colors:
+  night: { bg: "#0e1012", surface: "#171a1d", surface2: "#21262b", line: "#2f363c", text: "#ebe7df", dim: "#9d9a90", accent: "#f2a33a", on_accent: "#1a1205", ok: "#6cc38b", warn: "#f2c14e", crit: "#ff6b5e", proj: "#1b2024" }
+  day:   { bg: "#e6e4df", surface: "#f6f5f2", surface2: "#ebe9e4", line: "#cdc9bf", text: "#1b1c1d", dim: "#5d5b55", accent: "#9c5600", on_accent: "#ffffff", ok: "#1e7a45", warn: "#835c00", crit: "#b3261e", proj: "#d9dcd6" }
+# Chart series in fixed order, validated against each surface (lightness, chroma, CVD, contrast).
+series:
+  night: ["#c97b1a", "#4f95e6", "#d06bb0"]
+  day: ["#9c5600", "#2a6fc9", "#b33f8a"]

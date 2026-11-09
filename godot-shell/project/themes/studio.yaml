@@ -1,0 +1,40 @@
+name: Studio
+about: >-
+  A scene theme: the panel is a lit 3D object. Brushed-metal slabs over a leather-grained dash,
+  under a key light, drawn behind the same 2D controls every other theme uses. Text and the
+  projection stay flat and unlit.
+fonts:
+  display: { file: SairaSemiCondensed-SemiBold.ttf }
+  body: { file: AtkinsonHyperlegibleNext.ttf, weight: 400 }
+  strong: { file: AtkinsonHyperlegibleNext.ttf, weight: 700 }
+shape:
+  radius_mm: 1.5
+  gap_mm: 2
+  cards: flat
+  display_ratio: 2.3
+# The 3D skin: materials and light per appearance. Colors are linear-ish albedo, not text.
+scene:
+  night:
+    dash: "#17130f"         # leather
+    slab: "#5a6068"         # brushed metal
+    slab_metallic: 0.85
+    slab_roughness: 0.42
+    key_light: "#ffd9a8"
+    key_energy: 1.4
+    ambient: "#3a4048"
+    ambient_energy: 0.35
+  day:
+    dash: "#6b5a49"
+    slab: "#c9cdd2"
+    slab_metallic: 0.8
+    slab_roughness: 0.38
+    key_light: "#fff6ea"
+    key_energy: 1.6
+    ambient: "#c8d0d8"
+    ambient_energy: 0.7
+colors:
+  night: { bg: "#0b0a09", surface: "#2a2e33", surface2: "#353a40", line: "#4a5058", text: "#f3efe8", dim: "#b9b4aa", accent: "#f2a33a", on_accent: "#1a1205", ok: "#6cc38b", warn: "#f2c14e", crit: "#ff6b5e", proj: "#1b2024" }
+  day:   { bg: "#7d6b59", surface: "#d7dade", surface2: "#e3e6e9", line: "#aeb3b9", text: "#14171a", dim: "#3f454c", accent: "#9c5600", on_accent: "#ffffff", ok: "#1e7a45", warn: "#6e4d00", crit: "#a3221b", proj: "#d9dcd6" }
+series:
+  night: ["#c97b1a", "#4f95e6", "#d06bb0"]
+  day: ["#9c5600", "#2a6fc9", "#b33f8a"]

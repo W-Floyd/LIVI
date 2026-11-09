@@ -1,0 +1,32 @@
+{
+  "config": { "carType": 10 },
+  "telemetry": {
+    "fuelPct": 31.0,
+    "rangeKm": 148.0,
+    "ambientC": 4.0,
+    "batteryCapacityKwh": 77.4,
+    "batteryLevelKwh": 24.0,
+    "gear": "D",
+    "speedKph": 88.0
+  },
+  "navigation": {
+    "active": true,
+    "destinationName": "Ashford services",
+    "chargingStop": {
+      "powerW": 350000,
+      "distanceM": 42000,
+      "timeS": 1680,
+      "chargeS": 1140,
+      "departureWh": 24000,
+      "arrivalWh": 13900
+    }
+  },
+  "nowPlaying": {
+    "title": "Lantern Road",
+    "artist": "The Night Shift",
+    "album": "Episode 41",
+    "app": "Podcasts",
+    "playing": true
+  },
+  "precondition": { "manualUntil": null }
+}

@@ -1,4 +1,5 @@
 {
+  "config": { "carType": 10 },
   "telemetry": {
     "fuelPct": 64.0,
     "rangeKm": 312.0,

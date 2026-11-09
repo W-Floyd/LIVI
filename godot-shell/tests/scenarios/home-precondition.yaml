@@ -1,24 +1,23 @@
 name: home-precondition
 viewport: { width: 1920, height: 720 }
-appearance: day
 clock: 2026-11-09T08:30:00
 fixtures:
   core: fixtures/parked.json
 steps:
   - wait: { frames: 2 }
-  - expect_node: { path: Home/Soc, text: "64 %" }
+  - expect_node: { path: Page/Body/Side/Panel/Stat, value: "64" }
   - screenshot: home-idle
   - record: precondition-on-off
-  - tap: { node: Home/Precondition }
+  - tap: { node: Page/Body/Side/Panel/Precondition }
   - expect_action: { PreconditionBattery: { on: true } }
   - set: { core: { precondition: { manualUntil: 1794213000 }, telemetry: { fuelPct: 63.0 } } }
   - wait: { frames: 2 }
-  - expect_node: { path: Home/Precondition, text: Stop preconditioning }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, label: Warming battery, button_pressed: true }
   - gdscript: |
-      # The page and the core's mirror agree on the patched charge.
-      var shown: String = shell.get_node("Home/Soc").text
+      # The tile and the core's mirror agree on the patched charge.
+      var shown: String = shell.get_node("Page/Body/Side/Panel/Stat").value
       var mirrored = Core.get_value("/telemetry/fuelPct")
-      if shown != "%d %%" % roundi(mirrored):
+      if shown != str(roundi(mirrored)):
           return "shows %s, the core has %s" % [shown, mirrored]
-  - tap: { node: Home/Precondition }
+  - tap: { node: Page/Body/Side/Panel/Precondition }
   - expect_action: { PreconditionBattery: { on: false } }

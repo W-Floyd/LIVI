@@ -1,0 +1,11 @@
+name: gallery-gasoline
+# A combustion car: fuel instead of charge, no preconditioning, no charging stop.
+clock: 2026-11-09T08:15:00
+fixtures:
+  core: fixtures/gasoline.json
+steps:
+  - theme: { theme_name: instrument, appearance: day }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, visible: false }
+  - screenshot: { name: gasoline-instrument-day, compare: false }
+  - theme: { theme_name: charge, appearance: night }
+  - screenshot: { name: gasoline-charge-night, compare: false }

@@ -1,0 +1,19 @@
+name: Charge
+about: >-
+  Built around the battery. Deep green-teal with an electric mint accent that means energy
+  wherever it appears. A bold display face and tiles with an accent edge.
+fonts:
+  display: { file: RedHatDisplay.ttf, weight: 700 }
+  body: { file: RedHatText.ttf, weight: 400 }
+  strong: { file: RedHatText.ttf, weight: 600 }
+shape:
+  radius_mm: 2.2
+  gap_mm: 2.5
+  cards: edge
+  display_ratio: 2.4
+colors:
+  night: { bg: "#071514", surface: "#0e2220", surface2: "#15302c", line: "#20463f", text: "#e6f5f1", dim: "#8db3aa", accent: "#3ee6a8", on_accent: "#03231a", ok: "#9bdc5c", warn: "#ffc857", crit: "#ff6f61", proj: "#0c1d1b" }
+  day:   { bg: "#e4eeea", surface: "#fafdfc", surface2: "#edf4f1", line: "#c5d8d1", text: "#0b1f1b", dim: "#4b655f", accent: "#00754f", on_accent: "#ffffff", ok: "#3b7d12", warn: "#875800", crit: "#b3261e", proj: "#d6e3de" }
+series:
+  night: ["#16a873", "#4c86de", "#c9649f"]
+  day: ["#00754f", "#2f6bd1", "#c0428f"]

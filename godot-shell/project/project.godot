@@ -13,6 +13,7 @@ config/features=PackedStringArray("4.7", "GL Compatibility")
 Core="*res://core.gd"
 Clock="*res://clock.gd"
 Wayland="*res://wayland.gd"
+ThemeManager="*res://theme_manager.gd"
 
 [display]
 

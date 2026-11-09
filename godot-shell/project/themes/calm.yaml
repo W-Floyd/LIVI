@@ -1,0 +1,19 @@
+name: Calm
+about: >-
+  Day-first. Soft blue-grey surfaces, a deep teal accent and generous spacing. One rounded
+  family throughout, cards with a faint shadow, gentle transitions.
+fonts:
+  display: { file: Lexend.ttf, weight: 500 }
+  body: { file: Lexend.ttf, weight: 400 }
+  strong: { file: Lexend.ttf, weight: 600 }
+shape:
+  radius_mm: 3.5
+  gap_mm: 3
+  cards: soft
+  display_ratio: 2.1
+colors:
+  night: { bg: "#0d161c", surface: "#14212a", surface2: "#1c2c37", line: "#284150", text: "#e3edf2", dim: "#93a9b5", accent: "#6cc4e0", on_accent: "#062029", ok: "#74c69d", warn: "#e9c46a", crit: "#ff8a80", proj: "#16232b" }
+  day:   { bg: "#eaeff2", surface: "#ffffff", surface2: "#f1f5f7", line: "#d3dce1", text: "#13202a", dim: "#536572", accent: "#1d6a85", on_accent: "#ffffff", ok: "#2e7d4f", warn: "#8a6700", crit: "#b42318", proj: "#dde5e9" }
+series:
+  night: ["#1798bf", "#c97a30", "#b25fae"]
+  day: ["#00779e", "#c4631a", "#a2479a"]

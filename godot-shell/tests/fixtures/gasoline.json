@@ -1,0 +1,17 @@
+{
+  "config": { "carType": 1 },
+  "telemetry": {
+    "fuelPct": 58.0,
+    "rangeKm": 412.0,
+    "ambientC": 21.0,
+    "gear": "D",
+    "speedKph": 64.0
+  },
+  "navigation": { "active": true, "destinationName": "Harbour car park" },
+  "nowPlaying": {
+    "title": "Lantern Road",
+    "artist": "The Night Shift",
+    "album": "Episode 41",
+    "playing": true
+  }
+}

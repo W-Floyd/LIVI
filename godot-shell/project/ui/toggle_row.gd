@@ -49,7 +49,7 @@ func _style() -> void:
 	material = surface
 	for s in ["normal", "hover", "focus", "disabled"]:
 		if surface:
-			var b: StyleBoxFlat = ThemeManager.card_box()
+			var b: StyleBox = ThemeManager.card_box()
 			b.content_margin_top = 0
 			b.content_margin_bottom = 0
 			add_theme_stylebox_override(s, b)

@@ -1,0 +1,12 @@
+{
+  "config": { "carType": 10 },
+  "telemetry": {
+    "fuelPct": 50.0,
+    "rangeKm": 243.0,
+    "batteryCapacityKwh": 77.4
+  },
+  "navigation": {
+    "active": true,
+    "chargingStop": { "powerW": 150000, "distanceM": 740 }
+  }
+}

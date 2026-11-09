@@ -1,0 +1,102 @@
+# Synthetic: drawn by make-synth.py. Same shape as the importer's.
+synth/card:
+  day:
+    file: images/synth/card.png
+    size: [24, 24]
+    nine_patch:
+      texture_margins: [6, 6, 6, 6]
+      content_margins: [4, 4, 4, 4]
+  night:
+    file: images/synth/night/card.png
+    size: [24, 24]
+    nine_patch:
+      texture_margins: [6, 6, 6, 6]
+      content_margins: [4, 4, 4, 4]
+synth/btn_nor:
+  day:
+    file: images/synth/btn_nor.png
+    size: [24, 24]
+    nine_patch:
+      texture_margins: [6, 6, 6, 6]
+      content_margins: [4, 4, 4, 4]
+  night:
+    file: images/synth/night/btn_nor.png
+    size: [24, 24]
+    nine_patch:
+      texture_margins: [6, 6, 6, 6]
+      content_margins: [4, 4, 4, 4]
+synth/btn_push:
+  day:
+    file: images/synth/btn_push.png
+    size: [24, 24]
+    nine_patch:
+      texture_margins: [6, 6, 6, 6]
+      content_margins: [4, 4, 4, 4]
+  night:
+    file: images/synth/night/btn_push.png
+    size: [24, 24]
+    nine_patch:
+      texture_margins: [6, 6, 6, 6]
+      content_margins: [4, 4, 4, 4]
+synth/btn_dis:
+  day:
+    file: images/synth/btn_dis.png
+    size: [24, 24]
+    nine_patch:
+      texture_margins: [6, 6, 6, 6]
+      content_margins: [4, 4, 4, 4]
+  night:
+    file: images/synth/night/btn_dis.png
+    size: [24, 24]
+    nine_patch:
+      texture_margins: [6, 6, 6, 6]
+      content_margins: [4, 4, 4, 4]
+synth/bg:
+  day:
+    file: images/synth/bg.png
+    size: [8, 8]
+  night:
+    file: images/synth/night/bg.png
+    size: [8, 8]
+synth/road:
+  day:
+    file: images/synth/road.png
+    size: [64, 32]
+  night:
+    file: images/synth/night/road.png
+    size: [64, 32]
+synth/battery_05:
+  day:
+    file: images/synth/battery_05.png
+    size: [48, 16]
+  night:
+    file: images/synth/night/battery_05.png
+    size: [48, 16]
+synth/battery_10:
+  day:
+    file: images/synth/battery_10.png
+    size: [48, 16]
+  night:
+    file: images/synth/night/battery_10.png
+    size: [48, 16]
+synth/battery_13:
+  day:
+    file: images/synth/battery_13.png
+    size: [48, 16]
+  night:
+    file: images/synth/night/battery_13.png
+    size: [48, 16]
+synth/icon:
+  day:
+    file: images/synth/icon.png
+    size: [20, 20]
+    scale: 2.0
+synth/button:
+  day:
+    selector:
+      - state: {pressed: true}
+        image: synth/btn_push
+      - state: {enabled: false}
+        image: synth/btn_dis
+      - state: {}
+        image: synth/btn_nor

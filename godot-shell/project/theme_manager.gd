@@ -17,7 +17,16 @@ var near := "projection"       # what sits nearer the driver: projection | panel
 var text_scale := 1.0
 var material := "solid"        # solid | frosted | glass: surfaces floating over the map
 
+## Godot's button states as the state maps of a pack's selectors name them.
+const BUTTON_STATES := {
+	normal = {}, hover = {hovered = true}, pressed = {pressed = true, checked = true},
+	hover_pressed = {hovered = true, pressed = true, checked = true}, disabled = {enabled = false}}
+
 const SURFACE_SHADER := preload("res://ui/surface.gdshader")
+
+## Where vendor packs live, one folder per pack, next to the built-in `res://themes/`.
+var packs_dir := default_packs_dir()
+var pack: ThemePack            # the theme's pack; null for a built-in theme
 
 var rules: Dictionary
 var spec: Dictionary
@@ -29,6 +38,7 @@ var godot_theme := Theme.new()
 var px_per_mm: float
 
 var _font_files := {}
+var _fonts_dir := "res://fonts"
 
 
 func _ready() -> void:
@@ -43,6 +53,31 @@ func set_look(look: Dictionary) -> void:
 	for k in look:
 		set(k, float(look[k]) if k == "text_scale" else look[k])
 	apply()
+
+
+## `$LIVI_SHELL_THEMES`, else the user's data folder.
+static func default_packs_dir() -> String:
+	var d := OS.get_environment("LIVI_SHELL_THEMES")
+	if d != "":
+		return d
+	var home := OS.get_environment("HOME")
+	return home.path_join(".local/share/livi-shell/themes")
+
+
+## True when a built-in theme or a pack of that name exists.
+func has_theme(name: String) -> bool:
+	return _spec_path(name) != ""
+
+
+## Built-in themes win over a pack of the same name. "" when there is none.
+func _spec_path(name: String) -> String:
+	if name == "" or name.contains("/") or name.contains(".."):
+		return ""
+	var built_in := "res://themes/%s.yaml" % name
+	if FileAccess.file_exists(built_in):
+		return built_in
+	var p := packs_dir.path_join(name).path_join("theme.yaml")
+	return p if FileAccess.file_exists(p) else ""
 
 
 func defaults() -> void:
@@ -84,10 +119,19 @@ func side_left() -> bool:
 
 
 func apply() -> void:
-	spec = _yaml("res://themes/%s.yaml" % theme_name)
+	var path := _spec_path(theme_name)
+	spec = _yaml(path) if path != "" else {}
 	if spec.is_empty():
 		push_error("theme %s not found" % theme_name)
 		return
+	if path.begins_with("res://"):
+		pack = null
+		_fonts_dir = "res://fonts"
+	else:
+		var dir := path.get_base_dir()
+		if pack == null or pack.dir != dir:
+			pack = ThemePack.new(dir, spec)
+		_fonts_dir = dir.path_join("fonts")
 	c.clear()
 	var pal: Dictionary = spec.colors[appearance]
 	for k in pal:
@@ -134,6 +178,11 @@ func _build_theme() -> void:
 	t.set_stylebox("pressed", "Button", _box(c.accent, c.accent))
 	t.set_stylebox("hover_pressed", "Button", _box(c.accent, c.accent))
 	t.set_stylebox("focus", "Button", StyleBoxEmpty.new())
+	# A pack's image states replace the drawn boxes; the focus ring stays empty.
+	for state in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
+		var skinned := skin("button", BUTTON_STATES[state], px.gap * 1.2, 0.0)
+		if skinned:
+			t.set_stylebox(state, "Button", skinned)
 	for k in ["font_color", "font_hover_color", "font_focus_color"]:
 		t.set_color(k, "Button", c.text)
 	for k in ["font_pressed_color", "font_hover_pressed_color"]:
@@ -163,10 +212,30 @@ func _box(fill: Color, border: Color) -> StyleBoxFlat:
 	return b
 
 
+## An image skin for `role` (a key in the theme's `skins`) in the state a Godot control is
+## in, as a StyleBoxTexture whose content margins are at least `min_x` and `min_y`, so the
+## component's own padding stands. Null when the theme has no skin for it, or when surfaces
+## are frosted or drawn in 3D, which a bitmap cannot be.
+func skin(role: String, state := {}, min_x := 0.0, min_y := 0.0) -> StyleBoxTexture:
+	if pack == null or material != "solid" or is_scene():
+		return null
+	var key = spec.get("skins", {}).get(role)
+	var b := pack.box(str(key), appearance, state) if key else null
+	if b:
+		for side in [SIDE_LEFT, SIDE_RIGHT]:
+			b.set_content_margin(side, maxf(b.get_content_margin(side), min_x))
+		for side in [SIDE_TOP, SIDE_BOTTOM]:
+			b.set_content_margin(side, maxf(b.get_content_margin(side), min_y))
+	return b
+
+
 ## The card style a theme asks for: flat (hairline), soft (shadow) or edge (accent edge). Over
 ## the map (frosted, glass) it is only the shape the surface shader fills; in a scene theme the
 ## 3D skin draws the surface and the box is empty.
-func card_box() -> StyleBoxFlat:
+func card_box() -> StyleBox:
+	var sk := skin("card", {}, px.gap * 1.2, px.gap * 1.2)
+	if sk:
+		return sk
 	var b := StyleBoxFlat.new()
 	b.bg_color = c.surface
 	b.set_corner_radius_all(roundi(px.radius))
@@ -195,10 +264,15 @@ func card_box() -> StyleBoxFlat:
 
 
 func _font(f: Dictionary) -> Font:
-	var path := "res://fonts/%s" % f.file
+	var path := _fonts_dir.path_join(f.file)
 	if not _font_files.has(path):
 		var ff := FontFile.new()
 		ff.load_dynamic_font(path)
+		# A pack's fonts are hinted as the stock UI renders them, which is also what its
+		# references show; a built-in theme keeps Godot's default.
+		var hint: String = f.get("hinting", "normal" if pack else "")
+		if hint != "":
+			ff.hinting = {none = TextServer.HINTING_NONE, light = TextServer.HINTING_LIGHT, normal = TextServer.HINTING_NORMAL}[hint]
 		_font_files[path] = ff
 	var v := FontVariation.new()
 	v.base_font = _font_files[path]

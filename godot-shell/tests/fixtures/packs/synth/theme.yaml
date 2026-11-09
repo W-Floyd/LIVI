@@ -1,0 +1,17 @@
+# Synthetic vendor pack for the test suite: drawn by make-synth.py, no vendor assets.
+name: "Synth"
+about: "Tiny pack with 9-patches, selector states and one screen."
+fonts:
+  display: { file: SairaSemiCondensed-SemiBold.ttf }
+  body: { file: SairaSemiCondensed-Medium.ttf }
+  strong: { file: SairaSemiCondensed-SemiBold.ttf }
+shape: { radius_mm: 1, gap_mm: 2.5, cards: flat, display_ratio: 2.2 }
+colors:
+  night: { bg: "#0a0e16", surface: "#18243c", surface2: "#1c2c48", line: "#3c5a8c", text: "#dbe6f5", dim: "#8ea3c0", accent: "#f0aa28", on_accent: "#201400", ok: "#74c69d", warn: "#e9c46a", crit: "#ff8a80", proj: "#101826" }
+  day:   { bg: "#f4f6fa", surface: "#e1ecfa", surface2: "#d2e0f2", line: "#78a0d2", text: "#14202e", dim: "#4c6078", accent: "#b06e00", on_accent: "#ffffff", ok: "#2e7d4f", warn: "#8a6700", crit: "#b42318", proj: "#e4eaf2" }
+series:
+  night: ["#1798bf", "#c97a30", "#b25fae"]
+  day: ["#00779e", "#c4631a", "#a2479a"]
+skins: { card: synth/card, button: synth/button }
+images: images/index.yaml
+screens: { ev_main: screens/ev_main.yaml }

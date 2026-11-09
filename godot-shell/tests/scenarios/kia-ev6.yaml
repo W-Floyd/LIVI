@@ -1,0 +1,15 @@
+name: kia-ev6
+# Local only: needs the EV6 pack built by tools/import-vendor (not in the repo) in the packs
+# directory as kia-ev6; skipped where it is missing. Its reference is the importer's composite of
+# the stock screen until one is captured on the unit.
+requires: { theme: kia-ev6 }
+fixtures:
+  core: fixtures/ev6-main.json
+theme: { theme_name: kia-ev6, appearance: night }
+steps:
+  - page: ev_main
+  - compare_reference: { name: kia-ev6-main-night, reference: reference/ev_main_night.png, min: 0.99 }
+  - screenshot: { name: kia-ev6-main-night, compare: false }
+  - theme: { appearance: day }
+  - compare_reference: { name: kia-ev6-main-day, reference: reference/ev_main_day.png, min: 0.99 }
+  - screenshot: { name: kia-ev6-main-day, compare: false }

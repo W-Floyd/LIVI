@@ -317,7 +317,7 @@ impl ShellTest {
         }
     }
 
-    /// `{ differing: int, diff: Image }`, or `{ error: String }` when the sizes differ.
+    /// `{ differing: int, compared: int (pixels outside the mask), diff: Image }`, or `{ error: String }` when the sizes differ.
     /// `mask` is an array of Rect2i regions that may vary.
     #[func]
     fn compare_images(
@@ -350,6 +350,7 @@ impl ShellTest {
         match golden::compare(&rgba(&golden), &rgba(&actual), w as u32, tol, &mask) {
             Some(d) => {
                 out.set("differing", d.differing as i64);
+                out.set("compared", d.compared as i64);
                 let bytes = PackedByteArray::from(d.image);
                 if let Some(img) = Image::create_from_data(w, h, false, Format::RGBA8, &bytes) {
                     out.set("diff", &img);

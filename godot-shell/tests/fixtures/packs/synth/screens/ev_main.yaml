@@ -1,0 +1,132 @@
+# Synthetic screen in the importer's shape: views in draw order, rects in panel pixels.
+screen: ev_main
+panel: [1920, 720]
+density: 1.5
+window: [0, 30, 1920, 690]
+status_bar: { image: synth/btn_nor, height_dp: 20 }
+views:
+  - id: backdrop
+    type: View
+    depth: 1
+    rect: [0, 30, 1920, 690]
+    background: synth/bg
+  - id: layout_main_title
+    type: View
+    depth: 1
+    rect: [660, 40, 600, 80]
+    text:
+      string: "Synth Vehicle"
+      font: bold
+      size_px: 48
+      gravity: [center_horizontal, center_vertical]
+      color: { day: "#14202e", night: "#dbe6f5" }
+  - id: road
+    type: View
+    depth: 1
+    rect: [0, 400, 1920, 200]
+    background: synth/road
+  - id: mainview_energyinformation_battery_image
+    type: View
+    depth: 1
+    rect: [100, 450, 240, 75]
+    background: synth/battery_10
+  - id: mainview_text_battery_percentage_value
+    type: View
+    depth: 1
+    rect: [117, 405, 120, 95]
+    text:
+      string: "50"
+      font: regular
+      size_px: 63
+      gravity: [right]
+      color: { day: "#14202e", night: "#dbe6f5" }
+      single_line: true
+  - id: mainview_text_climateon_range_value
+    type: View
+    depth: 1
+    rect: [1260, 426, 109, 91]
+    text:
+      string: "243"
+      font: regular
+      size_px: 60
+      gravity: [right, top]
+      color: { day: "#14202e", night: "#dbe6f5" }
+      single_line: true
+  - id: mainview_text_nearyby_station_range_value
+    type: View
+    depth: 1
+    rect: [408, 261, 108, 91]
+    text:
+      string: "740"
+      font: regular
+      size_px: 60
+      gravity: [center_horizontal, center_vertical, left]
+      color: { day: "#14202e", night: "#dbe6f5" }
+      single_line: true
+  - id: mainview_text_nearyby_station_range_unit
+    type: View
+    depth: 1
+    rect: [516, 293, 40, 46]
+    text:
+      string: "m"
+      font: regular
+      size_px: 30
+      gravity: [bottom, left]
+      color: { day: "#14202e", night: "#dbe6f5" }
+      single_line: true
+  - id: mainview_text_nearyby_station_location
+    type: View
+    depth: 1
+    rect: [570, 278, 360, 58]
+    padding: [0, 0, 0, 12]
+    text:
+      string: "Placeholder Charging Hub"
+      font: regular
+      size_px: 30
+      gravity: [center_horizontal, center_vertical, left]
+      color: { day: "#14202e", night: "#dbe6f5" }
+      max_lines: 2
+      ellipsize: end
+      line_mult: 0.7
+  - id: tile
+    type: View
+    depth: 1
+    rect: [20, 620, 540, 80]
+    background: synth/button
+    padding: [110, 0, 10, 0]
+    text:
+      string: "Tile"
+      font: regular
+      size_px: 27
+      gravity: [center_horizontal, center_vertical]
+      color: { day: "#14202e", night: "#dbe6f5" }
+      single_line: true
+  - id: tile_icon
+    type: View
+    depth: 1
+    rect: [50, 630, 60, 60]
+    src: synth/icon
+    scale_type: fitCenter
+    padding: [5, 5, 5, 5]
+  - id: clipped
+    type: View
+    depth: 1
+    rect: [1300, 620, 150, 45]
+    text:
+      string: "Electricity Use Settings"
+      font: regular
+      size_px: 27
+      gravity: [center_horizontal, center_vertical]
+      color: { day: "#14202e", night: "#dbe6f5" }
+      single_line: true
+  - id: hidden
+    type: View
+    depth: 1
+    rect: [700, 100, 200, 100]
+    background: synth/btn_push
+    visibility: invisible
+  - id: swatch
+    type: View
+    depth: 1
+    rect: [1700, 100, 100, 100]
+    background: { color: { day: "#c8501e", night: "#7a2f10" } }

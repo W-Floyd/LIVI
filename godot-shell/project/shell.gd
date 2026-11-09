@@ -25,6 +25,9 @@ var left_out: Array[String] = []
 ## A scene theme's 3D layer, while one is in use.
 var _scene: SceneSkin
 
+## A pack's page standing in for the home page, while one is open.
+var _page: Control
+
 
 func _init() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -113,6 +116,24 @@ func _style() -> void:
 	queue_redraw()
 	_fit.call_deferred()
 	_place_projection.call_deferred()
+
+
+## "home", or a screen of the theme's pack, which replaces the home page until "home" again.
+## An error message when the theme has no such page.
+func open_page(page: String) -> String:
+	if page != "home" and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
+		return "theme %s has no page %s" % [ThemeManager.theme_name, page]
+	if _page:
+		remove_child(_page)
+		_page.free()
+		_page = null
+	$Page.visible = page == "home"
+	_projection.visible = page == "home"
+	if page != "home":
+		_page = PackScreen.new()
+		_page.screen_name = page
+		add_child(_page)
+	return ""
 
 
 func _place_projection() -> void:

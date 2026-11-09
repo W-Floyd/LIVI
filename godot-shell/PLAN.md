@@ -697,8 +697,13 @@ Every milestone lands with its scenarios.
       every scenario from here on.
 - [ ] Quality profiles (see "Quality profiles") and idle redraw, with `vm`
       and a first guess at `unit`.
-- [ ] Theme packs from outside the repo, with image skins (9-patch, `TextureButton`
+- [x] Theme packs from outside the repo, with image skins (9-patch, `TextureButton`
       states) and absolute per-page layout in the schema (see "Vendor themes").
+      Packs load from `$LIVI_SHELL_THEMES` or `~/.local/share/livi-shell/themes/`; `skins:`
+      in `theme.yaml` give cards and buttons (every state, from a selector) `StyleBoxTexture`s;
+      a pack screen is a page of views at their rectangles (`PackScreen`).
+- [ ] Pack pages built from the shell's components, not drawn by a dedicated page; the
+      `--reference` run mode and the onion-skin and flicker output of `compare_reference`.
 - [ ] Components as logic plus skin (see "Scene themes"), with 2D skins
       only, so 3D skins can come later without a rewrite.
 

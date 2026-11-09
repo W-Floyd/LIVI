@@ -17,6 +17,8 @@ impl Rect {
 #[derive(Debug, PartialEq)]
 pub struct Diff {
     pub differing: usize,
+    /// Pixels outside the mask: what `differing` is a share of.
+    pub compared: usize,
     /// RGBA8: the golden dimmed to grey, differing pixels in red, masked ones in blue.
     pub image: Vec<u8>,
 }
@@ -33,12 +35,16 @@ pub fn compare(
         return None;
     }
     let mut differing = 0;
+    let mut compared = 0;
     let mut image = Vec::with_capacity(golden.len());
     for (i, (g, a)) in golden.chunks_exact(4).zip(actual.chunks_exact(4)).enumerate() {
         let (x, y) = (i as u32 % width, i as u32 / width);
         if mask.iter().any(|r| r.contains(x, y)) {
             image.extend_from_slice(&[0, 0, 160, 255]);
-        } else if g.iter().zip(a).any(|(g, a)| g.abs_diff(*a) > tolerance) {
+            continue;
+        }
+        compared += 1;
+        if g.iter().zip(a).any(|(g, a)| g.abs_diff(*a) > tolerance) {
             differing += 1;
             image.extend_from_slice(&[255, 0, 0, 255]);
         } else {
@@ -46,7 +52,7 @@ pub fn compare(
             image.extend_from_slice(&[grey, grey, grey, 255]);
         }
     }
-    Some(Diff { differing, image })
+    Some(Diff { differing, compared, image })
 }
 
 #[cfg(test)]
@@ -78,6 +84,8 @@ mod tests {
             assert_eq!(got.as_ref().map(|d| d.differing), *want, "{name}");
             if let Some(d) = got {
                 assert_eq!(d.image.len(), golden.len(), "{name}");
+                let masked = mask.iter().map(|r| (r.w * r.h) as usize).sum::<usize>();
+                assert_eq!(d.compared, 4 - masked, "{name}");
             }
         }
     }

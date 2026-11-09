@@ -1,0 +1,70 @@
+name: pack-synth
+# A pack from outside the repo: image skins on the home page's components, and the pack's
+# own page, compared with references rendered from it.
+fixtures:
+  core: fixtures/to-charger.json
+  packs: fixtures/packs
+theme: { theme_name: synth, appearance: day }
+steps:
+  - wait: { frames: 2 }
+  - screenshot: pack-synth-home
+  - gdscript: |
+      var pack: ThemePack = ThemeManager.pack
+      if pack == null or ThemeManager.spec.name != "Synth":
+          return "pack not loaded"
+      var card: StyleBox = shell.get_node("Page/Body/Side/Panel/Stop").get_theme_stylebox("panel")
+      if not card is StyleBoxTexture or card.texture_margin_left != 6 or card.content_margin_left < 4:
+          return "card is not the 9-patch: %s" % card
+      # Selector states: pressed and disabled pick their own image, and night its own variant.
+      var px := func(state: Dictionary, mode := "day") -> Color:
+          return pack.texture("synth/button", mode, state).get_image().get_pixel(12, 12)
+      var normal: Color = px.call({})
+      var pressed: Color = px.call({pressed = true})
+      var disabled: Color = px.call({enabled = false})
+      if normal == pressed or normal == disabled or pressed == disabled:
+          return "states share an image: %s %s %s" % [normal, pressed, disabled]
+      if px.call({}, "night") == normal:
+          return "night has no variant of its own"
+      var btn: StyleBox = shell.get_node("Page/Body/Side/Panel/Precondition").get_theme_stylebox("normal")
+      var on: StyleBox = shell.get_node("Page/Body/Side/Panel/Precondition").get_theme_stylebox("pressed")
+      if not btn is StyleBoxTexture or btn.texture.get_image().get_pixel(12, 12) != normal \
+              or on.texture.get_image().get_pixel(12, 12) != pressed:
+          return "the button's states are not the selector's"
+      # The icon is stored at half size with a density scale of 2.
+      if pack.texture("synth/icon", "day").get_width() != 40:
+          return "scale not applied"
+  - page: ev_main
+  - expect_node: { path: Screen/layout_main_title, text: Synth Vehicle, rect: [660, 40, 600, 80] }
+  - expect_node: { path: Screen/road, rect: [0, 400, 1920, 200] }
+  # Bound to the core: charge, range and the charging stop; the unit follows the distance.
+  - expect_node: { path: Screen/mainview_text_battery_percentage_value, text: "31", rect: [117, 405, 120, 95] }
+  - expect_node: { path: Screen/mainview_text_climateon_range_value, text: "148" }
+  - expect_node: { path: Screen/mainview_text_nearyby_station_range_value, text: "42" }
+  - expect_node: { path: Screen/mainview_text_nearyby_station_range_unit, text: km }
+  # Not in the core: the pack's own.
+  - expect_node: { path: Screen/mainview_text_nearyby_station_location, text: Placeholder Charging Hub }
+  - expect_node: { path: Screen/tile, text: Tile, rect: [20, 620, 540, 80] }
+  - expect_node: { path: Screen/tile_icon, rect: [55, 635, 50, 50] }
+  - expect_node: { path: Screen/hidden, visible: "false" }
+  - set: { core: { telemetry: { fuelPct: 65 }, navigation: { chargingStop: { distanceM: 600 } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Screen/mainview_text_battery_percentage_value, text: "65" }
+  - expect_node: { path: Screen/mainview_text_nearyby_station_range_value, text: "600" }
+  - expect_node: { path: Screen/mainview_text_nearyby_station_range_unit, text: m }
+  - gdscript: |
+      var badge: Panel = shell.get_node("Screen/mainview_energyinformation_battery_image")
+      var want: Image = ThemeManager.pack.texture("synth/battery_13", "day").get_image()
+      var got: Image = (badge.get_theme_stylebox("panel") as StyleBoxTexture).texture.get_image()
+      if got.get_data() != want.get_data():
+          return "the badge is not the step for 65 %"
+  - set: { core: { telemetry: { fuelPct: 31 }, navigation: { chargingStop: { distanceM: 42000, name: Hub } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Screen/mainview_text_nearyby_station_location, text: Hub }
+  - compare_reference: { name: pack-synth-page-day, reference: reference/ev_main_day.png, min: 1.0 }
+  # A live region may differ: the edited reference matches once it is masked.
+  - compare_reference: { name: pack-synth-page-masked, reference: reference/ev_main_day_edited.png, min: 1.0, mask: [[1600, 80, 300, 200]] }
+  - theme: { appearance: night }
+  - compare_reference: { name: pack-synth-page-night, reference: reference/ev_main_night.png, min: 1.0 }
+  - page: home
+  - wait: { frames: 2 }
+  - screenshot: pack-synth-home-night

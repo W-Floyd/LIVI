@@ -96,6 +96,14 @@ func _run_one(path: String) -> String:
 	print("scenario %s" % _scenario)
 
 	var fixtures: Dictionary = sc.get("fixtures", {})
+	# Packs from the scenario's own folder, else the user's; a scenario that needs a pack only
+	# the developer has is skipped where it is missing.
+	ThemeManager.packs_dir = _tests.path_join(fixtures.packs) if fixtures.has("packs") else ThemeManager.default_packs_dir()
+	var needs: String = sc.get("requires", {}).get("theme", "")
+	if needs != "" and not ThemeManager.has_theme(needs):
+		print("skipped: no theme %s in %s" % [needs, ThemeManager.packs_dir])
+		_rows.append({scenario = _scenario, shot = "", status = "skipped", msg = "no theme %s" % needs})
+		return ""
 	var state = {}
 	if fixtures.has("core"):
 		state = JSON.parse_string(FileAccess.get_file_as_string(_tests.path_join(fixtures.core)))
@@ -232,6 +240,13 @@ func _step(step: Dictionary) -> String:
 			return await _screenshot(arg if arg is Dictionary else {name = arg})
 		"measure":
 			return await _measure(arg)
+		"page":
+			var shown: String = _shell.open_page(str(arg))
+			if shown != "":
+				return shown
+			await _frames(2)
+		"compare_reference":
+			return await _compare_reference(arg)
 		"theme":
 			var bad := _look_error(arg)
 			if bad != "":
@@ -454,13 +469,16 @@ func _touch(at: Vector2) -> void:
 ## `{ theme_name, appearance, hand, near, text_scale }`, any of them.
 func _look_error(look: Dictionary) -> String:
 	const KEYS := {
-		theme_name = ["instrument", "calm", "charge", "studio"], appearance = ["day", "night"],
+		theme_name = null, appearance = ["day", "night"],
 		hand = ["lhd", "rhd"], near = ["projection", "panel"], text_scale = null,
 		material = ["solid", "frosted", "glass"]}
 	for k in look:
 		if not KEYS.has(k):
 			return "theme: unknown key %s" % k
-		if KEYS[k] != null and not look[k] in KEYS[k]:
+		if k == "theme_name":
+			if not ThemeManager.has_theme(str(look[k])):
+				return "theme: no theme %s" % look[k]
+		elif KEYS[k] != null and not look[k] in KEYS[k]:
 			return "theme: %s is one of %s" % [k, KEYS[k]]
 	return ""
 
@@ -559,7 +577,13 @@ func _expect_node(arg: Dictionary) -> String:
 	if n == null:
 		return "no node"
 	for k in arg:
-		if k != "path" and str(n.get(k)) != str(arg[k]):
+		if k == "rect":
+			# [x, y, w, h] in panel pixels.
+			var want := Rect2(arg[k][0], arg[k][1], arg[k][2], arg[k][3])
+			var got: Rect2 = n.get_global_rect() if n is Control else Rect2()
+			if not (got.position.is_equal_approx(want.position) and got.size.is_equal_approx(want.size)):
+				return "rect is %s" % got
+		elif k != "path" and str(n.get(k)) != str(arg[k]):
 			return "%s is %s" % [k, str(n.get(k))]
 	return ""
 
@@ -609,6 +633,48 @@ func _screenshot(arg: Dictionary) -> String:
 	return ""
 
 
+## `{ name, reference, tolerance, min, mask }`: the share of pixels within `tolerance` of a
+## reference image must be at least `min`. The reference is a path, relative to the theme's
+## pack (else to tests/). The render and the diff are written to out/, never to goldens.
+func _compare_reference(arg: Dictionary) -> String:
+	var name: String = arg.name
+	var path: String = str(arg.reference)
+	if not path.is_absolute_path():
+		var base: String = ThemeManager.pack.dir if ThemeManager.pack else _tests
+		path = base.path_join(path)
+	var dir := _out.path_join(_scenario)
+	var row := {scenario = _scenario, shot = name, golden = path, new = dir.path_join(name + ".png"), status = "ok", msg = ""}
+	_rows.append(row)
+	await RenderingServer.frame_post_draw
+	var img := _vp.get_texture().get_image()
+	DirAccess.make_dir_recursive_absolute(dir)
+	img.save_png(row.new)
+	var ref := Image.load_from_file(path) if FileAccess.file_exists(path) else null
+	if ref == null:
+		row.status = "fail"
+		row.msg = "no reference at %s" % path
+		return row.msg
+	var mask: Array[Rect2i] = []
+	for r in arg.get("mask", []):
+		mask.append(Rect2i(r[0], r[1], r[2], r[3]))
+	var tol := int(arg.get("tolerance", DEFAULT_TOLERANCE))
+	var cmp: Dictionary = ShellTest.compare_images(ref, img, tol, mask)
+	if cmp.has("error"):
+		row.status = "fail"
+		row.msg = cmp.error
+		return row.msg
+	row.diff = dir.path_join(name + ".diff.png")
+	cmp.diff.save_png(row.diff)
+	var share := 1.0 - float(cmp.differing) / maxf(1.0, cmp.compared)
+	var want := float(arg.get("min", 0.98))
+	row.msg = "%.2f%% of %d pixels within %d (needs %.2f%%)" % [share * 100.0, cmp.compared, tol, want * 100.0]
+	print("compare_reference %s: %s" % [name, row.msg])
+	if share < want:
+		row.status = "fail"
+		return row.msg
+	return ""
+
+
 func _fail(scenario: String, shot: String, msg: String) -> void:
 	_failed += 1
 	push_error("FAIL %s %s" % [scenario, msg])
@@ -621,7 +687,7 @@ func _write_report() -> void:
 	var h := PackedStringArray([
 		"<!doctype html><meta charset=utf-8><title>Shell scenarios</title><style>",
 		"body{font:14px system-ui;margin:16px}img{width:32%;margin-right:1%}",
-		".fail{color:#b00}.ok,.updated,.shot{color:#070}</style>",
+		".fail{color:#b00}.ok,.updated,.shot{color:#070}.skipped{color:#888}</style>",
 		"<h1>%d failure(s)</h1>" % _failed,
 	])
 	for r in _rows:

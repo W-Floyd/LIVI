@@ -231,6 +231,76 @@ its own):
 - Series take the theme's validated series palette in a fixed order. Text
   uses text tokens, and status colors are never used for series.
 
+## What the law and the car decide
+
+These override the theme, the layout and the driver's preferences. Sources
+are in `docs/car-ux.md`.
+
+**Reversing camera** (FMVSS 111 in the US, UN R158 in the EU; both are
+law):
+- When the car goes into reverse (`reverse` or `gear` from the core's
+  telemetry), the camera takes the whole panel within 2.0 s. It comes from
+  LIVI's `camera` video plane, which `livi-compositor` already ranks above
+  all other video.
+- Each time it opens on the default view. It stays until the driver changes
+  the view or leaves reverse. In the US it must not stay up once the
+  backing event ends (forward past 10 mph, 10 m or 10 s; for UN R158,
+  16 km/h).
+- Inside the required field of view, overlays show only rearward-driving
+  or safety information: guide lines and distance warnings, no media or
+  notifications.
+- If the car's own system shows its camera instead, the shell gives up the
+  screen and draws nothing over it.
+
+**Always within reach** (Euro NCAP 2026; a rating, not law, but the
+benchmark for any car):
+- Volume and mute are always-visible touch controls, grouped together, on
+  every page and over the projection. The steering-wheel keys reach them too
+  (`Input::Key`).
+- Next track, and answering or rejecting a call, take one touch from
+  wherever the driver is.
+- Car functions the shell offers (climate, seat heating, demisting, if they
+  come) are at most two steps from home.
+- Warning colors keep the meaning ISO 2575 gives them (red danger,
+  amber caution, green on, blue high beam). The shell never uses them in a
+  way that could be mistaken for the car's own telltales.
+
+**What a screen visible to the driver may show** (California VC 27602, UK
+reg 109, Australia ADR 42 and road rule 299, Japan art. 71; all law):
+- While driving, nothing outside vehicle information, navigation and
+  maps, the road around the car, and route guidance shows on the driver's
+  screen: no video, no auto-scrolling text, no reading, no non-driving
+  images.
+- Album art is the grey area. NHTSA allows it during a selection that ends;
+  UK reg 109's list arguably excludes it (that reading isn't tested in
+  court). A **regional profile** in the car config (`region: us | us-ca | gb
+  | eu | au | jp`) picks the strictest reading for where the car is driven.
+  Strict profiles replace artwork with a plain icon while driving, and `jp`
+  also enforces JAMA's 30 characters.
+- The parked-only cover and the launcher's driving limits enforce this. The
+  region profile only decides how far they go.
+
+**Brightness** (FMVSS 101 S5.3.4; law in the US, on the vehicle):
+- The panel has at least two brightness levels at night, through the core's
+  `displayBrightness` and automatic brightness, and a way to turn it off
+  (screen off, with a touch to wake it).
+- The night palette is not a substitute for dimming.
+
+**Responsiveness** (NHTSA, the Alliance):
+- Every touch shows a visible response within 250 ms.
+- Anything that takes longer than 2 s shows that it's busy.
+
+**Tests:**
+- A scenario sets `reverse` and expects the camera plane full screen within
+  2.0 s of panel time (120 frames at 60 fps). It then checks that nothing
+  else is drawn over it, that the default view returns each time, and that
+  the camera goes when the backing event ends.
+- Volume and mute are found on every page, in every scenario (a runner
+  check).
+- For every region profile, a scenario checks what hides while driving.
+- The runner measures the frames from each tap to the first change on
+  screen, and fails a tap that takes longer than 250 ms.
+
 ## What the cluster already shows
 
 The car's own instrument cluster shows some of what the shell could show:
@@ -468,6 +538,9 @@ Every milestone lands with its scenarios.
       `VideoCfg`).
 - [ ] Start `livi-core` against the shell's socket.
 - [ ] Show Android Auto as a texture; send touches as `Input::Pointer`.
+- [ ] The reversing camera: full screen within 2.0 s of reverse, its
+      default view each time, no overlays but driving aids, gone after the
+      backing event (see "What the law and the car decide").
 
 ### 4. Layout and theming
 
@@ -496,6 +569,9 @@ Every milestone lands with its scenarios.
       `PreconditionBattery`) with its status.
 - [ ] Stats and graphs, from the core's telemetry.
 - [ ] Built-in pages as launcher entries.
+- [ ] Volume and mute always visible; next track and calls one touch away.
+- [ ] Regional profiles for what shows while driving, with their scenarios.
+- [ ] Brightness levels and screen off; the tap-response check in the runner.
 
 ### 7. On the unit
 

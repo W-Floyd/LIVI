@@ -91,6 +91,91 @@ Hosting LIVI's own Slint UI as a window lets the shell start small: it does
 home, maps, the dashboard and projection layout, and shows LIVI's settings and
 media pages until (if ever) they are rewritten.
 
+## Theming
+
+Everything that varies by car, driver or taste is data, not code. No scene
+holds a color, font, size or position of its own; it reads them from the
+resolved theme, and a theme change applies live, with no restart.
+
+**What LIVI already has** (`livi-core-proto`): a `Theme` with palettes (accent
+for dark and light), per-display layouts made of zones, and an
+`AppearancePreference` (automatic, light or dark). The config also carries
+`hand` (LHD or RHD), `darkMode`, the speed and temperature units, `carName` and
+`oemName`. The shell reads these from the core and does not keep its own copies.
+What the shell needs beyond them lives in its theme files until the core takes
+them over.
+
+**Layers**, each overriding the one before:
+1. The shell's built-in default.
+2. The car theme: branding, the car's 3D model, the panel, the default
+   handedness.
+3. The user's chosen theme.
+4. The driver's profile: their preferences.
+5. Accessibility settings.
+6. Runtime state: day or night, from the core's appearance and night sensor.
+
+A theme is a folder (or a `.pck`) with a `theme.yaml` manifest and its assets.
+A `ThemeManager` autoload resolves the layers into a Godot `Theme` for the
+controls, plus a token table for whatever is not a control (3D materials,
+shaders, the compositor's backdrop). It emits `changed` when the result
+changes.
+
+**What a theme covers:**
+- **Colors:** semantic tokens (surface, on-surface, accent, warning,
+  critical, charging, and so on), each with a day and a night value. LIVI's
+  palette fills the accent tokens.
+- **Typography:** bundled font files, a type scale (display, title, body,
+  caption, and numerals with tabular figures for speed and charge), and a
+  global text scale.
+- **Icons:** a named set of symbolic SVGs, tinted by token, falling back to
+  the default set. The launcher uses freedesktop icon themes.
+- **3D:** the car as glTF, with named nodes (doors, charge port, lights), a
+  paint-color parameter and camera presets. A generic car is the default.
+- **Layouts:** regions (projection, side panel, app area, status bar) as data,
+  per display and per mode (full, split, apps), the same model as LIVI's
+  layouts and zones.
+- **Handedness:** from the core's `hand`. It mirrors each layout so the
+  driver's controls sit on the driver's side, and it decides which side the
+  projection's margin goes on (`projectionViewAreaRight` or `Left`).
+- **Driver preferences:** which content sits nearer the driver (map or media),
+  what the side panel shows, the start page, a 12- or 24-hour clock, and the
+  units and language from the core's config. Preferences that only the shell
+  uses are kept per driver profile in the shell's own settings.
+- **Branding:** the OEM and car name and logo, the boot splash and the accent.
+- **Density (DPI):**
+  - Sizes in a theme are physical: millimeters for touch targets and spacing,
+    and points at a stated viewing distance for type. Each display's DPI turns
+    them into pixels, so a page reads the same on the G5W's 1920×720 panel, a
+    smaller head unit, the cluster, or a desktop window.
+  - DPI comes from the panel's physical size. The compositor learns it from
+    the output (as `livi-compositor` does: `panel <role> <mm_w> <mm_h> <w>
+    <h>`), and the cluster's from the core's `clusterDpi`. A per-display
+    override covers panels that report a wrong size.
+  - It's applied per display through Godot's `content_scale_factor`, so
+    layouts are written once in density-independent units.
+  - Hosted Wayland clients are told the same scale (`wl_output` scale and
+    `wp_fractional_scale`) and are rendered at it, not stretched.
+  - The minimum touch target is a size in millimeters (on the order of 9 mm),
+    checked after scaling.
+- **Accessibility:** text scale, a high-contrast palette, reduced motion (no
+  animated transitions or camera moves), a minimum touch-target size, and
+  status never shown by color alone (always an icon or text as well).
+
+**Tests:**
+- A scenario's `theme:` key picks the variant it renders under:
+  `{ name, hand, appearance, text_scale, contrast, reduced_motion, dpi }`.
+  `appearance` moves under it, and `dpi` goes with the scenario's
+  `viewport`.
+- Key pages have goldens across a matrix: LHD and RHD, day and night, text
+  scale 1.0 and 1.4, high contrast, and at least two densities (the G5W's
+  panel and a smaller, denser one).
+- The runner checks every scenario automatically:
+  - each text and background token pair meets WCAG AA contrast;
+  - every pressable control is at least the minimum touch-target size;
+  - no label is clipped or overflows;
+  - an RHD layout is the mirror of its LHD layout.
+- `cargo test` validates `theme.yaml` against its schema.
+
 ## Milestones
 
 1. **Toolchain and test harness.**
@@ -110,8 +195,14 @@ media pages until (if ever) they are rewritten.
    - Implement `livi-compositor`'s control protocol (the tags and `VideoCfg`).
    - Start `livi-core` against the shell's socket.
    - Show Android Auto as a texture; send touches as `Input::Pointer`.
-4. **Layout.** Full-screen projection, a split with a side panel (the
-   `projectionViewAreaRight` margin), and switching.
+4. **Layout and theming.**
+   - Full-screen projection, a split with a side panel (the
+     `projectionViewAreaRight` margin), and switching between them.
+   - The `ThemeManager` and the token, type and layout model (see "Theming"),
+     with handedness, day and night, text scale and DPI working first. The
+     placeholder page moves onto tokens.
+   - The theme checks (contrast, touch targets, clipping, mirroring) run in
+     every scenario from here on.
 5. **Hosting.** godot-maps, then LIVI's Slint UI, as windows in a region.
 6. **Pages.** Home, side panel (drive stats, the preconditioning toggle from
    the core's `PreconditionBattery` and status), stats and graphs (from the
@@ -172,7 +263,7 @@ and run headless, in the VM and in CI. No test needs a phone, a car or a GPU.
 ```yaml
 name: split-precondition
 viewport: { width: 1920, height: 720 }
-appearance: night            # day | night | auto (follows the fixture)
+theme: { appearance: night, hand: rhd }   # see "Theming"; appearance: day | night | auto
 fixtures:
   core: fixtures/driving-to-charger.json   # telemetry, navigation, chargingStop
   clients:

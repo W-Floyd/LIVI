@@ -63,7 +63,12 @@ built from.
 - `decoded/`: the apps decoded with apktool (resources only, `-s`), against a local framework
   folder in `decoded/.framework`. `res/values/` has colors, dimensions and styles;
   `res/layout/` has every screen's exact layout. It holds the images again, so
-  `firmware-V015/` is a duplicate kept for name searches.
+  `firmware-V015/` is a duplicate kept for name searches. `framework-res` and `hkmc-res` are
+  decoded here too.
+- `work/dex/`: the EV app's DEX class signatures and string constants (no bytecode).
+- `pack/`: the vendor theme pack, built from all of the above by `tools/import-vendor`
+  (see its README), with composited references of the "Electric vehicle" screen in
+  `pack/reference/`.
 
 **The apps that make up the stock look:**
 - `Launcher_WP3`: home and launcher.
@@ -74,14 +79,19 @@ built from.
   `Mobis_SystemPopup`.
 - `hkmc-res`: Hyundai/Kia's shared resources, values only.
 
-**The "Electric vehicle" screen** is pre-rendered images, not 3D:
+**The "Electric vehicle" screen** is pre-rendered images, not 3D. Its layout is `layout_main.xml`
+(title bar, then `layout_evmain_view.xml` and its includes); the `drivemode_wide_*` layouts are the
+drive-mode settings screen.
 - `HKMC_TAppEV3/res/drawable-nodpi/ev_etc_main_case{1..4}_NN.webp`: 1920 × 540 frames of the
   range road for each range state;
-- `ev_etc_eu_vehicle_{l,s}.webp`: the car;
+- `ev_ic_battery_bg_hatch_nor.webp` and `ev_ic_battery_cover_hatch.webp`: the car, under and
+  over the battery badge (the layout's default body style; code may pick another). No layout
+  uses `ev_etc_eu_vehicle_{l,s}`: code sets them, if anything does;
 - `ev_etc_battery_00`–`_20`: the battery badge.
 
-  `drawable-night-nodpi` has the night versions. The layout is `drivemode_wide_home_layout.xml`
-  and `drivemode_wide_main_layout.xml`, and each tile has its own `layout_ev_eco_main_*.xml`.
+  `drawable-night-nodpi` has the night versions. The bottom tiles are
+  `layout_evmain_view_bottom_widgets.xml`; the `layout_ev_eco_main_*.xml` layouts are the pages
+  the tiles open.
 
 ## How it was made
 

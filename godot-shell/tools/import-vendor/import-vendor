@@ -1,0 +1,11 @@
+#!/usr/bin/env -S python3 -I
+"""Stock head-unit firmware to a vendor theme pack. See README.md."""
+import os
+import sys
+
+# -I leaves the script's folder off sys.path; only this tool's own package is added back.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+from importvendor.cli import main  # noqa: E402
+
+main()

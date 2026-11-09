@@ -241,6 +241,10 @@ struct Manager<M: Media> {
     awaiting: HashMap<String, JoinHandle<()>>,
     reset_once: HashSet<String>,
     initial_night_mode: Option<bool>,
+    // The car's latest, for sessions that connect after it arrived; a forced
+    // appearance (initial_night_mode) wins over it.
+    car_night_mode: Option<bool>,
+    car_cluster_night_mode: Option<bool>,
     notices: Notices,
     cluster_stream_active: bool,
     video_allowed: bool,
@@ -285,6 +289,8 @@ async fn run<M: Media>(
         awaiting: HashMap::new(),
         reset_once: HashSet::new(),
         initial_night_mode: None,
+        car_night_mode: None,
+        car_cluster_night_mode: None,
         notices: Notices::default(),
         cluster_stream_active: true,
         video_allowed: true,
@@ -366,8 +372,10 @@ impl<M: Media> Manager<M> {
     fn register(&mut self, session: Session) -> SessionId {
         let id = self.next_id;
         self.next_id += 1;
-        if let Some(night) = self.initial_night_mode {
+        if let Some(night) = self.initial_night_mode.or(self.car_night_mode) {
             session.send(StackCmd::NightMode(night));
+        }
+        if let Some(night) = self.initial_night_mode.or(self.car_cluster_night_mode) {
             session.send(StackCmd::ClusterNightMode(night));
         }
         session.send(StackCmd::ClusterActive(self.cluster_stream_active));
@@ -966,11 +974,13 @@ impl<M: Media> Manager<M> {
                 }
             }
             CpCmd::NightMode(night) => {
+                self.car_night_mode = Some(night);
                 for s in self.sessions.values() {
                     s.send(StackCmd::NightMode(night));
                 }
             }
             CpCmd::ClusterNightMode(night) => {
+                self.car_cluster_night_mode = Some(night);
                 for s in self.sessions.values() {
                     s.send(StackCmd::ClusterNightMode(night));
                 }

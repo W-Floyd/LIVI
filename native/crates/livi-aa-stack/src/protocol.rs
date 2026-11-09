@@ -253,6 +253,10 @@ pub struct Session {
     cluster_focus_pending: bool,
     cluster_stream_wanted: bool,
     shutdowns_waiting: u32,
+    // The latest NightMode sensor given, kept even before Running: the
+    // phone's night sensor start, which comes after the replay on connect,
+    // answers with it.
+    night_mode: Option<bool>,
 }
 
 impl Session {
@@ -293,6 +297,7 @@ impl Session {
             cluster_focus_pending: false,
             cluster_stream_wanted: true,
             shutdowns_waiting: 0,
+            night_mode: None,
         };
         (session, vec![Out::After(WATCHDOG, Timer::Watchdog)])
     }
@@ -1020,7 +1025,13 @@ impl Session {
                 [0x6a, 0x02, 0x08, 0x00],
             );
         } else if sensor_type == 10 {
-            let night = self.config.borrow().initial_night_mode == Some(true);
+            // A forced appearance wins over the car's.
+            let night = self
+                .config
+                .borrow()
+                .initial_night_mode
+                .or(self.night_mode)
+                == Some(true);
             self.send_to(
                 out,
                 ch::SENSOR,
@@ -1148,6 +1159,9 @@ impl Session {
 
     pub fn send_sensor(&mut self, sensor: &Sensor) -> Vec<Out> {
         let mut out = Vec::new();
+        if let Sensor::NightMode(night) = sensor {
+            self.night_mode = Some(*night);
+        }
         if self.state != State::Running {
             return out;
         }
@@ -1525,6 +1539,33 @@ pub(crate) mod tests {
                 .is_empty()
         );
         assert!(s.on_link_closed(None).is_empty());
+    }
+
+    // The car's night, replayed on connect before the session runs, answers
+    // the phone's night sensor start; a forced appearance wins.
+    #[test]
+    fn the_night_sensor_starts_in_the_cars_night() {
+        for (forced, car, want) in [
+            (None, None, 0x00),
+            (None, Some(true), 0x01),
+            (Some(false), Some(true), 0x00),
+            (Some(true), Some(false), 0x01),
+        ] {
+            let (mut s, tx) = session(AaConfig::default());
+            tx.send_modify(|c| c.initial_night_mode = forced);
+            if let Some(night) = car {
+                assert!(s.send_sensor(&Sensor::NightMode(night)).is_empty());
+            }
+            s.on_link_control(&serde_json::json!({ "type": "ready" }));
+            s.on_message(ch::CONTROL, ctrl_msg::SERVICE_DISCOVERY_REQUEST, &[]);
+            s.on_message(ch::VIDEO, media_msg::SETUP, &[0x08, 0x07]);
+            let out = s.on_message(ch::SENSOR, sensor_msg::REQUEST, &[0x08, 0x0a]);
+            assert_eq!(
+                frames(&out)[1].payload,
+                [0x52, 0x02, 0x08, want],
+                "forced {forced:?}, car {car:?}"
+            );
+        }
     }
 
     #[test]

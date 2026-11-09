@@ -355,50 +355,69 @@ it is decided by its memory on the unit.
 
 ## Milestones
 
-1. **Toolchain and test harness.**
-   - Build gdext for the arm64 VM and for armv7-musl (cross, as livi-headunit
-     does).
-   - Load it in Alpine's Godot 4.7 (`godot` and `godot-templates`).
-   - Check that `livi-core-client` links from the extension.
-   - Stand up the test harness (see "Testing") before any UI work: the fake
-     core, the scenario runner, one golden screenshot, and the runner in the
-     VM. Every later milestone lands with its scenarios.
-2. **Compositor in Godot.**
-   - A minimal smithay server in the extension, with `xdg_shell` and shm.
-     Show `weston-terminal` as a `TextureRect`.
-   - Then dmabuf, through EGLImage and a native GL texture.
-   - Then input: pointer, touch and keyboard, through `wl_seat`.
-3. **LIVI's video.**
-   - Implement `livi-compositor`'s control protocol (the tags and `VideoCfg`).
-   - Start `livi-core` against the shell's socket.
-   - Show Android Auto as a texture; send touches as `Input::Pointer`.
-4. **Layout and theming.**
-   - Full-screen projection, a split with a side panel (the
-     `projectionViewAreaRight` margin), and switching between them.
-   - The `ThemeManager` and the token, type and layout model (see "Theming"),
-     with handedness, day and night, text scale and DPI working first. The
-     placeholder page moves onto tokens.
-   - The theme checks (contrast, touch targets, clipping, mirroring) run in
-     every scenario from here on.
-   - Quality profiles (see "Quality profiles") and idle redraw, with `vm` and
-     a first guess at `unit`.
-5. **Hosting and the launcher.**
-   - godot-maps, then LIVI's Slint UI, as windows in a region.
-   - The launcher (see "App launcher"):
-     - first discovery, icons, launching in its own scope, and matching
-       windows to launches;
-     - then lifecycle, the driving limits and per-driver arrangement.
-   - XWayland (see "XWayland"), lazily started, for X11-only apps.
-6. **Pages.** Home, side panel (drive stats, the preconditioning toggle from
-   the core's `PreconditionBattery` and status), stats and graphs (from the
-   core's telemetry). Built-in pages are launcher entries too.
-7. **On the unit.**
-   - armv7 build and package.
-   - Measure Android Auto decode plus Godot compositing on the Mali-G51
-     (frame rate and latency), idle CPU and GPU with low-processor mode, and
-     memory.
-   - Run every quality profile on the unit, set the `unit` limits from the
-     results, and tune the adaptive step-down.
+Every milestone lands with its scenarios.
+
+### 1. Toolchain and test harness
+
+- [x] Build gdext for the arm64 VM, and cross-build it for armv7-musl
+      (`scripts/build-armv7.sh`, macOS or Linux, no pmbootstrap).
+- [x] Load it in Alpine's Godot 4.7.
+- [x] Check that `livi-core-client` links from the extension.
+- [x] Stand up the test harness (see "Testing") before any UI work: the fake
+      core, the scenario runner, goldens, and the runner in the VM.
+- [ ] gdUnit4 for scene tests.
+
+### 2. Compositor in Godot
+
+- [x] A minimal smithay server in the extension, with `xdg_shell` and shm.
+      `weston-terminal` shows as a texture.
+- [x] Test clients, `fixtures.clients`, and the `measure` step.
+- [ ] dmabuf, through EGLImage and a native GL texture.
+- [ ] Input: pointer, touch and keyboard, through `wl_seat`.
+
+### 3. LIVI's video
+
+- [ ] Implement `livi-compositor`'s control protocol (the tags and
+      `VideoCfg`).
+- [ ] Start `livi-core` against the shell's socket.
+- [ ] Show Android Auto as a texture; send touches as `Input::Pointer`.
+
+### 4. Layout and theming
+
+- [ ] Full-screen projection, a split with a side panel (the
+      `projectionViewAreaRight` margin), and switching between them.
+- [ ] The `ThemeManager` and the token, type and layout model (see
+      "Theming"), with handedness, day and night, text scale and DPI
+      working first. The placeholder page moves onto tokens.
+- [ ] The theme checks (contrast, touch targets, clipping, mirroring) run in
+      every scenario from here on.
+- [ ] Quality profiles (see "Quality profiles") and idle redraw, with `vm`
+      and a first guess at `unit`.
+
+### 5. Hosting and the launcher
+
+- [ ] godot-maps, then LIVI's Slint UI, as windows in a region.
+- [ ] The launcher (see "App launcher"): discovery, icons, launching in its
+      own scope, and matching windows to launches.
+- [ ] The launcher's lifecycle, driving limits and per-driver arrangement.
+- [ ] XWayland (see "XWayland"), lazily started, for X11-only apps.
+
+### 6. Pages
+
+- [ ] Home.
+- [ ] Side panel: drive stats, and the preconditioning toggle (the core's
+      `PreconditionBattery`) with its status.
+- [ ] Stats and graphs, from the core's telemetry.
+- [ ] Built-in pages as launcher entries.
+
+### 7. On the unit
+
+- [ ] armv7 package.
+- [ ] Measure Android Auto decode plus Godot compositing on the Mali-G51
+      (frame rate and latency), idle CPU and GPU with low-processor mode,
+      and memory.
+- [ ] Run every quality profile on the unit, set the `unit` limits from the
+      results, and tune the adaptive step-down.
 
 Go or no-go after 7: if the Mali can't composite the projection and Godot at a
 usable rate, stop; the work up to 6 is still usable as hosted pages under

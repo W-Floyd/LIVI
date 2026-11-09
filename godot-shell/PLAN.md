@@ -142,6 +142,24 @@ changes.
   units and language from the core's config. Preferences that only the shell
   uses are kept per driver profile in the shell's own settings.
 - **Branding:** the OEM and car name and logo, the boot splash and the accent.
+- **Materials:** each surface role (panels floating over the map, the status
+  bar, sheets, the parked-only cover) has a material:
+  - `solid`;
+  - `frosted`: a background blur, a tint, a saturation boost and optional
+    grain;
+  - `glass`, which is frosted plus an edge highlight and a slight refraction
+    and lensing at the edges, in the "liquid glass" style.
+  How it's done:
+  - It's a shader on a `BackBufferCopy`, sampling the screen texture's
+    mipmaps. That's cheap and works in the GLES3 compatibility renderer.
+  - Anything already in the scene can be blurred behind a panel: the
+    projection, hosted windows and the 3D car.
+  - Each material falls back to `solid` (the tint, made opaque) when the
+    quality profile turns blur off, when the user asks for reduced
+    transparency, or for high contrast.
+  - The contrast check for text on glass uses the worst backdrop the panel
+    can sit over (the tint mixed with the lightest and the darkest of what's
+    behind it), not the tint alone.
 - **Density (DPI):**
   - Sizes in a theme are physical: millimeters for touch targets and spacing,
     and points at a stated viewing distance for type. Each display's DPI turns
@@ -212,6 +230,9 @@ page looks like; a quality profile says how much the GPU may spend drawing
 it. The Mali-G51 has a different budget from llvmpipe or a desktop.
 
 **What a profile sets:**
+- Materials: whether `frosted` and `glass` may blur, the blur's mip level,
+  and how often a still backdrop is blurred again. Off means the solid
+  fallback.
 - Anti-aliasing: MSAA for 2D and 3D, FXAA, or none. The panel's own pixels
   matter here; text is already anti-aliased.
 - Textures:

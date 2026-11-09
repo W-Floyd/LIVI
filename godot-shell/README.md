@@ -18,6 +18,7 @@ scripts/vm.sh scripts/test.sh                   # in the VM: cargo test, then ev
 scripts/vm.sh scripts/test.sh home-night        # one scenario
 scripts/vm.sh scripts/test.sh --update-goldens  # rewrite goldens, then review them in the diff
 scripts/vm.sh scripts/test.sh --shots-only      # render without comparing
+scripts/vm.sh scripts/test.sh --record          # also record flows to MP4, for review and docs
 ```
 
 `vm.sh` syncs `godot-shell/` and `native/` into the VM, runs the command, and copies `out/`
@@ -40,6 +41,11 @@ value }`, `screenshot: name` or `{ name, tolerance, max_pixels, mask: [[x, y, w,
 }`, `measure: { name, frames, expect: { <profile>: { <metric>: max } } }`, and `gdscript: |`
 with a block that is the body of `func run(shell, runner)`: it can use the autoloads, `await
 runner.frames(n)`, and returns an error string to fail.
+
+`record: name` (or `{ name, hold_frames }`) records the flow from there to `record: stop` or the
+scenario's end, for review and docs; recordings are never compared. They are made only with
+`--record`: every drawn frame of the panel, with a ring where each tap lands and a half-second
+hold after each step, encoded to `out/<scenario>/<name>.mp4` (ffmpeg) and shown in the report.
 
 `measure` runs frames unthrottled and writes `out/<scenario>/<name>.metrics.json`: fps, frame
 time p50/p95/max, the viewport's CPU render time, process CPU % and RSS, the compositor's

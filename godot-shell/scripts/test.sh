@@ -1,6 +1,7 @@
 #!/bin/sh
 # Every test: cargo's, then the scenarios, rendered under a headless weston so no display is
-# needed. Arguments go to the runner: a scenario name or path, --update-goldens, --shots-only.
+# needed. Arguments go to the runner: a scenario name or path, --update-goldens, --shots-only,
+# --record.
 set -eu
 cd "$(dirname "$0")/.."
 (cd ext && cargo test --quiet)
@@ -35,4 +36,15 @@ status=$runtime/status
 } 2>&1 | awk -v pidf="$runtime/pid" '{ print; fflush() }
     /Failed to load script/ && !k {
         getline p < pidf; system("kill " p); k = 1 }'
+
+# --record leaves JPEG frames per recording; they become one MP4 each, at the run's 60 fps.
+for frames in out/*/*.frames; do
+    [ -d "$frames" ] || continue
+    if command -v ffmpeg >/dev/null; then
+        ffmpeg -loglevel error -y -framerate 60 -i "$frames/%05d.jpg" -c:v libx264 -preset veryfast \
+            -crf 23 -pix_fmt yuv420p -movflags +faststart "${frames%.frames}.mp4" && rm -rf "$frames"
+    else
+        echo "no ffmpeg: $frames left as JPEG frames" >&2
+    fi
+done
 exit "$(cat "$status")"

@@ -176,6 +176,35 @@ changes.
   - an RHD layout is the mirror of its LHD layout.
 - `cargo test` validates `theme.yaml` against its schema.
 
+## What the cluster already shows
+
+The car's own instrument cluster shows some of what the shell could show:
+speed, gear, charge and range, the time, the outside temperature, warning
+lights, and sometimes the next turn or what's playing. Showing it twice costs
+space on the center panel and pulls the driver's eyes away from the road
+twice. So it is part of the car's config, next to the car theme.
+
+**The vehicle config declares:**
+- `cluster.shows`: what the cluster already displays, as tags from a fixed
+  set: `speed`, `gear`, `charge`, `range`, `clock`, `outside_temp`,
+  `telltales`, `next_turn`, `now_playing`, `trip`, `efficiency`. Where LIVI
+  drives the cluster screen itself, its cluster layout adds its own tags.
+- `cluster.show_anyway`: tags shown on the center panel even so (for
+  example, `charge` while a charging stop is planned, or `clock` for the
+  passenger). The driver's profile can extend or override this list.
+
+**Components** declare the tags they duplicate (the charge stat duplicates
+`charge` and `range`; the status bar's clock duplicates `clock`). A
+component whose tags are all in `cluster.shows` and none in
+`cluster.show_anyway` is left out, and its layout region collapses or
+gives the space to its neighbors. A component that duplicates only some
+of its tags stays.
+
+**Tests:** scenarios set the vehicle config like a theme variant
+(`vehicle: { cluster: { shows: [...], show_anyway: [...] } }`). Goldens are
+kept with and without the duplicates, and the runner checks that no element
+shows a tag the config hides.
+
 ## Quality profiles
 
 Rendering cost is set by the device, not the theme. A theme says what a
@@ -518,6 +547,9 @@ steps:
   are reviewed in the diff like code.
 - `--shots-only` renders screenshots without comparing, for docs and review
   (day and night, every page).
+- `--record` turns a scenario's `record` steps into MP4s of the flow, for
+  review and docs, never compared. They're captured from the panel's own
+  viewport, with taps marked and a pause after each step.
 
 **Where it runs:**
 - In the VM, under its GNOME session or a headless compositor (`weston

@@ -22,6 +22,16 @@ var _scenario: String
 var _client_bin: String
 var _clients: Array[int] = []
 
+## Flow recording, for review and docs; never compared. Only with --record.
+const RECORD_MAX_FRAMES := 1800
+const TAP_MARK_FRAMES := 18
+var _record := false
+var _rec_dir := ""
+var _rec_frame := 0
+var _rec_hold := 30
+var _rec_marks: Array[Dictionary] = []
+var _tap_ring: Image
+
 
 func run(args: PackedStringArray) -> void:
 	var root := ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
@@ -29,6 +39,7 @@ func run(args: PackedStringArray) -> void:
 	_out = root.path_join("out")
 	_update = args.has("--update-goldens")
 	_shots_only = args.has("--shots-only")
+	_record = args.has("--record")
 	var i := args.find("--test")
 	var target := _tests.path_join("scenarios")
 	if i + 1 < args.size() and not args[i + 1].begins_with("--"):
@@ -116,6 +127,9 @@ func _run_one(path: String) -> String:
 		var e := await _step(step)
 		if e != "":
 			return "%s: %s" % [JSON.stringify(step), e]
+		# A recording holds after each step so a viewer can follow; test runs are unaffected.
+		if _rec_dir != "":
+			await _frames(_rec_hold)
 	return ""
 
 
@@ -150,6 +164,7 @@ func _spawn(c: Dictionary) -> String:
 
 
 func _teardown() -> void:
+	_record_stop()
 	for pid in _clients:
 		OS.kill(pid)
 	_clients.clear()
@@ -185,6 +200,12 @@ func _step(step: Dictionary) -> String:
 			return _expect("input", "input", _input_from_scenario(arg))
 		"expect_node":
 			return _expect_node(arg)
+		"record":
+			if str(arg) == "stop":
+				_record_stop()
+			else:
+				_rec_hold = int(arg.get("hold_frames", 30)) if arg is Dictionary else 30
+				_record_start(arg.name if arg is Dictionary else str(arg))
 		"screenshot":
 			return await _screenshot(arg if arg is Dictionary else {name = arg})
 		"measure":
@@ -334,7 +355,62 @@ func _point(arg) -> Variant:
 	return "tap needs node, or x and y"
 
 
+## `record: name` starts, `record: stop` (or the scenario's end) stops. Frames go to
+## out/<scenario>/<name>.frames/ as JPEG; test.sh encodes them to <name>.mp4.
+func _record_start(name: String) -> void:
+	_record_stop()
+	if not _record:
+		return
+	_rec_dir = _out.path_join(_scenario).path_join(name + ".frames")
+	DirAccess.make_dir_recursive_absolute(_rec_dir)
+	_rec_frame = 0
+	_rec_marks.clear()
+	_rows.append({scenario = _scenario, shot = name, status = "recorded", msg = "",
+		video = _out.path_join(_scenario).path_join(name + ".mp4")})
+	RenderingServer.frame_post_draw.connect(_record_frame)
+
+
+func _record_stop() -> void:
+	if RenderingServer.frame_post_draw.is_connected(_record_frame):
+		RenderingServer.frame_post_draw.disconnect(_record_frame)
+	_rec_dir = ""
+
+
+func _record_frame() -> void:
+	if _vp == null or _rec_frame >= RECORD_MAX_FRAMES:
+		return
+	var img := _vp.get_texture().get_image()
+	img.convert(Image.FORMAT_RGBA8)
+	var ring := _ring()
+	for m in _rec_marks:
+		var r := Rect2i(Vector2i.ZERO, ring.get_size())
+		img.blend_rect(ring, r, Vector2i(m.pos) - ring.get_size() / 2)
+		m.age += 1
+	_rec_marks = _rec_marks.filter(func(m): return m.age < TAP_MARK_FRAMES)
+	_rec_frame += 1
+	img.save_jpg(_rec_dir.path_join("%05d.jpg" % _rec_frame), 0.9)
+
+
+## A white ring with a dark edge, readable on any theme, drawn where a tap lands.
+func _ring() -> Image:
+	if _tap_ring:
+		return _tap_ring
+	var size := 76
+	_tap_ring = Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var c := Vector2(size, size) / 2.0
+	for y in size:
+		for x in size:
+			var d := Vector2(x + 0.5, y + 0.5).distance_to(c)
+			if d >= 27 and d < 33:
+				_tap_ring.set_pixel(x, y, Color(1, 1, 1, 0.9))
+			elif d >= 24 and d < 36:
+				_tap_ring.set_pixel(x, y, Color(0, 0, 0, 0.55))
+	return _tap_ring
+
+
 func _tap(at: Vector2) -> void:
+	if _rec_dir != "":
+		_rec_marks.append({pos = at, age = 0})
 	var move := InputEventMouseMotion.new()
 	move.position = at
 	_vp.push_input(move)
@@ -476,6 +552,8 @@ func _write_report() -> void:
 			for k in ["golden", "new", "diff"]:
 				if r.has(k) and FileAccess.file_exists(r[k]):
 					h.append("<img title=%s src='file://%s'>" % [k, r[k].uri_encode().replace("%2F", "/")])
+		if r.has("video"):
+			h.append("<video controls muted loop width=960 src='file://%s'></video>" % r.video.uri_encode().replace("%2F", "/"))
 		if r.has("metrics"):
 			h.append("<table>")
 			for k in r.metrics:

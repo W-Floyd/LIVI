@@ -8,6 +8,7 @@ steps:
   - wait: { frames: 2 }
   - expect_node: { path: Home/Soc, text: "64 %" }
   - screenshot: home-idle
+  - record: precondition-on-off
   - tap: { node: Home/Precondition }
   - expect_action: { PreconditionBattery: { on: true } }
   - set: { core: { precondition: { manualUntil: 1794213000 }, telemetry: { fuelPct: 63.0 } } }

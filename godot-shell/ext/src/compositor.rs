@@ -36,7 +36,8 @@ use smithay::utils::Serial;
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
-    SurfaceAttributes, with_states,
+    SubsurfaceCachedState, SurfaceAttributes, TraversalAction, get_parent, with_states,
+    with_surface_tree_downward,
 };
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -73,6 +74,8 @@ pub struct Window {
     pub mapped: bool,
     /// The dmabuf on screen, held until a frame has been drawn without it.
     shown: Option<WlBuffer>,
+    /// The toplevel surface's own latest shm picture, under its subsurfaces.
+    root_frame: Option<Frame>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,6 +104,9 @@ pub struct State {
     pub events: Vec<WindowEvent>,
     next_id: u64,
     buffer_keys: HashMap<ObjectId, u64>,
+    /// Each subsurface's latest shm picture. Android's compositor draws a layer per subsurface and
+    /// leaves the toplevel itself a placeholder, so a window is these laid over each other.
+    layers: HashMap<ObjectId, Frame>,
     next_key: u64,
     /// Keys of dmabufs the client destroyed; the embedder frees what it imported for them.
     pub gone_buffers: Vec<u64>,
@@ -155,7 +161,7 @@ impl Server {
             touch,
             compositor: CompositorState::new::<State>(&dh),
             xdg_shell: XdgShellState::new::<State>(&dh),
-            shm: ShmState::new::<State>(&dh, vec![]),
+            shm: ShmState::new::<State>(&dh, vec![Format::Abgr8888, Format::Xbgr8888]),
             seat_state,
             _seat: seat,
             dmabuf: DmabufState::new(),
@@ -164,6 +170,7 @@ impl Server {
             events: Vec::new(),
             next_id: 1,
             buffer_keys: HashMap::new(),
+            layers: HashMap::new(),
             next_key: 1,
             gone_buffers: Vec::new(),
             release_next: Vec::new(),
@@ -250,12 +257,18 @@ impl Server {
         self.state.release_now = std::mem::take(&mut self.state.release_next);
         let ms = self.started.elapsed().as_millis() as u32;
         for w in &self.state.windows {
-            with_states(w.toplevel.wl_surface(), |states| {
-                let mut attrs = states.cached_state.get::<SurfaceAttributes>();
-                for cb in attrs.current().frame_callbacks.drain(..) {
-                    cb.done(ms);
-                }
-            });
+            with_surface_tree_downward(
+                w.toplevel.wl_surface(),
+                (),
+                |_, _, _| TraversalAction::DoChildren(()),
+                |_, states, _| {
+                    let mut attrs = states.cached_state.get::<SurfaceAttributes>();
+                    for cb in attrs.current().frame_callbacks.drain(..) {
+                        cb.done(ms);
+                    }
+                },
+                |_, _, _| true,
+            );
         }
         let _ = self.display.flush_clients();
     }
@@ -349,10 +362,16 @@ impl Server {
 
 /// shm's ARGB and XRGB are little-endian words, so B, G, R, A in memory.
 fn to_rgba(src: &[u8], width: u32, height: u32, stride: usize, format: Format) -> Option<Vec<u8>> {
-    let opaque = match format {
-        Format::Argb8888 => false,
-        Format::Xrgb8888 => true,
-        _ => return None,
+    // (alpha opaque, bytes are R G B A in memory rather than B G R A)
+    let (opaque, rgb_order) = match format {
+        Format::Argb8888 => (false, false),
+        Format::Xrgb8888 => (true, false),
+        Format::Abgr8888 => (false, true),
+        Format::Xbgr8888 => (true, true),
+        other => {
+            eprintln!("compositor: shm format {other:?} not handled");
+            return None;
+        }
     };
     let row = width as usize * 4;
     if height == 0 || stride < row || src.len() < stride * (height as usize - 1) + row {
@@ -361,7 +380,8 @@ fn to_rgba(src: &[u8], width: u32, height: u32, stride: usize, format: Format) -
     let mut out = Vec::with_capacity(row * height as usize);
     for y in 0..height as usize {
         for px in src[y * stride..y * stride + row].chunks_exact(4) {
-            out.extend_from_slice(&[px[2], px[1], px[0], if opaque { 255 } else { px[3] }]);
+            let (r, b) = if rgb_order { (px[0], px[2]) } else { (px[2], px[0]) };
+            out.extend_from_slice(&[r, px[1], b, if opaque { 255 } else { px[3] }]);
         }
     }
     Some(out)
@@ -397,6 +417,14 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        let mut root = surface.clone();
+        while let Some(parent) = get_parent(&root) {
+            root = parent;
+        }
+        if &root != surface {
+            self.commit_layer(&root, surface);
+            return;
+        }
         let Some(i) = self.windows.iter().position(|w| w.toplevel.wl_surface() == surface) else {
             return;
         };
@@ -433,6 +461,7 @@ impl CompositorHandler for State {
                         self.release_next.push(old);
                     }
                     let Some(frame) = frame else { return };
+                    self.windows[i].root_frame = Some(frame.clone());
                     Content::Pixels(frame)
                 };
                 let window = &mut self.windows[i];
@@ -457,6 +486,7 @@ impl CompositorHandler for State {
                     let id = window.id;
                     self.events.push(WindowEvent::Mapped(id));
                 }
+                self.recomposite(i);
             }
             Some(BufferAssignment::Removed) if self.windows[i].mapped => {
                 let window = &mut self.windows[i];
@@ -469,6 +499,119 @@ impl CompositorHandler for State {
                 self.events.push(WindowEvent::Unmapped(id));
             }
             _ => {}
+        }
+    }
+}
+
+impl State {
+    /// A subsurface of window `root` committed: keep its picture, then lay the window out again.
+    fn commit_layer(&mut self, root: &WlSurface, surface: &WlSurface) {
+        let Some(i) = self.windows.iter().position(|w| w.toplevel.wl_surface() == root) else {
+            return;
+        };
+        let assignment = with_states(surface, |states| {
+            states.cached_state.get::<SurfaceAttributes>().current().buffer.take()
+        });
+        match assignment {
+            Some(BufferAssignment::NewBuffer(buffer)) => {
+                if get_dmabuf(&buffer).is_err() {
+                    match read_shm(&buffer) {
+                        Some(f) => {
+                            self.layers.insert(surface.id(), f);
+                        }
+                        None => {
+                            self.layers.remove(&surface.id());
+                        }
+                    }
+                }
+                buffer.release();
+            }
+            Some(BufferAssignment::Removed) => {
+                self.layers.remove(&surface.id());
+            }
+            None => {}
+        }
+        self.recomposite(i);
+    }
+
+    /// Window `i` as its toplevel's own picture with every subsurface's over it, bottom to top; the
+    /// window is as big as the toplevel's picture, or where the layers reach if that is a placeholder.
+    fn recomposite(&mut self, i: usize) {
+        let root = self.windows[i].toplevel.wl_surface().clone();
+        let mut placed: Vec<(ObjectId, Point<i32, Logical>)> = Vec::new();
+        with_surface_tree_downward(
+            &root,
+            Point::<i32, Logical>::from((0, 0)),
+            |_, states, loc| {
+                let sub = states.cached_state.get::<SubsurfaceCachedState>().current().location;
+                TraversalAction::DoChildren(*loc + sub)
+            },
+            |surf, _, loc| placed.push((surf.id(), *loc)),
+            |_, _, _| true,
+        );
+        let root_id = root.id();
+        let has_layers = placed.iter().any(|(id, _)| *id != root_id && self.layers.contains_key(id));
+        if !has_layers {
+            return;
+        }
+        let base = self.windows[i].root_frame.clone();
+        let mut w = base.as_ref().map(|f| f.width).unwrap_or(0);
+        let mut h = base.as_ref().map(|f| f.height).unwrap_or(0);
+        if w <= 1 && h <= 1 {
+            w = 0;
+            h = 0;
+        }
+        for (id, loc) in &placed {
+            if let Some(f) = self.layers.get(id) {
+                w = w.max((loc.x.max(0) as u32) + f.width);
+                h = h.max((loc.y.max(0) as u32) + f.height);
+            }
+        }
+        if w == 0 || h == 0 {
+            return;
+        }
+        let mut canvas = vec![0u8; (w * h * 4) as usize];
+        let mut blit = |f: &Frame, x0: i32, y0: i32| {
+            for y in 0..f.height as i32 {
+                let dy = y0 + y;
+                if dy < 0 || dy >= h as i32 {
+                    continue;
+                }
+                for x in 0..f.width as i32 {
+                    let dx = x0 + x;
+                    if dx < 0 || dx >= w as i32 {
+                        continue;
+                    }
+                    let s = ((y as u32 * f.width + x as u32) * 4) as usize;
+                    let d = ((dy as u32 * w + dx as u32) * 4) as usize;
+                    let a = f.rgba[s + 3] as u32;
+                    if a == 255 {
+                        canvas[d..d + 4].copy_from_slice(&f.rgba[s..s + 4]);
+                    } else if a > 0 {
+                        for k in 0..3 {
+                            canvas[d + k] = ((f.rgba[s + k] as u32 * a + canvas[d + k] as u32 * (255 - a)) / 255) as u8;
+                        }
+                        canvas[d + 3] = (a + canvas[d + 3] as u32 * (255 - a) / 255).min(255) as u8;
+                    }
+                }
+            }
+        };
+        if let Some(f) = base.as_ref().filter(|f| f.width > 1 || f.height > 1) {
+            blit(f, 0, 0);
+        }
+        for (id, loc) in &placed {
+            if *id != root_id {
+                if let Some(f) = self.layers.get(id) {
+                    blit(f, loc.x, loc.y);
+                }
+            }
+        }
+        let window = &mut self.windows[i];
+        window.frame = Some(Content::Pixels(Frame { width: w, height: h, rgba: canvas }));
+        if !window.mapped {
+            window.mapped = true;
+            let id = window.id;
+            self.events.push(WindowEvent::Mapped(id));
         }
     }
 }
@@ -509,6 +652,7 @@ impl XdgShellHandler for State {
             frame: None,
             mapped: false,
             shown: None,
+            root_frame: None,
         });
     }
 

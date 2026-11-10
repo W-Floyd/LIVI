@@ -5,6 +5,8 @@
 #   ./run.sh                      cocoa window, in the foreground
 #   ./run.sh --headless           no window, daemonized (or HEADLESS=1)
 #   ./run.sh --headless --vnc 1   ...plus VNC on 127.0.0.1:5901 (or VNC=1)
+#   ./run.sh --view               headless + VNC on 127.0.0.1:5901 (password nura): a viewer that scales the picture
+#                                 and never resizes the guest, unlike the cocoa window, whose size the guest follows
 #   ./run.sh --stop               guest-agent shutdown, then ACPI, then `quit`
 #   XRES=1920 YRES=720 ./run.sh   the display's size (the panel's by default); GNOME takes it as the monitor's preferred mode
 #
@@ -51,6 +53,7 @@ while [ $# -gt 0 ]; do
     --stop) stop; exit ;;
     --headless) HEADLESS=1 ;;
     --vnc) VNC=$2; shift ;;
+    --view) HEADLESS=1; VNC=1 ;;
     --) shift; break ;;
     *) break ;;
     esac
@@ -85,12 +88,17 @@ set -- \
     -monitor unix:"$MON",server,nowait \
     -pidfile "$PID" \
     "$@"
-[ -z "$VNC" ] || set -- "$@" -vnc 127.0.0.1:"$VNC"
+[ -z "$VNC" ] || set -- "$@" -vnc 127.0.0.1:"$VNC",password=on
 
 if [ "$HEADLESS" = 1 ]; then
     # The virtio GPU stays, so GNOME still has an output (and screendump works).
     qemu-system-aarch64 "$@" -display none -daemonize -D qemu.log
     echo "started, pid $(cat "$PID")"
+    if [ -n "$VNC" ]; then
+        sleep 1
+        echo "set_password vnc nura" | nc -U -w 1 "$MON" >/dev/null
+        echo "view: open vnc://:nura@127.0.0.1:$((5900 + VNC))"
+    fi
 else
     exec qemu-system-aarch64 "$@" -display cocoa,zoom-to-fit=on
 fi

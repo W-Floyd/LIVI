@@ -39,7 +39,7 @@ Screenshot, any mode: `echo "screendump $PWD/s.ppm" | nc -U monitor.sock`.
   `efi-vars.fd`) loads systemd-boot from the image's FAT boot partition. No
   `-kernel`/`-initrd`. This is the same path `pmbootstrap qemu` takes.
 - Devices: `virt,highmem=on`, HVF with `-cpu host`, virtio-blk, virtio-net (user
-  mode networking, host 127.0.0.1:2222 to guest 22), virtio-gpu-pci at 1920x720 (`XRES`/`YRES`; the cocoa window scales to fit; no virgl, so
+  mode networking, host 127.0.0.1:2222 to guest 22), virtio-gpu-pci at 1920x720 (`XRES`/`YRES`; no virgl, so
   GL is llvmpipe), virtio keyboard and tablet, and a virtio-serial port for
   `qemu-guest-agent`.
 - Control sockets in this folder: `qmp.sock` (QMP), `monitor.sock` (HMP),
@@ -96,3 +96,5 @@ it until it is deleted from `chroot_rootfs_qemu-aarch64` in the container.
 `/dev/installp*` nodes from an earlier install make mkfs fail. It also
 unregisters pmbootstrap's own `qemu-arm` binfmt handler. pmbootstrap registers
 it again on its next armv7 build, and Docker's `arm` handler stays.
+
+To view it at a fixed size: `./run.sh --view`, then `open vnc://:nura@127.0.0.1:5901` (macOS Screen Sharing scales the picture to its window and never changes the guest's resolution). The cocoa window sends its size to the guest, which follows it.

@@ -14,15 +14,15 @@ extends Node3D
 signal moved
 
 ## How long the road is: the world units from the car's origin to the range-off end.
-static var ROAD_UNITS := 36.9
-static var HALF_W := 4.55
+static var ROAD_UNITS := 54.4
+static var HALF_W := 3.7
 ## The road narrows with distance beyond what the lens does, to the stock screen's far end: by
 ## ROAD_TAPER of its width at its end.
-static var ROAD_TAPER := 0.5
+static var ROAD_TAPER := 0.36
 ## Where the car stands on the road (x along it, z across) and how big it is.
-static var CAR_X := 1.6
+static var CAR_X := -0.57
 static var CAR_Z := 1.2
-static var CAR_SCALE := 1.9
+static var CAR_SCALE := 2.23
 ## A charger closer than this ahead of the nose is drawn this far ahead: it is the same place
 ## at this scale, and it would sit inside the car.
 const PIN_MIN_AHEAD := 0.9
@@ -33,11 +33,11 @@ const PIN_MIN_AHEAD := 0.9
 const NEAR := 0.5
 ## The point the camera looks at, which CAR_NDC places on the screen; the car moves independently.
 const CAM_TARGET := Vector3(1.6, 0.6, 1.2)
-static var CAM_YAW := 22.7
-static var CAM_PITCH := 19.9
-static var CAM_DIST := 54.3
-static var CAM_FOV := 16.3
-static var CAR_NDC := Vector2(-1.779, -0.337)
+static var CAM_YAW := 21.0
+static var CAM_PITCH := 22.0
+static var CAM_DIST := 41.6
+static var CAM_FOV := 25.5
+static var CAR_NDC := Vector2(-1.626, -0.318)
 const TICK_KM := 50.0
 ## Under this the end of the lit road turns to the warning color, over its last WARN_KM.
 const LOW_RANGE_KM := 50.0

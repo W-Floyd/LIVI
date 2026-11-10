@@ -48,7 +48,11 @@ func _ready() -> void:
 		win.content_scale_size = Vector2i(1920, 720)
 		win.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
 		win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
-		win.size = Vector2i(1280, 480)
+		# On a display of the panel's own size (the VM's default) the shell fills it; else a window.
+		if DisplayServer.screen_get_size() == Vector2i(1920, 720):
+			win.mode = Window.MODE_FULLSCREEN
+		else:
+			win.size = Vector2i(1280, 480)
 		_vp = win
 	else:
 		var sub := SubViewport.new()

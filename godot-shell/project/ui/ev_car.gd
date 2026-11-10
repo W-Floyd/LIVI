@@ -50,13 +50,14 @@ func _init() -> void:
 	_glass.render_priority = 1
 	add_child(_shell)
 	_battery = _box("Battery", BATTERY, Vector3(0.1, BATTERY_Y, 0), _cell)
-	if model:
-		return
-	_box("Floor", Vector3(3.5, 0.05, 1.62), Vector3(0.05, 0.2, 0), _plate)
+	if not model:
+		_box("Floor", Vector3(3.5, 0.05, 1.62), Vector3(0.05, 0.2, 0), _plate)
 	for sx in [-1, 1]:
 		for sz in [-1, 1]:
 			_wheel(Vector3(sx * WHEEL_X, WHEEL_R, sz * WHEEL_Z))
 	for sz in [-1, 1]:
+		if model:
+			break
 		_box("Lamp", Vector3(0.05, 0.05, 0.42), Vector3(2.0, 0.7, sz * 0.5), _lamp)
 
 

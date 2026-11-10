@@ -9,6 +9,9 @@ extends Control
 ## Nothing in the core backs the tap targets yet, so they only emit `tile_pressed`.
 
 signal tile_pressed(id: String)
+## The bar's back button.
+signal back_pressed
+
 
 ## The range with climate off has no field in the telemetry yet. Until it does: this much over
 ## the range with climate on, about what the EV6 shows.
@@ -56,6 +59,9 @@ var _scene: EvScene
 var _spec := {}
 var _views := {}
 var _title: Label
+var _bar: TitleBar
+## The controls and labels hidden so the scene shows whole (the bar's eye button).
+var ui_hidden := false
 var _battery := {}
 var _charger := {}
 var _on := {}
@@ -82,6 +88,10 @@ func _ready() -> void:
 	_scene.name = "Scene"
 	add_child(_scene)
 	_scene.moved.connect(_place)
+	_bar = TitleBar.new()
+	_bar.back_pressed.connect(func(): back_pressed.emit())
+	_bar.hide_toggled.connect(set_ui_hidden)
+	add_child(_bar)
 	_title = UI.label("", "strong", "title")
 	_title.name = "Title"
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -114,6 +124,35 @@ func _ready() -> void:
 	Core.changed.connect(func(_s): _bind())
 	resized.connect(_layout)
 	_restyle()
+
+
+## Hides or shows the page's labels and tap targets, leaving the scene and the bar.
+func set_ui_hidden(v: bool) -> void:
+	ui_hidden = v
+	_bar.ui_hidden = v
+	if v:
+		_apply_hidden()
+		return
+	for t in _tiles.values():
+		(t as Control).visible = true
+	_settings.visible = true
+	_bind()
+	_layout()
+	queue_redraw()
+
+
+func _apply_hidden() -> void:
+	for b in [_battery, _charger, _on, _off]:
+		(b.box as Control).visible = false
+	for t in _tiles.values():
+		(t as Control).visible = false
+	_settings.visible = false
+	queue_redraw()
+
+
+func _process(_delta: float) -> void:
+	if ui_hidden:
+		_apply_hidden()
 
 
 ## A column of rows of controls laid over the scene: they follow it, so they take no input.
@@ -386,6 +425,9 @@ func _layout() -> void:
 	var h := size.y
 	var rects := {}
 	if not _spec.is_empty():
+		var bar := _rect("_View_3")
+		_bar.position = bar.position if bar.size != Vector2.ZERO else Vector2(0, top_inset)
+		_bar.size = bar.size if bar.size != Vector2.ZERO else Vector2(w, TitleBar.bar_height())
 		_title.position = _rect("layout_main_title").position
 		_title.size = _rect("layout_main_title").size
 		var tiles: Array[Rect2] = []
@@ -406,8 +448,11 @@ func _layout() -> void:
 		_scene.lift(0.0)
 	else:
 		var margin := gap * 1.5
+		var bar_h := TitleBar.bar_height()
+		_bar.position = Vector2(0, top_inset)
+		_bar.size = Vector2(w, bar_h)
 		var title_h: float = ThemeManager.font_size("title") * 1.25
-		_title.position = Vector2(0, top_inset + gap * 0.4)
+		_title.position = Vector2(0, top_inset + (bar_h - title_h) / 2.0)
 		_title.size = Vector2(w, title_h)
 		var row_h: float = ThemeManager.px.touch * 1.3
 		var gap_x := maxf(gap * 1.2, ThemeManager.px.touch_gap)
@@ -562,10 +607,12 @@ func _draw() -> void:
 			var h := roundi(float(bar.height_dp) * float(_spec.get("density", 1.0)))
 			pack.box(bar.image, mode).draw(get_canvas_item(), Rect2(0, 0, size.x, h))
 		for id in ["_View_3", "_View_4", "mainview_bottom_layout_widget"]:
+			if ui_hidden and id == "mainview_bottom_layout_widget":
+				continue
 			var key := str(_view(id).get("background", ""))
 			if key != "" and pack.has_image(key):
 				pack.box(key, mode).draw(get_canvas_item(), _rect(id))
-	if _show_on and not _leader.is_empty():
+	if _show_on and not _leader.is_empty() and not ui_hidden:
 		var p: Vector2 = _leader[0]
 		var c: Color = ThemeManager.c.warn if _scene.km_on <= EvScene.LOW_RANGE_KM else ThemeManager.c.accent
 		var to: Vector2 = _leader[1]

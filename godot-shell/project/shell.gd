@@ -158,6 +158,7 @@ func open_page(page: String) -> String:
 		var ev := EvLive.new()
 		ev.top_inset = 0.0 if own_bar else _status.get_combined_minimum_size().y
 		ev.tile_pressed.connect(func(id): ev_action.emit(id))
+		ev.back_pressed.connect(func(): open_page.call_deferred("home"))
 		_page = ev
 		add_child(_page)
 	elif not home:

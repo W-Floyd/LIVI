@@ -1,0 +1,49 @@
+name: ev-live-bar
+# The page's top bar: a back button to the home page, and an eye button that hides the page's
+# labels and tap targets so the scene shows whole, and shows them again.
+clock: 2026-11-09T17:42:00
+fixtures:
+  core: fixtures/ev6-main.json
+theme: { theme_name: instrument, appearance: night }
+steps:
+  - page: ev
+  - expect_node: { path: EvLive/TitleBar/Back, visible: true }
+  - expect_node: { path: EvLive/TitleBar/HideUI, visible: true, button_pressed: false }
+  - expect_node: { path: EvLive/Battery, visible: true }
+  - expect_node: { path: EvLive/next_departure, visible: true }
+  - screenshot: ev-live-bar-shown
+  - tap: { node: EvLive/TitleBar/HideUI }
+  - wait: { frames: 3 }
+  - expect_node: { path: EvLive/TitleBar/HideUI, button_pressed: true }
+  - expect_node: { path: EvLive/Battery, visible: false }
+  - expect_node: { path: EvLive/RangeOn, visible: false }
+  - expect_node: { path: EvLive/next_departure, visible: false }
+  - expect_node: { path: EvLive/Settings, visible: false }
+  - screenshot: ev-live-bar-hidden
+  - tap: { node: EvLive/TitleBar/HideUI }
+  - wait: { frames: 3 }
+  - expect_node: { path: EvLive/Battery, visible: true }
+  - expect_node: { path: EvLive/next_departure, visible: true }
+  # The bar is a target too: at least the rule table's size, in either hand.
+  - gdscript: |
+      var back: Control = shell.get_node("EvLive/TitleBar/Back")
+      var hide: Control = shell.get_node("EvLive/TitleBar/HideUI")
+      for b in [back, hide]:
+          if b.size.x < ThemeManager.px.touch - 0.5 or b.size.y < ThemeManager.px.touch - 0.5:
+              return "%s is %s, under the touch size" % [b.name, b.size]
+      if back.get_global_rect().intersects(hide.get_global_rect()):
+          return "back and hide overlap"
+      if (back.global_position.x < hide.global_position.x) != (ThemeManager.hand == "lhd"):
+          return "the back button is not on the drive side"
+  - theme: { hand: rhd }
+  - wait: { frames: 2 }
+  - gdscript: |
+      var back: Control = shell.get_node("EvLive/TitleBar/Back")
+      var hide: Control = shell.get_node("EvLive/TitleBar/HideUI")
+      if (back.global_position.x < hide.global_position.x) != (ThemeManager.hand == "lhd"):
+          return "the back button is not on the drive side"
+  - screenshot: { name: ev-live-bar-rhd, compare: false }
+  - theme: { hand: lhd }
+  - tap: { node: EvLive/TitleBar/Back }
+  - wait: { frames: 3 }
+  - expect_node: { path: Page/Body, visible: true }

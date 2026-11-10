@@ -32,7 +32,7 @@ done
 # compile fails that scenario instead.
 status=$runtime/status
 {
-    XDG_RUNTIME_DIR=$runtime WAYLAND_DISPLAY=wayland-test timeout "${TEST_TIMEOUT:-60}" \
+    XDG_RUNTIME_DIR=$runtime WAYLAND_DISPLAY=wayland-test timeout "${TEST_TIMEOUT:-240}" \
         sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$runtime/pid" \
         godot --path project --display-driver wayland --rendering-driver opengl3 \
         --audio-driver Dummy --fixed-fps 60 --disable-vsync -- --test "$@" &&

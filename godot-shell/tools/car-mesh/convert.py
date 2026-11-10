@@ -66,6 +66,40 @@ def remesh(w, f, voxel, close, sigma):
     return v + lo + voxel * 0.5, ff
 
 
+def feature_edges(w, f, skin, angle, keep):
+    """The model's crease and panel-gap lines that lie on its outer skin, longest `keep` of them,
+    as segments (n, 2, 3). The skin is dense points of the remeshed surface."""
+    from scipy.spatial import cKDTree
+
+    tri = w[f]
+    nrm = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+    ln = np.linalg.norm(nrm, axis=1)
+    ok = ln > 1e-12
+    nrm[ok] /= ln[ok, None]
+    e = np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]])
+    face = np.tile(np.arange(len(f)), 3)
+    key = np.sort(e, axis=1)
+    order = np.lexsort((key[:, 1], key[:, 0]))
+    key, face, e = key[order], face[order], e[order]
+    same = (key[1:] == key[:-1]).all(axis=1)
+    first = np.flatnonzero(same)
+    pair = np.zeros(len(key), bool)
+    pair[first] = pair[first + 1] = True
+    sharp = np.zeros(len(key), bool)
+    cos = (nrm[face[first]] * nrm[face[first + 1]]).sum(axis=1)
+    sharp[first] = cos < np.cos(np.radians(angle))
+    # An edge with one face is a boundary: a panel gap or an open seam.
+    pick = sharp | ~pair
+    seg = w[e[pick]]
+    mid = seg.mean(axis=1)
+    d, _ = cKDTree(skin).query(mid)
+    seg = seg[d < 0.04]
+    length = np.linalg.norm(seg[:, 1] - seg[:, 0], axis=1)
+    seg = seg[length > 0.012]
+    length = length[length > 0.012]
+    return seg[np.argsort(-length)[:keep]]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("stl")
@@ -80,6 +114,8 @@ def main():
     ap.add_argument("--remesh", type=float, default=0.0, help="voxel size in metres: rebuild the outer surface (try 0.02)")
     ap.add_argument("--close", type=int, default=3, help="--remesh: voxels of gap to close")
     ap.add_argument("--smooth", type=float, default=1.5, help="--remesh: blur of the volume, in voxels")
+    ap.add_argument("--edges", type=int, default=0, help="also keep the N longest crease lines on the outer skin")
+    ap.add_argument("--edge-angle", type=float, default=30.0, help="--edges: degrees between faces that make a crease")
     ap.add_argument("--front", default="+y")
     ap.add_argument("--up", default="+z")
     a = ap.parse_args()
@@ -104,8 +140,10 @@ def main():
         f = f[~inside]
         used, inv = np.unique(f, return_inverse=True)
         w, f = w[used], inv.reshape(-1, 3)
+    src_w, src_f = w, f
     if a.remesh:
         w, f = remesh(w, f, a.remesh, a.close, a.smooth)
+    skin = w
     ratio = 1.0 - a.tris / len(f)
     if ratio > 0:
         w, f = fast_simplification.simplify(w.astype(np.float32), f.astype(np.int32), target_reduction=ratio, agg=a.agg)
@@ -113,6 +151,11 @@ def main():
         o.write(b"LCAR" + struct.pack("<II", len(w), f.size))
         o.write(w.astype("<f4").tobytes())
         o.write(f.astype("<u4").tobytes())
+        if a.edges:
+            seg = feature_edges(src_w, src_f, skin, a.edge_angle, a.edges)
+            o.write(b"LINE" + struct.pack("<I", len(seg)))
+            o.write(seg.astype("<f4").tobytes())
+            print(f"{len(seg)} edge segments")
     print(f"{len(f)} triangles, {len(w)} vertices, size {(w.max(0) - w.min(0)).round(3)} m")
 
 

@@ -42,8 +42,10 @@ func run(args: PackedStringArray) -> void:
 	_record = args.has("--record")
 	var i := args.find("--test")
 	var target := _tests.path_join("scenarios")
-	if i + 1 < args.size() and not args[i + 1].begins_with("--"):
-		target = _resolve(args[i + 1])
+	for a in args.slice(i + 1):
+		if not a.begins_with("--"):
+			target = _resolve(a)
+			break
 	_client_bin = OS.get_environment("SHELL_TEST_CLIENT")
 	if _client_bin == "":
 		_client_bin = root.path_join("ext/target/release/livi-shell-test-client")

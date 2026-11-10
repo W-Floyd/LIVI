@@ -1,0 +1,11 @@
+name: perf-ev-live-car
+# What the car model costs on the EV page, whatever mesh is installed (tools/car-mesh).
+requires: { car: true }
+fixtures:
+  core: fixtures/ev6-main.json
+theme: { theme_name: instrument, appearance: night, car: auto }
+steps:
+  - page: ev_live
+  - measure: { name: ev-live-car-normal, frames: 240 }
+  - theme: { quality: low }
+  - measure: { name: ev-live-car-low, frames: 240 }

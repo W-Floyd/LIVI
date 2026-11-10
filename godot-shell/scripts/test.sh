@@ -1,10 +1,13 @@
 #!/bin/sh
 # Every test: cargo's, then the scenarios, rendered under a headless weston so no display is
-# needed. Arguments go to the runner: a scenario name or path, --update-goldens, --shots-only,
-# --record.
+# needed. Arguments go to the runner: a scenario name or path (which also skips cargo test),
+# --update-goldens, --shots-only, --record.
 set -eu
 cd "$(dirname "$0")/.."
-(cd ext && cargo test --quiet)
+# Naming a scenario is iterating on it: skip cargo's tests (a full run keeps them).
+named=
+for a in "$@"; do case $a in --*) ;; *) named=1 ;; esac; done
+[ -n "$named" ] || (cd ext && cargo test --quiet)
 # Release: the measure steps time the extension, and a debug build's numbers mean little.
 scripts/build-ext.sh --release
 # Every run: the import registers the extension, resources and global class names (a new

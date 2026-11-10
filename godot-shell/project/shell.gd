@@ -32,6 +32,8 @@ var _scene: SceneSkin
 ## A pack's page standing in for the home page, while one is open.
 var _page: Control
 var _live_bar := false
+## The "app" page: the newest hosted window fills the panel, nothing else drawn.
+var _app_page := false
 
 
 func _init() -> void:
@@ -138,12 +140,13 @@ func open_page(page: String) -> String:
 	if page == "ev_live":
 		if _powertrain() != "electric":
 			return "ev_live needs an electric car"
-	elif page != "home" and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
+	elif page != "home" and page != "app" and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
 		return "theme %s has no page %s" % [ThemeManager.theme_name, page]
 	if _page:
 		remove_child(_page)
 		_page.free()
 		_page = null
+	_app_page = page == "app"
 	var home := page == "home"
 	var live := page == "ev_live"
 	var own_bar := live and _own_bar()
@@ -151,7 +154,9 @@ func open_page(page: String) -> String:
 	# The live page keeps the status bar unless its pack draws its own title bar.
 	$Page.visible = home or (live and not own_bar)
 	_body.visible = home
-	_projection.visible = home
+	_projection.visible = home or _app_page
+	if _app_page:
+		_place_projection()
 	if _scene:
 		_scene.visible = home
 	if live:
@@ -161,7 +166,7 @@ func open_page(page: String) -> String:
 		ev.back_pressed.connect(func(): open_page.call_deferred("home"))
 		_page = ev
 		add_child(_page)
-	elif not home:
+	elif not home and not _app_page:
 		_page = PackScreen.new()
 		_page.screen_name = page
 		add_child(_page)
@@ -177,7 +182,7 @@ func _own_bar() -> bool:
 func _place_projection() -> void:
 	if _projection == null:
 		return
-	var r := Rect2(Vector2.ZERO, size) if ThemeManager.floating() else Rect2(_slot.global_position - global_position, _slot.size)
+	var r := Rect2(Vector2.ZERO, size) if (ThemeManager.floating() or _app_page) else Rect2(_slot.global_position - global_position, _slot.size)
 	_projection.position = r.position
 	_projection.size = r.size
 

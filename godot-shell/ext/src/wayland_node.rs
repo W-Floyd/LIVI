@@ -155,7 +155,9 @@ impl WaylandCompositor {
         if let Err(e) = server.listen(&name.to_string()) {
             return gs(format!("{name}: {e}"));
         }
-        match GlImporter::new() {
+        // LIVI_SHELL_NO_DMABUF: offer wl_shm only, for clients that cope (and to tell which path a blank window is on).
+        let no_dmabuf = std::env::var("LIVI_SHELL_NO_DMABUF").map(|v| !v.is_empty()).unwrap_or(false);
+        match if no_dmabuf { Err("disabled by LIVI_SHELL_NO_DMABUF".to_string()) } else { GlImporter::new() } {
             Ok(gl) => {
                 let formats: Vec<(u32, u64)> = gl.formats().iter().map(|f| (f.fourcc, f.modifier)).collect();
                 match server.enable_dmabuf(&formats, gl.render_node()) {

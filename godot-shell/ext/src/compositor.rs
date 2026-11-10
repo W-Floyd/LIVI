@@ -11,6 +11,11 @@ use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Format as DrmFormat, Fourcc, Modifier};
 use smithay::delegate_compositor;
 use smithay::delegate_dmabuf;
+use smithay::delegate_output;
+use smithay::delegate_viewporter;
+use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
+use smithay::wayland::output::{OutputHandler, OutputManagerState};
+use smithay::wayland::viewporter::ViewporterState;
 use smithay::delegate_seat;
 use smithay::delegate_shm;
 use smithay::delegate_xdg_shell;
@@ -88,6 +93,10 @@ pub struct State {
     touch: TouchHandle<State>,
     dmabuf: DmabufState,
     dmabuf_global: Option<DmabufGlobal>,
+    // Kept alive: the globals vanish with them. Clients (Waydroid's) ask for an output to size themselves.
+    _output: Output,
+    _output_manager: OutputManagerState,
+    _viewporter: ViewporterState,
     pub windows: Vec<Window>,
     pub events: Vec<WindowEvent>,
     next_id: u64,
@@ -128,7 +137,19 @@ impl Server {
         let touch = seat.add_touch();
         // The keymap is xkb's default (us); delay and rate are milliseconds and keys per second.
         let keyboard = seat.add_keyboard(XkbConfig::default(), 400, 25).map_err(io::Error::other)?;
+        // The panel: 1920 x 720, 12.3 inches (about 310 x 116 mm), the one output.
+        let output = Output::new(
+            "livi-0".into(),
+            PhysicalProperties { size: (310, 116).into(), subpixel: Subpixel::Unknown, make: "LIVI".into(), model: "panel".into() },
+        );
+        let mode = Mode { size: (1920, 720).into(), refresh: 60_000 };
+        output.create_global::<State>(&dh);
+        output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
+        output.set_preferred(mode);
         let state = State {
+            _output: output,
+            _output_manager: OutputManagerState::new_with_xdg_output::<State>(&dh),
+            _viewporter: ViewporterState::new::<State>(&dh),
             pointer,
             keyboard,
             touch,
@@ -470,6 +491,14 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
+        // The panel is the only place a window can be: fullscreen on it.
+        use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgState;
+        toplevel.with_pending_state(|s| {
+            s.size = Some((1920, 720).into());
+            s.states.set(XdgState::Fullscreen);
+            s.states.set(XdgState::Activated);
+        });
+        toplevel.send_configure();
         let id = self.next_id;
         self.next_id += 1;
         self.windows.push(Window {
@@ -529,6 +558,10 @@ delegate_xdg_shell!(State);
 delegate_shm!(State);
 delegate_seat!(State);
 delegate_dmabuf!(State);
+delegate_output!(State);
+delegate_viewporter!(State);
+
+impl OutputHandler for State {}
 
 #[cfg(test)]
 mod tests {

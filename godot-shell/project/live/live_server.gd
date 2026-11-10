@@ -4,7 +4,7 @@ extends Node
 ## this thread, between frames.
 
 const PORT := 8765
-const PAGES := ["home", "ev", "ev_live", "ev_main"]
+const PAGES := ["home", "ev", "ev_live", "ev_main", "app"]
 const LOOK := {
 	appearance = ["day", "night"], hand = ["lhd", "rhd"], near = ["projection", "panel"],
 	material = ["solid", "frosted", "glass"], quality = ["normal", "low"],
@@ -66,6 +66,19 @@ func _ready() -> void:
 	if e != OK:
 		push_error("live: cannot listen on %d (%s)" % [PORT, error_string(e)])
 		return
+	# Hosted apps connect to the shell's own compositor; scripts/waydroid.sh into-shell points Waydroid at it.
+	var werr: String = Wayland.listen("")
+	if werr != "":
+		push_error("compositor: %s" % werr)
+	else:
+		var f := FileAccess.open("/tmp/livi-shell-wayland", FileAccess.WRITE)
+		if f:
+			f.store_string(Wayland.socket_name())
+		Wayland.window_mapped.connect(func(id, app_id, title):
+			print("live: window %d mapped (%s, %s)" % [id, app_id, title])
+			_open("app"))
+		Wayland.window_unmapped.connect(func(id): print("live: window %d unmapped" % id))
+		print("live: wayland socket %s" % Wayland.socket_name())
 	_open(_page)
 	print("live: http://localhost:%d/" % PORT)
 
@@ -78,7 +91,15 @@ func _open(page: String) -> void:
 		_page = page
 
 
-func _process(_delta: float) -> void:
+var _dbg := 0.0
+
+
+func _process(delta: float) -> void:
+	_dbg += delta
+	if _dbg > 8.0:
+		_dbg = 0.0
+		if Wayland.window_count() > 0:
+			print("live: windows %d, stats %s" % [Wayland.window_count(), Wayland.stats()])
 	while _tcp.is_connection_available():
 		_conns.append({peer = _tcp.take_connection(), buf = PackedByteArray()})
 	for c in _conns.duplicate():

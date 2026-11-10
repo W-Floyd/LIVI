@@ -1,6 +1,7 @@
 #!/bin/sh
 # Manage Waydroid and the stock EV app in the VM, from the host.
-#   scripts/waydroid.sh start        # container + session (idempotent)
+#   scripts/waydroid.sh start        # container + session (idempotent), on the live shell's compositor if it runs
+#   scripts/waydroid.sh into-shell   # restart both so Android's window goes to the shell (scripts/live-window.sh must be running)
 #   scripts/waydroid.sh launch [pkg] # start, then open the app (default: the stock EV app)
 #   scripts/waydroid.sh ui           # the whole Android UI
 #   scripts/waydroid.sh size [WxH [dpi]]   # the display size and density (default 1920x720 240: the panel, at 1.5x so the layouts' 1280x480 dp fill it), then relaunch
@@ -14,7 +15,8 @@ set -eu
 cd "$(dirname "$0")/.."
 PKG=${PKG:-com.hkmc.daudio.app.ev3}
 SSH="ssh -p 2222 -o BatchMode=yes user@localhost"
-ENVS='export XDG_RUNTIME_DIR=/run/user/10000 WAYLAND_DISPLAY=wayland-0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10000/bus'
+# The shell's own compositor when the live shell runs (project/live), else the desktop's.
+ENVS='export XDG_RUNTIME_DIR=/run/user/10000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10000/bus; if [ -s /tmp/livi-shell-wayland ] && pgrep -f -- "--live" >/dev/null; then export WAYLAND_DISPLAY=$(cat /tmp/livi-shell-wayland); else export WAYLAND_DISPLAY=wayland-0; fi'
 as_user() { $SSH "$ENVS; $*"; }
 as_root() { $SSH "echo nura | sudo -S -p '' $*" 2>&1; }
 android() { as_root waydroid shell -- "$@"; }
@@ -33,7 +35,11 @@ start() {
 cmd=${1:-status}
 [ $# -eq 0 ] || shift
 case $cmd in
-    status) as_user waydroid status ;;
+    status) as_user 'echo "wayland: $WAYLAND_DISPLAY"; waydroid status' ;;
+    into-shell)
+        as_user 'systemctl --user stop waydroid-session' || true
+        as_root systemctl restart waydroid-container >/dev/null
+        start; as_user 'echo "wayland: $WAYLAND_DISPLAY"; waydroid status' ;;
     start) start; as_user waydroid status ;;
     launch)
         start

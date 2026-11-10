@@ -1,0 +1,3 @@
+# Fixed return values for stubbed vendor methods (copy to $OUT/stub-values.txt).
+# Lpkg/Class;->method(args)ret = integer | true | false     (ret: Z B S C I)
+Lcom/example/Manager;->isReady()Z = true

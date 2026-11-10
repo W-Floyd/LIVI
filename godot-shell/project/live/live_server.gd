@@ -20,7 +20,8 @@ const DATA := [
 
 var _tcp := TCPServer.new()
 var _conns: Array[Dictionary] = []
-var _vp: SubViewport
+## What is drawn and read: a SubViewport of its own, or with `--window` the real window.
+var _vp: Viewport
 var _shell: Node
 var _page := "ev"
 var _data := {}
@@ -41,12 +42,22 @@ func _ready() -> void:
 	ThemeManager.set_look({theme_name = OS.get_environment("LIVE_THEME") if OS.get_environment("LIVE_THEME") != "" else "instrument", appearance = "night", car = "auto"})
 	for t in EvScene.tunables():
 		_defaults[t.key] = t.value
-	_vp = SubViewport.new()
-	_vp.size = Vector2i(1920, 720)
-	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	add_child(_vp)
+	if OS.get_cmdline_user_args().has("--window"):
+		# Rendered at the panel's size and scaled to the window, so layout and input are the unit's.
+		var win := get_window()
+		win.content_scale_size = Vector2i(1920, 720)
+		win.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
+		win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
+		win.size = Vector2i(1280, 480)
+		_vp = win
+	else:
+		var sub := SubViewport.new()
+		sub.size = Vector2i(1920, 720)
+		sub.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		add_child(sub)
+		_vp = sub
 	_shell = preload("res://shell.tscn").instantiate()
-	_vp.add_child(_shell)
+	(_vp if _vp is SubViewport else self).add_child(_shell)
 	var e := _tcp.listen(PORT, "*")
 	if e != OK:
 		push_error("live: cannot listen on %d (%s)" % [PORT, error_string(e)])

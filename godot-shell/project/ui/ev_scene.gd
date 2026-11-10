@@ -11,7 +11,7 @@ extends Node3D
 
 signal moved
 
-const UPK := 0.15
+const UPK := 0.155
 const HALF_W := 4.5
 const CAR_Z := 1.2
 const CAR_X := 1.6
@@ -21,20 +21,17 @@ const CAR_FRONT := CAR_X + EvCar.LENGTH / 2.0 * CAR_SCALE
 ## at this scale, and it would sit inside the car.
 const PIN_MIN_AHEAD := 0.9
 const ROAD_MAX_KM := 520.0
-## The picture was framed with the camera at CAM_POS0, turned CAM_YAW/CAM_PITCH, with a
-## CAM_FOV0 lens, looking at the car. The camera backs off along its line to the car by
-## CAM_DOLLY and the lens narrows by the same factor: the car keeps its size and place and the
-## view its angle, with less perspective (a large dolly is close to orthographic).
+## Fitted to the stock screen by overlaying its render: the camera looks at the car from its
+## left and a little behind. CAM_YAW is from the side view (90 is straight along the road), with a
+## mid-length lens (little warping of the car). The car sits at CAR_NDC on the screen, in
+## half-heights from the center, by shifting the frustum.
 const NEAR := 0.5
-const CAM_DOLLY := 4.0
-const CAM_POS0 := Vector3(9.0, 8.77, 26.5)
 const CAR_AIM := Vector3(CAR_X, 0.6, CAR_Z)
-const CAM_POS := CAR_AIM + (CAM_POS0 - CAR_AIM) * CAM_DOLLY
-const CAM_YAW := 27.5
-const CAM_PITCH := 14.2
-const CAM_FOV0 := 50.2
-const CAM_FOV := 13.4  # 2 atan(tan(CAM_FOV0 / 2) / CAM_DOLLY)
-## The car's place on the screen is kept by shifting the frustum; see _base_offset.
+const CAM_YAW := 20.0
+const CAM_PITCH := 19.0
+const CAM_DIST := 34.0
+const CAM_FOV := 25.0
+const CAR_NDC := Vector2(-2.03, -0.36)
 const TICK_KM := 50.0
 ## Under this the end of the lit road turns to the warning color, over its last WARN_KM.
 const LOW_RANGE_KM := 50.0
@@ -92,7 +89,7 @@ func _ready() -> void:
 	_camera.keep_aspect = Camera3D.KEEP_HEIGHT
 	_camera.size = 2.0 * _camera.near * tan(deg_to_rad(CAM_FOV) / 2.0)
 	add_child(_camera)
-	_camera.look_at_from_position(CAM_POS, CAM_POS + _forward() * 50.0)
+	_camera.look_at_from_position(cam_pos(), cam_pos() + _forward() * 50.0)
 	_camera.frustum_offset = _base_offset()
 	_camera.current = true
 	_rig = Node3D.new()
@@ -162,16 +159,13 @@ func _exit_tree() -> void:
 		get_viewport().msaa_3d = _msaa_before as Viewport.MSAA
 
 
-## The frustum shift that keeps the car where the original camera had it: backing off along the
-## line to the car scales an off-center point's screen position by CAM_DOLLY, so shift it back.
+static func cam_pos() -> Vector3:
+	return CAR_AIM - _forward() * CAM_DIST
+
+
+## The frustum shift that puts the car (on the optical axis) at CAR_NDC.
 static func _base_offset() -> Vector2:
-	var f := _forward()
-	var r := f.cross(Vector3.UP).normalized()
-	var u := r.cross(f)
-	var d := CAR_AIM - CAM_POS0
-	var t0 := tan(deg_to_rad(CAM_FOV0) / 2.0)
-	var uv := Vector2(d.dot(r), d.dot(u)) / (d.dot(f) * t0)
-	return uv * (CAM_DOLLY - 1.0) * tan(deg_to_rad(CAM_FOV) / 2.0) * NEAR
+	return -CAR_NDC * tan(deg_to_rad(CAM_FOV) / 2.0) * NEAR
 
 
 static func _forward() -> Vector3:
@@ -320,7 +314,7 @@ func _mirror() -> void:
 		Vector3(1.0 - 2.0 * r.x * r.x, -2.0 * r.x * r.y, -2.0 * r.x * r.z),
 		Vector3(-2.0 * r.y * r.x, 1.0 - 2.0 * r.y * r.y, -2.0 * r.y * r.z),
 		Vector3(-2.0 * r.z * r.x, -2.0 * r.z * r.y, 1.0 - 2.0 * r.z * r.z))
-	_rig.transform = Transform3D(b, 2.0 * CAM_POS.dot(r) * r)
+	_rig.transform = Transform3D(b, 2.0 * cam_pos().dot(r) * r)
 
 
 ## The range with climate on and off, the charger's distance and the charge, all in

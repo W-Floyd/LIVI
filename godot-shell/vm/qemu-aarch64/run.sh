@@ -6,6 +6,7 @@
 #   ./run.sh --headless           no window, daemonized (or HEADLESS=1)
 #   ./run.sh --headless --vnc 1   ...plus VNC on 127.0.0.1:5901 (or VNC=1)
 #   ./run.sh --stop               guest-agent shutdown, then ACPI, then `quit`
+#   XRES=1920 YRES=720 ./run.sh   the display's size (the panel's by default); GNOME takes it as the monitor's preferred mode
 #
 # Arguments after the options go to qemu.
 set -eu
@@ -73,7 +74,7 @@ set -- \
     -device virtio-blk-pci,drive=hd,bootindex=0 \
     -netdev user,id=net,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:8765-:8765 \
     -device virtio-net-pci,netdev=net \
-    -device virtio-gpu-pci \
+    -device virtio-gpu-pci,xres=${XRES:-1920},yres=${YRES:-720} \
     -device virtio-keyboard-pci \
     -device virtio-tablet-pci \
     -device virtio-serial-pci \
@@ -91,5 +92,5 @@ if [ "$HEADLESS" = 1 ]; then
     qemu-system-aarch64 "$@" -display none -daemonize -D qemu.log
     echo "started, pid $(cat "$PID")"
 else
-    exec qemu-system-aarch64 "$@" -display cocoa
+    exec qemu-system-aarch64 "$@" -display cocoa,zoom-to-fit=on
 fi

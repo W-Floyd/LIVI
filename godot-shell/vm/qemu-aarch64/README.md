@@ -39,7 +39,7 @@ Screenshot, any mode: `echo "screendump $PWD/s.ppm" | nc -U monitor.sock`.
   `efi-vars.fd`) loads systemd-boot from the image's FAT boot partition. No
   `-kernel`/`-initrd`. This is the same path `pmbootstrap qemu` takes.
 - Devices: `virt,highmem=on`, HVF with `-cpu host`, virtio-blk, virtio-net (user
-  mode networking, host 127.0.0.1:2222 to guest 22), virtio-gpu-pci (no virgl, so
+  mode networking, host 127.0.0.1:2222 to guest 22), virtio-gpu-pci at 1920x720 (`XRES`/`YRES`; the cocoa window scales to fit; no virgl, so
   GL is llvmpipe), virtio keyboard and tablet, and a virtio-serial port for
   `qemu-guest-agent`.
 - Control sockets in this folder: `qmp.sock` (QMP), `monitor.sock` (HMP),

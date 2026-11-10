@@ -27,3 +27,5 @@ Known not to work / caveats:
 - Very slow under QEMU TCG: allow ~1 min after launch before the first frame.
 - `MainActivity.onDestroy` throws "Receiver not registered" (the app unregisters a receiver it never registered).
 - Only the EV app is handled; other apps need their own odex deodexed and stubs generated (`APP=...`).
+
+`scripts/waydroid.sh` manages it from the host: `start`, `launch`, `ui`, `size`, `shot`, `logs`, `sh`, `stop`, `status`, `build` (the five scripts above in order).

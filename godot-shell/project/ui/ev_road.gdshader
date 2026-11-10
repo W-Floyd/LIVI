@@ -6,6 +6,8 @@ render_mode unshaded, blend_mix, depth_draw_never, cull_disabled;
 
 uniform float upk = 0.285;
 uniform float half_w = 4.5;
+uniform float taper = 0.0;
+uniform float taper_len = 1.0;
 uniform float km_on = 243.0;
 uniform float km_off = 253.0;
 uniform float km_warn = 1.0e6;
@@ -26,7 +28,8 @@ void vertex() {
 
 void fragment() {
 	float km = lp.x / upk;
-	float v = lp.y / half_w;
+	float hw = half_w * (1.0 - taper * clamp(lp.x / taper_len, 0.0, 1.0));
+	float v = lp.y / hw;
 	float av = abs(v);
 	float aa = max(fwidth(km), 1e-3);
 	float av_aa = max(fwidth(v), 1e-3);

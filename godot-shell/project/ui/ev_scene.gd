@@ -12,7 +12,11 @@ extends Node3D
 signal moved
 
 const UPK := 0.17
-const HALF_W := 3.7
+const HALF_W := 4.0
+## The road narrows with distance beyond what the lens does, to the stock screen's far end: by
+## ROAD_TAPER of its width at ROAD_TAPER_KM.
+const ROAD_TAPER := 0.6
+const ROAD_TAPER_KM := 253.0
 const CAR_Z := 1.2
 const CAR_X := 1.6
 const CAR_SCALE := 1.9
@@ -111,6 +115,8 @@ func _ready() -> void:
 	_rig.add_child(_road)
 	_road_mat.set_shader_parameter("upk", UPK)
 	_road_mat.set_shader_parameter("half_w", HALF_W)
+	_road_mat.set_shader_parameter("taper", ROAD_TAPER)
+	_road_mat.set_shader_parameter("taper_len", ROAD_TAPER_KM * UPK)
 	_road_mat.set_shader_parameter("tick_km", TICK_KM)
 
 	_blob = MeshInstance3D.new()
@@ -379,12 +385,17 @@ func screen(world: Vector3) -> Vector2:
 ## Anchors for the 2D layer, as panel pixels: where the lit road ends and where the far end
 ## is, on the near edge and on the far edge (`*_far`), the pin's head, and a spot on the car's
 ## flank for the charge.
+## The road's half width at `x` along it.
+static func road_half(x: float) -> float:
+	return HALF_W * (1.0 - ROAD_TAPER * clampf(x / (ROAD_TAPER_KM * UPK), 0.0, 1.0))
+
+
 func anchors() -> Dictionary:
 	return {
-		on = screen(Vector3(km_on * UPK, 0, HALF_W)),
-		off = screen(Vector3(km_off * UPK, 0, HALF_W)),
-		on_far = screen(Vector3(km_on * UPK, 0, -HALF_W)),
-		off_far = screen(Vector3(km_off * UPK, 0, -HALF_W)),
+		on = screen(Vector3(km_on * UPK, 0, road_half(km_on * UPK))),
+		off = screen(Vector3(km_off * UPK, 0, road_half(km_off * UPK))),
+		on_far = screen(Vector3(km_on * UPK, 0, -road_half(km_on * UPK))),
+		off_far = screen(Vector3(km_off * UPK, 0, -road_half(km_off * UPK))),
 		pin = screen(Vector3(pin_x(), 3.0, 0)),
 		car = screen(Vector3(CAR_X - 0.9, 3.0, CAR_Z)),
 	}

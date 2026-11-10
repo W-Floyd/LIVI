@@ -78,11 +78,47 @@ Stubs and what each was needed for:
 | `0x16470000..` Telechips SDHC ext regs | unimplemented, read 0 |
 | DT `lk-log-proc-match` + `reserved-memory` (`0x2f000000`) | the stock `klogd` reads `/proc/lk_log`; without a bound device the driver oopses -> panic -> reboot |
 
-## Next blocker
+## Crash loop: SurfaceFlinger, and the display
 
-A native service crash-loops from about 12 s guest time (`Core dump to |/bin/false pipe failed`,
-`init: untracked pid N exited` every ~5 s, then `sched: RT throttling activated`); there is no logcat on the
-serial console, so which one is unidentified. Not attempted: display (VIOC/LVDS/HDMI), Mali, VPU (`no-reserved
-memory`, the stock DT's pmap regions are not modelled), USB, ethernet, SMP (needs `maxcpus` > 1 and PSCI CPU_ON
-is only exercised by QEMU's generic handler), the real extint SPIs of the pinctrl node, and the audio/I2C
-devices (`serdes_init`, `tcc_adc_getdata: failed to find adc device`).
+Driving the console shell (a root console from `build-ramdisk.py`: `ro.secure=0`, `console` service as root) and
+reading `logcat -d` showed the loop was `surfaceflinger` aborting every ~5 s (init restarts it and `zygote`):
+
+```
+E/mali (101): Failed creating base context during opening of kernel driver.
+E/tc_hwc (101): tc_cfg_open(49): can't open[No such file or directory] '/dev/graphics/fb0'
+E/SurfaceFlinger(101): ERROR: failed to open framebuffer (No such file or directory), aborting
+```
+
+(`mediaserver` also aborts once with `Unable to open the mixer`; `micomd` logs `/dev/ttyTCC2 open failed`; neither loops.)
+
+The stock kernel has `FB_TCC` (Telechips VIOC) but no simplefb/bochs/DRM, the vendor source for it is not available and its
+DT bindings are undocumented, so instead of modelling VIOC:
+
+- `qfb/qfb.c`: a 100-line fbdev module (1920x720, 32 bpp, three y-panned buffers) over 32 MiB of VRAM at `0x70000000`
+  plus a few registers at `0x72000000` (the QEMU device `tcc803x-qfb` in the patch scans out from them).
+  `build-qfb.sh` builds it against vanilla linux-3.18.x with `SUBLEVEL=24` so the vermagic matches the stock kernel
+  (no MODVERSIONS), cross-compiled in the `gen5w-build` image (`docker build -t gen5w-build ../gen5w-stock`).
+- `build-ramdisk.py` + `overlay/init.emu.rc`: stock ramdisk plus `insmod /qfb.ko`, tmpfs over `/system/vendor/lib/egl`
+  (hides the Mali EGL; the loader falls back to the software `libGLES_android`), the stock fbdev `gralloc.default`
+  bind-mounted over `gralloc.tcc803x`, `/dev/null` over `hwcomposer.tcc803x`, `ro.kernel.qemu=1`. Same trick as `gen5w-stock`.
+  Output goes next to the input ramdisk (Kia-derived, not committed). Select it with `RAMDISK=ramdisk.emu.gz run.sh`.
+- The stock SurfaceFlinger wants a third framebuffer buffer (gralloc itself asks for two), hence `NBUF 3`: with two it aborts
+  with `GraphicBufferAlloc::createGraphicBuffer ... Out of memory`.
+- `vmalloc=400M` on the cmdline: the default vmalloc area is too small for the 32 MiB `ioremap` plus binder
+  (`binder_alloc_mmap_handler ... get_vm_area failed`).
+
+`DOCKER_FLAGS="-i --name tccq"` plus `EXTRA="-monitor unix:/run/q/mon,server,nowait"` lets a script drive the console on stdin
+and run `screendump` (PPM; this QEMU has no libpng) through `docker exec`.
+
+## Result
+
+With the overlay ramdisk, `qfb.ko` and `vmalloc=400M` the machine boots the stock userland to `sys.boot_completed=1` in
+about 200 s of wall time (guest clock ~3x slower; kernel to init < 1 s, console prompt at ~10 s, `zygote`/`system_server` up, the
+launcher reports `Displayed ... total +13s` guest). No more crash loop; `drive.py` runs a click-through like
+`tools/gen5w-stock/screenshots.sh` (`am force-stop com.mobis.welcome`, `input tap`, `monkey -p ...`).
+
+Compared with the Linux 4.4 screenshots (`ref/gen5w-stock`): consent, home settings and user profile are pixel-identical (apart from
+the 8x16 px top-left corner, a clock stub) once red and blue are swapped; radio differs only in the top-left clock/animation area.
+The 4.4 references are red/blue swapped: gralloc asks the fbdev for RGBA byte order and bochs ignores it. Fonts and layout do not differ.
+Open: the launcher (`com.android.launcher3`) draws a blank dark screen here, not the home screen of the 4.4 reference; the
+voicememo capture differs (not settled when captured). Not modelled: SMP (`maxcpus=1`), `/dev/ttyTCC2` (micomd), audio mixer, Mali/VPU/USB/ethernet.

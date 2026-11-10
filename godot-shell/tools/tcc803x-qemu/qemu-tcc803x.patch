@@ -27,10 +27,10 @@ index ac473ce..f06bcce 100644
 +arm_ss.add(when: 'CONFIG_TCC803X', if_true: files('tcc803x.c'))
 diff --git a/hw/arm/tcc803x.c b/hw/arm/tcc803x.c
 new file mode 100644
-index 0000000..40355b6
+index 0000000..ab17974
 --- /dev/null
 +++ b/hw/arm/tcc803x.c
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,249 @@
 +/*
 + * Telechips TCC803x (Kia EV6 Gen5W head unit) experimental machine.
 + *
@@ -56,6 +56,9 @@ index 0000000..40355b6
 +#include "exec/address-spaces.h"
 +#include "target/arm/cpu.h"
 +#include "target/arm/gtimer.h"
++#include "ui/console.h"
++#include "ui/qemu-pixman.h"
++#include "migration/vmstate.h"
 +
 +#define TCC_RAM_BASE   0x20000000
 +#define TCC_GIC_DIST   0x17301000
@@ -68,6 +71,105 @@ index 0000000..40355b6
 +
 +#define TCC_UART_BASE  0x16600000
 +#define TCC_UART_SPI   88
++
++/*
++ * Simple scan-out device for the "qfb" guest module (tools/tcc803x-qemu/qfb):
++ * 32 MiB of VRAM at TCC_QFB_VRAM and a few registers the guest sets on
++ * set_par/pan. Stands in for the Telechips VIOC display pipeline.
++ */
++#define TCC_QFB_VRAM  0x70000000
++#define TCC_QFB_REGS  0x72000000
++#define TCC_QFB_SIZE  0x02000000
++
++#define TYPE_TCC_QFB "tcc803x-qfb"
++OBJECT_DECLARE_SIMPLE_TYPE(QfbState, TCC_QFB)
++
++struct QfbState {
++    SysBusDevice parent_obj;
++    MemoryRegion vram, regs;
++    QemuConsole *con;
++    uint32_t r[8];      /* 0 width, 1 height, 2 stride, 3 byte offset, 4 fmt (0 BGRX, 1 RGBX) */
++    uint32_t cur[5];
++    DisplaySurface *ds;
++};
++
++static uint64_t qfb_reg_read(void *opaque, hwaddr addr, unsigned size)
++{
++    QfbState *s = opaque;
++    return addr < sizeof(s->r) * 4 ? s->r[addr / 4] : 0;
++}
++
++static void qfb_reg_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
++{
++    QfbState *s = opaque;
++    if (addr < sizeof(s->r) * 4) {
++        s->r[addr / 4] = val;
++    }
++}
++
++static const MemoryRegionOps qfb_reg_ops = {
++    .read = qfb_reg_read,
++    .write = qfb_reg_write,
++    .endianness = DEVICE_NATIVE_ENDIAN,
++    .valid.min_access_size = 4,
++    .valid.max_access_size = 4,
++};
++
++static void qfb_update(void *opaque)
++{
++    QfbState *s = opaque;
++    uint8_t *p = memory_region_get_ram_ptr(&s->vram);
++
++    if (!s->r[0] || !s->r[1] || !s->r[2] ||
++        (uint64_t)s->r[3] + (uint64_t)s->r[1] * s->r[2] > TCC_QFB_SIZE) {
++        return;
++    }
++    if (!s->ds || memcmp(s->cur, s->r, sizeof(s->cur))) {
++        memcpy(s->cur, s->r, sizeof(s->cur));
++        s->ds = qemu_create_displaysurface_from(
++            s->r[0], s->r[1], s->r[4] ? PIXMAN_x8b8g8r8 : PIXMAN_x8r8g8b8,
++            s->r[2], p + s->r[3]);
++        dpy_gfx_replace_surface(s->con, s->ds);
++    }
++    dpy_gfx_update_full(s->con);
++}
++
++static const GraphicHwOps qfb_ops = {
++    .gfx_update = qfb_update,
++};
++
++static void qfb_realize(DeviceState *dev, Error **errp)
++{
++    QfbState *s = TCC_QFB(dev);
++    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
++
++    memory_region_init_ram(&s->vram, OBJECT(s), "qfb.vram", TCC_QFB_SIZE,
++                           &error_fatal);
++    memory_region_init_io(&s->regs, OBJECT(s), &qfb_reg_ops, s, "qfb.regs",
++                          0x1000);
++    sysbus_init_mmio(sbd, &s->vram);
++    sysbus_init_mmio(sbd, &s->regs);
++    s->con = graphic_console_init(dev, 0, &qfb_ops, s);
++}
++
++static void qfb_class_init(ObjectClass *oc, void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(oc);
++    dc->realize = qfb_realize;
++}
++
++static const TypeInfo qfb_info = {
++    .name = TYPE_TCC_QFB,
++    .parent = TYPE_SYS_BUS_DEVICE,
++    .instance_size = sizeof(QfbState),
++    .class_init = qfb_class_init,
++};
++
++static void qfb_register_types(void)
++{
++    type_register_static(&qfb_info);
++}
++type_init(qfb_register_types)
 +
 +static struct arm_boot_info tcc803x_binfo;
 +
@@ -150,6 +252,13 @@ index 0000000..40355b6
 +        }
 +        qdev_realize_and_unref(card, qdev_get_child_bus(sdhci, "sd-bus"),
 +                               &error_fatal);
++    }
++
++    {
++        DeviceState *fb = qdev_new(TYPE_TCC_QFB);
++        sysbus_realize_and_unref(SYS_BUS_DEVICE(fb), &error_fatal);
++        sysbus_mmio_map(SYS_BUS_DEVICE(fb), 0, TCC_QFB_VRAM);
++        sysbus_mmio_map(SYS_BUS_DEVICE(fb), 1, TCC_QFB_REGS);
 +    }
 +
 +    tcc803x_binfo.loader_start = TCC_RAM_BASE;

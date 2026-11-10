@@ -17,6 +17,7 @@ var near := "projection"       # what sits nearer the driver: projection | panel
 var text_scale := 1.0
 var material := "solid"        # solid | frosted | glass: surfaces floating over the map
 var reduced_motion := false    # no animated transitions or camera moves
+var car := "auto"             # auto | procedural: the EV page's car, a model when one is installed
 var quality := "normal"        # normal | low: what the 3D pages may spend (PLAN.md, "Quality profiles")
 var ev_page := "auto"          # auto | image | live: which "Electric vehicle" page `ev` opens
 
@@ -84,7 +85,7 @@ func _spec_path(name: String) -> String:
 
 
 func defaults() -> void:
-	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", ev_page = "auto"})
+	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto"})
 
 
 ## The "Electric vehicle" page `ev` stands for: the look's choice, else the theme's own

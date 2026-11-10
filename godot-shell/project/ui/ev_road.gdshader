@@ -37,7 +37,7 @@ void fragment() {
 	float s_warn = smoothstep(km_warn - aa, km_warn + aa, km);
 
 	float t = clamp(km / max(km_on, 1.0), 0.0, 1.0);
-	vec4 lit = vec4(mix(c_lit.rgb, c_far.rgb, t * 0.9), c_lit.a);
+	vec4 lit = vec4(mix(c_lit.rgb, c_far.rgb, t * 0.25), c_lit.a);
 	lit = mix(lit, c_warn, s_warn);
 	vec4 body = mix(c_far, lit, s_on);
 
@@ -52,11 +52,13 @@ void fragment() {
 	float d = abs(km - tick_km * round(km / tick_km)) * upk;
 	float tick = (1.0 - smoothstep(0.07, 0.16, d)) * (1.0 - smoothstep(0.16, 0.22, av))
 		* step(tick_km * 0.5, km) * s_end;
+	// Where climate-on range ends, a bar across the road; the pale part beyond it is climate off.
+	float split = (1.0 - smoothstep(0.08, 0.2, abs(km - km_on) * upk)) * s_body * s_end * step(1.0, km_off - km_on);
 	// The end of the road: a bright cap.
 	float cap = smoothstep(km_off - 1.4, km_off - 0.2, km) * s_end * s_body;
-	col = mix(col, c_line.rgb, edge * 0.55 + center * 0.5 + tick * 0.9 + cap * 0.55);
+	col = mix(col, c_line.rgb, edge * 0.55 + center * 0.5 + tick * 0.9 + cap * 0.55 + split * 0.8);
 	a = max(a, max(edge * 0.55, max(center * 0.4, tick * 0.8)));
-	a = max(a, cap * 0.85);
+	a = max(a, max(cap * 0.85, split * 0.9));
 
 	// The charger: a ring and a soft disc where it stands.
 	float r = length(vec2(lp.x - stop_x, lp.y));

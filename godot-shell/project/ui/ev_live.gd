@@ -12,7 +12,7 @@ signal tile_pressed(id: String)
 
 ## The range with climate off has no field in the telemetry yet. Until it does: this much over
 ## the range with climate on, about what the EV6 shows.
-const RANGE_OFF_FALLBACK := 0.04
+const RANGE_OFF_FALLBACK := 0.12
 const RANGE_OFF_PATH := "/telemetry/rangeClimateOffKm"
 const TILES := ["next_departure", "scheduled", "v2l"]
 

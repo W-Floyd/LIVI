@@ -114,7 +114,7 @@ labels projected from it:
   past the end of the road it stops there in the warning color, and nearer than a car length
   ahead of the nose it is drawn a car length ahead.
 - **Range with climate off** has no telemetry field yet: it is `rangeClimateOffKm` when the core
-  has one, else the range with climate on plus `EvLive.RANGE_OFF_FALLBACK` (4 %).
+  has one, else the range with climate on plus `EvLive.RANGE_OFF_FALLBACK` (12 %).
 - **Car:** built from meshes, no model file and so no licence to carry: a translucent shell
   lofted from a side profile (`ev_glass.gdshader`: tint, sky reflection, a rim), over a battery
   block (`ev_battery.gdshader`) lit from the rear up to the charge (`/telemetry/fuelPct`) in
@@ -169,3 +169,18 @@ scripts/build-armv7.sh [--release]   # macOS or Linux -> project/bin/linux-arm32
 A cross build against a sysroot of Alpine edge's armv7 musl, libgcc and libxkbcommon (fetched
 once), linked with clang and lld; needs rustup and `ld.lld`. No pmbootstrap. Packaging for the
 unit is milestone 7.
+
+## A car model
+
+The EV page draws a procedural car. `car: auto` (the default outside tests; scenarios use
+`procedural` unless a `theme:` step says otherwise) uses a model instead when
+`$LIVI_SHELL_CAR` or `~/.local/share/livi-shell/car.mesh` exists. Make one from a binary STL:
+
+```sh
+python3 tools/car-mesh/convert.py car.stl ref/models/car.mesh   # needs numpy, fast-simplification
+SHELL_CAR=ref/models/car.mesh scripts/vm.sh scripts/test.sh ev-live-car
+```
+
+The model is someone's work, so it is never committed (`ref/` is ignored); `ev-live-car` skips
+without it and compares nothing. The shell draws it as the same translucent shell with the
+battery block inside. Axes: front +x, up +y; `--front` and `--up` name the STL's.

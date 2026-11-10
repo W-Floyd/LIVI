@@ -42,19 +42,54 @@ func _init() -> void:
 	_lamp.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_shell = MeshInstance3D.new()
 	_shell.name = "Shell"
-	_shell.mesh = _body()
+	var model := load_model(ThemeManager.car)
+	_shell.mesh = model if model else _body()
 	_shell.material_override = _glass
 	_shell.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# After the road and the contact shadow, which it is seen over.
 	_glass.render_priority = 1
 	add_child(_shell)
 	_battery = _box("Battery", BATTERY, Vector3(0.1, BATTERY_Y, 0), _cell)
+	if model:
+		return
 	_box("Floor", Vector3(3.5, 0.05, 1.62), Vector3(0.05, 0.2, 0), _plate)
 	for sx in [-1, 1]:
 		for sz in [-1, 1]:
 			_wheel(Vector3(sx * WHEEL_X, WHEEL_R, sz * WHEEL_Z))
 	for sz in [-1, 1]:
 		_box("Lamp", Vector3(0.05, 0.05, 0.42), Vector3(2.0, 0.7, sz * 0.5), _lamp)
+
+
+## `car.mesh` (tools/car-mesh) from `$LIVI_SHELL_CAR` or the user's data folder, as a mesh with
+## smooth normals; null when `choice` is "procedural" or there is no such file.
+static func load_model(choice: String) -> ArrayMesh:
+	if choice == "procedural":
+		return null
+	var path := OS.get_environment("LIVI_SHELL_CAR")
+	if path == "":
+		path = OS.get_environment("HOME").path_join(".local/share/livi-shell/car.mesh")
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null or f.get_buffer(4).get_string_from_ascii() != "LCAR":
+		return null
+	var nv := f.get_32()
+	var ni := f.get_32()
+	var verts := f.get_buffer(nv * 12).to_float32_array()
+	var idx := f.get_buffer(ni * 4).to_int32_array()
+	if verts.size() != nv * 3 or idx.size() != ni:
+		return null
+	var pts := PackedVector3Array()
+	pts.resize(nv)
+	for i in nv:
+		pts[i] = Vector3(verts[i * 3], verts[i * 3 + 1], verts[i * 3 + 2])
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_smooth_group(0)
+	for i in range(0, ni, 3):
+		# The shell is seen from outside; Godot's front faces are clockwise.
+		for k in [0, 2, 1]:
+			st.add_vertex(pts[idx[i + k]])
+	st.generate_normals()
+	return st.commit()
 
 
 ## The charge as 0..1; negative when unknown (an empty block).

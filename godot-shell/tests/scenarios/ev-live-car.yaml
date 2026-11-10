@@ -1,0 +1,16 @@
+name: ev-live-car
+# The EV page with the car model, where one is installed (tools/car-mesh; never committed).
+# Review shots only: the model is not ours, so nothing is compared.
+requires: { car: true }
+clock: 2026-11-09T17:42:00
+fixtures:
+  core: fixtures/ev6-main.json
+theme: { theme_name: instrument, appearance: night, car: auto }
+steps:
+  - page: ev
+  - expect_node: { path: EvLive/Title, text: Electric vehicle }
+  - screenshot: { name: ev-live-car-night, compare: false }
+  - theme: { appearance: day }
+  - screenshot: { name: ev-live-car-day, compare: false }
+  - theme: { theme_name: charge, appearance: night }
+  - screenshot: { name: ev-live-car-charge-night, compare: false }

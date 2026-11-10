@@ -21,6 +21,10 @@ if [ -n "$pack" ]; then
     $ssh_cmd user@localhost "mkdir -p $packs"
     rsync -a --delete -e "$ssh_cmd" "$pack"/ user@localhost:"$packs"/ >/dev/null
 fi
+if [ -n "${SHELL_CAR:-}" ]; then
+    $ssh_cmd user@localhost "mkdir -p .local/share/livi-shell"
+    rsync -a -e "$ssh_cmd" "$SHELL_CAR" user@localhost:.local/share/livi-shell/car.mesh >/dev/null
+fi
 rc=0
 $ssh_cmd user@localhost "cd $DEST/godot-shell && $*" || rc=$?
 # --delete: the VM's copies started as ours, so anything missing there was removed on purpose.

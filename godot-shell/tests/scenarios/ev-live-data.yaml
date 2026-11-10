@@ -10,7 +10,7 @@ steps:
   - expect_node: { path: EvLive/Battery/Row1/battery_value, text: "31" }
   - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "148" }
   # No climate-off range in the telemetry yet: 4 % over the climate-on range.
-  - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "154" }
+  - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "166" }
   - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "42" }
   - expect_node: { path: EvLive/ChargerLabel/Row0/charger_unit, text: km }
   - screenshot: ev-live-data-far-charger
@@ -38,7 +38,7 @@ steps:
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/Battery/Row1/battery_value, text: "80" }
   - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "320" }
-  - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "333" }
+  - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "358" }
   - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "90" }
   - screenshot: ev-live-data-long-range
   - gdscript: |

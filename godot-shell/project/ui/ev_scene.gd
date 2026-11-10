@@ -225,7 +225,8 @@ func restyle() -> void:
 	# A theme that names its road gets it as given; otherwise it is accent light over the page.
 	lit.a = 1.0 if c.has("road") else (0.92 if not day else 0.85)
 	var far: Color = c.get("road_far", lit.lerp(c.bg if day else Color.WHITE, 0.55))
-	far.a = 0.55
+	if not c.has("road_far"):
+		far.a = 0.9
 	_road_mat.set_shader_parameter("c_lit", lit)
 	_road_mat.set_shader_parameter("c_far", far)
 	_road_mat.set_shader_parameter("c_warn", c.warn)

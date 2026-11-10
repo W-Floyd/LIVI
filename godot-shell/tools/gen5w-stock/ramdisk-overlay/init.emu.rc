@@ -1,0 +1,10 @@
+# Emulator additions, imported from init.rc by build-ramdisk.sh.
+on early-init
+    write /proc/sys/kernel/panic_on_oops 0
+
+# No Mali/TCC graphics stack in QEMU: hide the vendor EGL (the loader falls back
+# to libGLES_android) and make the fbdev gralloc stand in for the TCC one.
+on post-fs
+    mount tmpfs tmpfs /system/vendor/lib/egl nosuid nodev
+    mount none /system/lib/hw/gralloc.default.so /system/lib/hw/gralloc.tcc803x.so bind
+    mount none /dev/null /system/lib/hw/hwcomposer.tcc803x.so bind

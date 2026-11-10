@@ -1,0 +1,33 @@
+--- a/emulator/cli.py	2026-11-10 12:33:13
++++ b/emulator/cli.py	2026-11-10 13:11:42
+@@ -25,6 +25,12 @@
+ 
+ def run(args, **kwargs):
+     return subprocess.run([str(x) for x in args], check=True, **kwargs)
++
++
++def sparse_copy(src, dst):
++    # GNU cp on Linux; macOS cp has neither flag but clones sparse files with -c.
++    flags = ["-c"] if sys.platform == "darwin" else ["--reflink=auto", "--sparse=always"]
++    run(["cp", *flags, "--", src, dst])
+ 
+ 
+ def docker_json(*args):
+@@ -120,7 +126,7 @@
+                         raise ValueError("USB media must be a regular image file")
+                     # Snapshot input media once per instance so another writer
+                     # can never change the backing bytes or compete for a lock.
+-                    run(["cp", "--reflink=auto", "--sparse=always", "--", usb, directory / "usb.raw"])
++                    sparse_copy(usb, directory / "usb.raw")
+                     config["usb_source"] = str(usb)
+                     config["usb_sha256"] = digest(directory / "usb.raw")
+                     (directory / "usb.raw").chmod(0o444)
+@@ -300,7 +306,7 @@
+                 if not (source / src).is_file():
+                     raise ValueError(f"source must be a regular file: {source / src}")
+                 before = digest(source / src)
+-                run(["cp", "--reflink=auto", "--sparse=always", "--", source / src, temporary / dst])
++                sparse_copy(source / src, temporary / dst)
+                 actual = digest(temporary / dst)
+                 if actual != before or digest(source / src) != before:
+                     raise RuntimeError("source changed during import; stop its emulator first")

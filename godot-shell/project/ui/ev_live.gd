@@ -217,6 +217,14 @@ func _restyle() -> void:
 	_override(_l(_battery, "battery_name"), "ev_mainview_battery_text", false)
 	_override(_l(_battery, "battery_value"), "mainview_text_battery_percentage_value", false)
 	_override(_l(_battery, "battery_unit"), "mainview_text_battery_percentage_unit", false)
+	# The charge sits over the car's lines: a halo of the page's ground keeps it readable.
+	var halo: Color = ThemeManager.c.bg
+	halo.a = 0.85
+	for n in ["battery_name", "battery_value", "battery_unit"]:
+		var l := _l(_battery, n)
+		l.add_theme_color_override("font_outline_color", halo)
+		l.add_theme_constant_override("outline_size", roundi(ThemeManager.px.gap * (0.7 if n == "battery_value" else 0.45)))
+	_l(_battery, "battery_unit").add_theme_color_override("font_color", ThemeManager.c.text)
 	_override(_l(_charger, "charger_value"), "mainview_text_nearyby_station_range_value")
 	_override(_l(_charger, "charger_unit"), "mainview_text_nearyby_station_range_unit")
 	_override(_l(_charger, "charger_name"), "mainview_text_nearyby_station_location")

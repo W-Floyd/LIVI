@@ -25,7 +25,7 @@ static var CAR_Z := 1.2
 static var CAR_SCALE := 2.23
 ## A charger closer than this ahead of the nose is drawn this far ahead: it is the same place
 ## at this scale, and it would sit inside the car.
-const PIN_MIN_AHEAD := 0.9
+static var PIN_MIN_AHEAD := 3.0
 ## Fitted to the stock screen by overlaying its render in the live page (scripts/live.sh): the camera looks at the car from its
 ## left and a little behind. CAM_YAW is from the side view (90 is straight along the road), with a
 ## mid-length lens (little warping of the car). The car sits at CAR_NDC on the screen, in
@@ -71,7 +71,8 @@ var _road: MeshInstance3D
 var _road_mat := ShaderMaterial.new()
 var _car: EvCar
 var _pin: Node3D
-var _pin_body := StandardMaterial3D.new()
+var _drop_edge := Sprite3D.new()
+var _drop := Sprite3D.new()
 var _pin_base := Color.WHITE
 var _plug: Sprite3D
 var _beam: MeshInstance3D
@@ -194,6 +195,7 @@ static func tunables() -> Array:
 		{key = "car_along", label = "Car along road", min = -6.0, max = 20.0, step = 0.01, value = CAR_X, code = "static var CAR_X := %v"},
 		{key = "car_across", label = "Car across road", min = -4.0, max = 6.0, step = 0.01, value = CAR_Z, code = "static var CAR_Z := %v"},
 		{key = "car_scale", label = "Car scale", min = 0.8, max = 3.5, step = 0.01, value = CAR_SCALE, code = "static var CAR_SCALE := %v"},
+		{key = "pin_gap", label = "Charger gap", min = 0.0, max = 10.0, step = 0.05, value = PIN_MIN_AHEAD, code = "static var PIN_MIN_AHEAD := %v"},
 		{key = "road_units", label = "Road length", min = 10.0, max = 90.0, step = 0.1, value = ROAD_UNITS, code = "static var ROAD_UNITS := %v"},
 		{key = "road_w", label = "Road half width", min = 1.0, max = 8.0, step = 0.05, value = HALF_W, code = "static var HALF_W := %v"},
 		{key = "road_taper", label = "Road taper", min = 0.0, max = 0.95, step = 0.01, value = ROAD_TAPER, code = "static var ROAD_TAPER := %v"},
@@ -212,6 +214,7 @@ static func tune(key: String, v: float) -> bool:
 		"car_along": CAR_X = v
 		"car_across": CAR_Z = v
 		"car_scale": CAR_SCALE = v
+		"pin_gap": PIN_MIN_AHEAD = v
 		"road_w": HALF_W = v
 		"road_taper": ROAD_TAPER = v
 		_: return false
@@ -244,45 +247,70 @@ static func _forward() -> Vector3:
 	return Vector3(sin(yaw) * cos(pitch), -sin(pitch), -cos(yaw) * cos(pitch))
 
 
+## The pin's size: world units per texture pixel, and the height of the texture's center.
+const DROP_PX := 0.021
+const DROP_Y := 2.47
+static var _drops := [null, null]
+
+
+## A map pin's silhouette in white, 128 x 160: a circle and the cone down to its tip. `inset`
+## 1 is the smaller one that sits inside the first as its fill.
+static func _drop_texture(inset: int) -> ImageTexture:
+	if _drops[inset] != null:
+		return _drops[inset]
+	var w := 128
+	var h := 160
+	var circle := Vector2(64, 56)
+	var r := 50.0 - 7.0 * inset
+	var tip := Vector2(64, 150.0 - 4.0 * inset)
+	var d := circle.distance_to(tip)
+	var chord := d - r * r / d
+	var slope := r / sqrt(d * d - r * r)
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	for y in h:
+		for x in w:
+			var hit := 0
+			for sy in 3:
+				for sx in 3:
+					var p := Vector2(x + (sx + 0.5) / 3.0, y + (sy + 0.5) / 3.0)
+					var along := tip.y - p.y
+					if p.distance_to(circle) <= r or (along >= 0.0 and along <= chord and absf(p.x - 64.0) <= along * slope):
+						hit += 1
+			img.set_pixel(x, y, Color(1, 1, 1, hit / 9.0))
+	var tex := ImageTexture.create_from_image(img)
+	_drops[inset] = tex
+	return tex
+
+
 func _build_pin() -> void:
 	_pin = Node3D.new()
 	_pin.name = "Charger"
 	_rig.add_child(_pin)
-	_pin_body.metallic = 0.25
-	_pin_body.roughness = 0.35
-	var head := MeshInstance3D.new()
-	var ball := SphereMesh.new()
-	ball.radius = 0.7
-	ball.height = 1.4
-	ball.radial_segments = 24
-	ball.rings = 12
-	head.mesh = ball
-	head.position.y = 2.25
-	var tip := MeshInstance3D.new()
-	var cone := CylinderMesh.new()
-	cone.top_radius = 0.7
-	cone.bottom_radius = 0.0
-	cone.height = 1.5
-	cone.radial_segments = 24
-	cone.rings = 1
-	tip.mesh = cone
-	tip.position.y = 1.2
-	for m in [head, tip]:
-		m.material_override = _pin_body
-		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_pin.add_child(m)
+	# The stock look: a flat map pin with a lighter edge, over a beam of light and a small bright
+	# foot on the road.
+	for part in [["DropEdge", _drop_texture(0), _drop_edge], ["Drop", _drop_texture(1), _drop]]:
+		var sp: Sprite3D = part[2]
+		sp.name = part[0]
+		sp.texture = part[1]
+		sp.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		sp.shaded = false
+		sp.no_depth_test = true
+		sp.render_priority = 1 if part[0] == "DropEdge" else 2
+		sp.pixel_size = DROP_PX
+		sp.position = Vector3(0, DROP_Y, 0)
+		_pin.add_child(sp)
 	_plug = Sprite3D.new()
 	_plug.name = "Plug"
 	_plug.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_plug.shaded = false
 	_plug.no_depth_test = true
 	_plug.render_priority = 3
-	_plug.position = Vector3(0, 2.25, 0)
+	_plug.position = Vector3(0, DROP_Y + 24.0 * DROP_PX, 0)
 	_pin.add_child(_plug)
 	_beam = MeshInstance3D.new()
 	_beam.name = "Beam"
 	var b := CylinderMesh.new()
-	b.top_radius = 0.45
+	b.top_radius = 0.2
 	b.bottom_radius = 2.0
 	b.height = 2.4
 	b.radial_segments = 20
@@ -324,11 +352,9 @@ func restyle() -> void:
 	var rim: Color = (c.dim as Color) if day else (c.text as Color).lerp(accent, 0.2)
 	_car.style(glass, rim, accent, (c.text as Color).lerp(c.bg, 0.45 if not day else 0.1), day, low)
 	_pin_base = Color(0.97, 0.98, 1.0) if day else (c.text as Color).lerp(c.bg, 0.4)
-	_pin_body.emission_enabled = true
-	_pin_body.emission_energy_multiplier = 0.15
 	_plug.texture = Icons.texture("plug", 128)
-	_plug.pixel_size = 0.72 / 128.0
-	_plug.modulate = c.bg if not day else (c.text as Color).darkened(0.2)
+	_plug.pixel_size = 0.8 / 128.0
+	_plug.modulate = Color(1, 1, 1, 0.96)
 	_beam_mat.set_shader_parameter("color", Color(1, 1, 1, 0.22 if not day else 0.16))
 	(_blob.material_override as ShaderMaterial).set_shader_parameter("strength", 0.55 if not day else 0.28)
 
@@ -434,8 +460,8 @@ func _push() -> void:
 	var c: Dictionary = ThemeManager.c
 	var pin_color: Color = c.warn if stop_unreachable else _pin_base
 	_road_mat.set_shader_parameter("c_stop", Color(pin_color.r, pin_color.g, pin_color.b, 0.9) if stop_unreachable else Color(1, 1, 1, 0.85))
-	_pin_body.albedo_color = pin_color
-	_pin_body.emission = pin_color
+	_drop_edge.modulate = pin_color
+	_drop.modulate = pin_color.darkened(0.4)
 	_car.set_charge(charge)
 	moved.emit()
 

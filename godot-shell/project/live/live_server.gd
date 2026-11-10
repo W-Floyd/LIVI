@@ -227,7 +227,7 @@ func _schema() -> Array:
 		out.append({group = "Data", key = "data." + d[0], label = d[1], min = d[4], max = d[5], step = d[6], value = _data[d[0]]})
 	for t in EvScene.tunables():
 		var group := "Camera"
-		if t.key.begins_with("car_a") or t.key == "car_scale":
+		if t.key.begins_with("car_a") or t.key == "car_scale" or t.key == "pin_gap":
 			group = "Car"
 		elif t.key.begins_with("road"):
 			group = "Road"

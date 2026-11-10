@@ -67,7 +67,8 @@ void fragment() {
 	float r = length(vec2(lp.x - stop_x, lp.y));
 	float ring = (1.0 - smoothstep(0.06, 0.2, abs(r - 2.0))) * s_body;
 	float disc = (1.0 - smoothstep(0.0, 2.0, r)) * 0.25 * s_body;
-	float stop_a = max(ring * 0.9, disc);
+	float core = (1.0 - smoothstep(0.0, 0.5, r)) * s_body;
+	float stop_a = max(max(ring * 0.5, disc), core * 0.9);
 	col = mix(col, c_stop.rgb, stop_a);
 	a = max(a, stop_a * c_stop.a);
 

@@ -22,7 +22,7 @@ steps:
           return "scene state %s %s %s" % [s.km_on, s.stop_km, s.charge]
       if not is_equal_approx(fill, 0.31):
           return "battery block fill %s, not the charge" % fill
-      if not is_equal_approx(road.get_shader_parameter("km_on"), 148.0) or not is_equal_approx(road.get_shader_parameter("stop_x"), maxf(42.0 * s.upk(), EvScene.CAR_FRONT + EvScene.PIN_MIN_AHEAD)):
+      if not is_equal_approx(road.get_shader_parameter("km_on"), 148.0) or not is_equal_approx(road.get_shader_parameter("stop_x"), maxf(42.0 * s.upk(), EvScene.car_front() + EvScene.PIN_MIN_AHEAD)):
           return "road does not follow the range and the charger"
       var a: Dictionary = s.anchors()
       if not (a.on.x < a.off.x and a.pin.x < a.on.x):
@@ -61,7 +61,7 @@ steps:
   - expect_node: { path: EvLive/ChargerLabel/Row0/charger_unit, text: m }
   - gdscript: |
       var s: EvScene = shell.get_node("EvLive/Scene")
-      if s.pin_x() < EvScene.CAR_FRONT:
+      if s.pin_x() < EvScene.car_front():
           return "pin inside the car"
   # Beyond the range: the pin stops at the end of the road and says so in the warning color.
   - set: { core: { navigation: { chargingStop: { distanceM: 600000 } } } }

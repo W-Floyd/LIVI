@@ -19,10 +19,10 @@ static var HALF_W := 4.55
 ## The road narrows with distance beyond what the lens does, to the stock screen's far end: by
 ## ROAD_TAPER of its width at its end.
 static var ROAD_TAPER := 0.5
-const CAR_Z := 1.2
-const CAR_X := 1.6
-const CAR_SCALE := 1.9
-const CAR_FRONT := CAR_X + EvCar.LENGTH / 2.0 * CAR_SCALE
+## Where the car stands on the road (x along it, z across) and how big it is.
+static var CAR_X := 1.6
+static var CAR_Z := 1.2
+static var CAR_SCALE := 1.9
 ## A charger closer than this ahead of the nose is drawn this far ahead: it is the same place
 ## at this scale, and it would sit inside the car.
 const PIN_MIN_AHEAD := 0.9
@@ -31,7 +31,8 @@ const PIN_MIN_AHEAD := 0.9
 ## mid-length lens (little warping of the car). The car sits at CAR_NDC on the screen, in
 ## half-heights from the center, by shifting the frustum.
 const NEAR := 0.5
-const CAR_AIM := Vector3(CAR_X, 0.6, CAR_Z)
+## The point the camera looks at, which CAR_NDC places on the screen; the car moves independently.
+const CAM_TARGET := Vector3(1.6, 0.6, 1.2)
 static var CAM_YAW := 22.7
 static var CAM_PITCH := 19.9
 static var CAM_DIST := 54.3
@@ -115,7 +116,6 @@ func _ready() -> void:
 	quad.size = Vector2(10.0, 5.0)
 	_blob.mesh = quad
 	_blob.rotation_degrees.x = -90
-	_blob.position = Vector3(CAR_X, 0.02, CAR_Z)
 	var blob_mat := ShaderMaterial.new()
 	blob_mat.shader = preload("ev_blob.gdshader")
 	blob_mat.render_priority = -1
@@ -125,8 +125,6 @@ func _ready() -> void:
 
 	_car = EvCar.new()
 	_car.name = "Car"
-	_car.position = Vector3(CAR_X, 0, CAR_Z)
-	_car.scale = Vector3.ONE * CAR_SCALE
 	_rig.add_child(_car)
 	_build_pin()
 
@@ -141,7 +139,6 @@ func _ready() -> void:
 	_under = OmniLight3D.new()
 	_under.name = "Under"
 	_under.omni_range = 9.0
-	_under.position = Vector3(CAR_X, 0.7, CAR_Z)
 	_rig.add_child(_under)
 	_env = WorldEnvironment.new()
 	add_child(_env)
@@ -174,6 +171,11 @@ func _apply_view() -> void:
 	plane.size = Vector2(x1 - x0, HALF_W * 2.0 * 1.8)
 	plane.center_offset = Vector3((x0 + x1) / 2.0, 0, 0)
 	_road_mat.set_shader_parameter("half_w", HALF_W)
+	_blob.position = Vector3(CAR_X, 0.02, CAR_Z)
+	_blob.scale = Vector3.ONE * (CAR_SCALE / 1.9)
+	_car.position = Vector3(CAR_X, 0, CAR_Z)
+	_car.scale = Vector3.ONE * CAR_SCALE
+	_under.position = Vector3(CAR_X, 0.7, CAR_Z)
 	_road_mat.set_shader_parameter("taper", ROAD_TAPER)
 	_road_mat.set_shader_parameter("taper_len", ROAD_UNITS)
 	_mirror()
@@ -189,6 +191,9 @@ static func tunables() -> Array:
 		{key = "cam_dist", label = "Distance", min = 5.0, max = 150.0, step = 0.1, value = CAM_DIST, code = "static var CAM_DIST := %v"},
 		{key = "car_x", label = "Car x", min = -3.0, max = 3.0, step = 0.005, value = CAR_NDC.x, code = "static var CAR_NDC := Vector2(%v, CAR_Y)"},
 		{key = "car_y", label = "Car y", min = -1.5, max = 1.5, step = 0.005, value = CAR_NDC.y, code = "# CAR_Y = %v"},
+		{key = "car_along", label = "Car along road", min = -6.0, max = 20.0, step = 0.01, value = CAR_X, code = "static var CAR_X := %v"},
+		{key = "car_across", label = "Car across road", min = -4.0, max = 6.0, step = 0.01, value = CAR_Z, code = "static var CAR_Z := %v"},
+		{key = "car_scale", label = "Car scale", min = 0.8, max = 3.5, step = 0.01, value = CAR_SCALE, code = "static var CAR_SCALE := %v"},
 		{key = "road_units", label = "Road length", min = 10.0, max = 90.0, step = 0.1, value = ROAD_UNITS, code = "static var ROAD_UNITS := %v"},
 		{key = "road_w", label = "Road half width", min = 1.0, max = 8.0, step = 0.05, value = HALF_W, code = "static var HALF_W := %v"},
 		{key = "road_taper", label = "Road taper", min = 0.0, max = 0.95, step = 0.01, value = ROAD_TAPER, code = "static var ROAD_TAPER := %v"},
@@ -204,6 +209,9 @@ static func tune(key: String, v: float) -> bool:
 		"car_x": CAR_NDC.x = v
 		"car_y": CAR_NDC.y = v
 		"road_units": ROAD_UNITS = v
+		"car_along": CAR_X = v
+		"car_across": CAR_Z = v
+		"car_scale": CAR_SCALE = v
 		"road_w": HALF_W = v
 		"road_taper": ROAD_TAPER = v
 		_: return false
@@ -216,8 +224,13 @@ func _exit_tree() -> void:
 		get_viewport().msaa_3d = _msaa_before as Viewport.MSAA
 
 
+## The car's nose along the road.
+static func car_front() -> float:
+	return CAR_X + EvCar.LENGTH / 2.0 * CAR_SCALE
+
+
 static func cam_pos() -> Vector3:
-	return CAR_AIM - _forward() * CAM_DIST
+	return CAM_TARGET - _forward() * CAM_DIST
 
 
 ## The frustum shift that puts the car (on the optical axis) at CAR_NDC.
@@ -400,8 +413,8 @@ func upk() -> float:
 
 
 func pin_x() -> float:
-	var x := maxf(stop_km * upk(), CAR_FRONT + PIN_MIN_AHEAD)
-	return minf(x, maxf(km_off * upk(), CAR_FRONT + PIN_MIN_AHEAD))
+	var x := maxf(stop_km * upk(), car_front() + PIN_MIN_AHEAD)
+	return minf(x, maxf(km_off * upk(), car_front() + PIN_MIN_AHEAD))
 
 
 func _push() -> void:

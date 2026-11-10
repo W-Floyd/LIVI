@@ -25,6 +25,8 @@ var _shell: Node
 var _page := "ev"
 var _data := {}
 var _defaults := {}
+var _mask := 0
+var _last := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -116,6 +118,12 @@ func _serve(c: Dictionary) -> bool:
 				for k in d:
 					_apply(k, d[k])
 			_reply(peer, 200, "application/json", "{}".to_utf8_buffer())
+		["POST", "/input"]:
+			var evs = JSON.parse_string(body)
+			if evs is Array:
+				for e in evs:
+					_pointer(e)
+			_reply(peer, 200, "application/json", "{}".to_utf8_buffer())
 		["POST", "/reset"]:
 			for k in _defaults:
 				EvScene.tune(k, _defaults[k])
@@ -150,6 +158,29 @@ func _apply(key: String, value) -> void:
 		ThemeManager.set_look({key: value})
 		if key == "theme_name" or key == "ev_page" or key == "car":
 			_open(_page)
+
+
+## A pointer event from the page, in panel pixels: `{ t: down | up | move, x, y }`.
+func _pointer(e: Dictionary) -> void:
+	var pos := Vector2(float(e.get("x", 0)), float(e.get("y", 0)))
+	match str(e.get("t", "")):
+		"down", "up":
+			var b := InputEventMouseButton.new()
+			b.button_index = MOUSE_BUTTON_LEFT
+			b.pressed = e.t == "down"
+			_mask = MOUSE_BUTTON_MASK_LEFT if b.pressed else 0
+			b.button_mask = _mask
+			b.position = pos
+			b.global_position = pos
+			_vp.push_input(b)
+		"move":
+			var m := InputEventMouseMotion.new()
+			m.position = pos
+			m.global_position = pos
+			m.relative = pos - _last
+			m.button_mask = _mask
+			_vp.push_input(m)
+	_last = pos
 
 
 func _stock_path() -> String:

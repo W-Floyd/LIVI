@@ -28,11 +28,12 @@
 <div id="view">
   <div id="stage"><img id="frame" alt=""><img id="stock" alt="" hidden></div>
   <div id="bar">
+    <label>mode <select id="mode"><option value="use">use (click and tap the screen)</option><option value="tune">tune (drag the car and camera)</option></select></label>
     <label><input type="checkbox" id="ov"> overlay stock</label>
     <label>opacity <input type="range" id="ovo" min="0" max="100" value="50"></label>
     <button id="reset">reset</button>
     <button id="copy">copy values</button>
-    <span id="hint">drag: move the car &nbsp; shift-drag: turn the camera &nbsp; wheel: lens</span>
+    <span id="hint"></span>
     <span id="fps"></span>
   </div>
   <pre id="out" hidden></pre>
@@ -113,11 +114,45 @@ async function loop() {
   }
 }
 
-// Dragging the picture.
+// The picture: in "use" mode the pointer is the screen's touch; in "tune" mode dragging moves the car.
+const mode = document.getElementById('mode'), hint = document.getElementById('hint');
+function setMode() {
+  hint.textContent = mode.value === 'use' ? 'click and drag on the screen as on the unit' : 'drag: move the car   shift-drag: turn the camera   wheel: lens';
+  stage.style.cursor = mode.value === 'use' ? 'default' : 'grab';
+}
+mode.onchange = setMode; setMode();
+let queue = [], posting = false;
+async function post() {
+  if (posting) return;
+  posting = true;
+  while (queue.length) {
+    const batch = queue; queue = [];
+    await fetch('/input', { method: 'POST', body: JSON.stringify(batch) }).catch(() => {});
+  }
+  posting = false;
+}
+function panelXY(e) {
+  const r = stage.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+}
+function push(t, e) {
+  const last = queue[queue.length - 1];
+  if (t === 'move' && last && last.t === 'move') queue.pop();
+  queue.push({ t, ...panelXY(e) });
+  post();
+}
 let drag = null;
-stage.onpointerdown = e => { stage.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, turn: e.shiftKey }; stage.style.cursor = 'grabbing'; };
-stage.onpointerup = () => { drag = null; stage.style.cursor = 'grab'; };
+stage.onpointerdown = e => {
+  stage.setPointerCapture(e.pointerId);
+  if (mode.value === 'use') { drag = { use: true }; push('down', e); return; }
+  drag = { x: e.clientX, y: e.clientY, turn: e.shiftKey }; stage.style.cursor = 'grabbing';
+};
+stage.onpointerup = e => {
+  if (drag && drag.use) push('up', e);
+  drag = null; setMode();
+};
 stage.onpointermove = e => {
+  if (mode.value === 'use') { push('move', e); return; }
   if (!drag) return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
   drag.x = e.clientX; drag.y = e.clientY;
@@ -130,7 +165,7 @@ stage.onpointermove = e => {
     bump('car_y', -dy / (H / 2 * k));
   }
 };
-stage.onwheel = e => { e.preventDefault(); bump('cam_fov', e.deltaY * 0.02); };
+stage.onwheel = e => { if (mode.value === 'tune') { e.preventDefault(); bump('cam_fov', e.deltaY * 0.02); } };
 function bump(key, d) {
   const p = schema.find(s => s.key === key);
   if (!p) return;

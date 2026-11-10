@@ -170,7 +170,7 @@ SHELL_PACK=godot-shell/ref/kia/ev6/2024/pack SHELL_CAR=godot-shell/ref/models/ca
 Runs the shell in the VM (`project/live/live_server.gd`, `-- --live`) and serves a page: the live
 frame, sliders for the page's camera, road, data and look, and an overlay of the stock
 screenshot (when the pack has one). Drag the picture to move the car, shift-drag to turn the camera,
-wheel for the lens. "copy values" prints the `static var` lines to paste into `ev_scene.gd`
+wheel for the lens (mode "tune"); in mode "use" the pointer is the screen's touch. "copy values" prints the `static var` lines to paste into `ev_scene.gd`
 (`EvScene.tunables()` lists what a slider can change). The VM forwards host port 8765 to the
 guest's (`run.sh`; `vm/qemu-aarch64/overlay` opens it in the guest's firewall). A VM started
 before that needs `echo "hostfwd_add tcp:127.0.0.1:8765-:8765" | nc -U vm/qemu-aarch64/monitor.sock`.

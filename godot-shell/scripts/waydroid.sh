@@ -3,7 +3,7 @@
 #   scripts/waydroid.sh start        # container + session (idempotent)
 #   scripts/waydroid.sh launch [pkg] # start, then open the app (default: the stock EV app)
 #   scripts/waydroid.sh ui           # the whole Android UI
-#   scripts/waydroid.sh size [WxH [dpi]]   # the display size and density (default 1920x720 160), then relaunch
+#   scripts/waydroid.sh size [WxH [dpi]]   # the display size and density (default 1280x720 160: the V015 EV app is laid out for that, in px), then relaunch
 #   scripts/waydroid.sh shot [file]  # the QEMU display as a PNG (default out/waydroid.png)
 #   scripts/waydroid.sh logs [N]     # the last N logcat lines (default 80), crashes first
 #   scripts/waydroid.sh sh [cmd...]  # a shell, or one command, inside Android as root
@@ -16,7 +16,7 @@ PKG=${PKG:-com.hkmc.daudio.app.ev3}
 SSH="ssh -p 2222 -o BatchMode=yes user@localhost"
 ENVS='export XDG_RUNTIME_DIR=/run/user/10000 WAYLAND_DISPLAY=wayland-0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10000/bus'
 as_user() { $SSH "$ENVS; $*"; }
-as_root() { $SSH "echo nura | sudo -S $*" 2>&1 | grep -v '^\[sudo\]\|^Password'; }
+as_root() { $SSH "echo nura | sudo -S -p '' $*" 2>&1; }
 android() { as_root waydroid shell -- "$@"; }
 
 start() {
@@ -42,9 +42,11 @@ case $cmd in
     ui) start; as_user 'waydroid show-full-ui' ;;
     size)
         start
-        android wm size "${1:-1920x720}"
-        android wm density "${2:-160}"
+        # Stopped first: the app dies if Android relaunches it on the size change (its onDestroy unregisters a
+        # receiver it never registered).
         android am force-stop "$PKG"
+        android wm size "${1:-1280x720}"
+        android wm density "${2:-160}"
         as_user "waydroid app launch $PKG" ;;
     shot)
         out=${1:-out/waydroid.png}
@@ -59,7 +61,7 @@ case $cmd in
         android logcat -d | grep -E "FATAL EXCEPTION|AndroidRuntime" -A12 | tail -"$n"
         echo "--- $PKG"
         android logcat -d | grep -i "$PKG" | tail -"$n" ;;
-    sh) if [ $# -gt 0 ]; then android "$@"; else $SSH -t "echo nura | sudo -S waydroid shell"; fi ;;
+    sh) [ "${1:-}" != -- ] || shift; if [ $# -gt 0 ]; then android "$@"; else $SSH -t "echo nura | sudo -S waydroid shell"; fi ;;
     stop)
         as_user 'systemctl --user stop waydroid-session' || true
         as_root systemctl stop waydroid-container

@@ -1,0 +1,154 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LIVI shell, live</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1114; --panel:#171a1f; --line:#272b32; --text:#e8eaed; --dim:#8b919a; --acc:#e0a23a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:13px/1.4 system-ui, sans-serif; display:flex; height:100vh; }
+  #view { flex:1; min-width:0; display:flex; flex-direction:column; padding:12px; gap:8px; }
+  #stage { position:relative; width:100%; aspect-ratio:1920/720; background:#000; border:1px solid var(--line); touch-action:none; cursor:grab; user-select:none; }
+  #stage img { position:absolute; inset:0; width:100%; height:100%; display:block; pointer-events:none; }
+  #stock { opacity:.5; mix-blend-mode:normal; }
+  #bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; color:var(--dim); }
+  #bar label { display:flex; gap:6px; align-items:center; }
+  #hint { color:var(--dim); }
+  aside { width:340px; overflow:auto; background:var(--panel); border-left:1px solid var(--line); padding:12px; }
+  h2 { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:16px 0 6px; }
+  h2:first-child { margin-top:0; }
+  .row { display:grid; grid-template-columns:96px 1fr 64px; gap:8px; align-items:center; margin:3px 0; }
+  .row.sel { grid-template-columns:96px 1fr; }
+  .row span { color:var(--dim); }
+  input[type=range] { width:100%; accent-color:var(--acc); }
+  input[type=number], select { width:100%; background:#0f1114; color:var(--text); border:1px solid var(--line); padding:3px 4px; font:inherit; }
+  button { background:#22262d; color:var(--text); border:1px solid var(--line); padding:5px 10px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  pre { background:#0f1114; border:1px solid var(--line); padding:8px; overflow:auto; max-height:200px; font:12px ui-monospace, monospace; }
+  #fps { margin-left:auto; font-variant-numeric:tabular-nums; }
+</style>
+<div id="view">
+  <div id="stage"><img id="frame" alt=""><img id="stock" alt="" hidden></div>
+  <div id="bar">
+    <label><input type="checkbox" id="ov"> overlay stock</label>
+    <label>opacity <input type="range" id="ovo" min="0" max="100" value="50"></label>
+    <button id="reset">reset</button>
+    <button id="copy">copy values</button>
+    <span id="hint">drag: move the car &nbsp; shift-drag: turn the camera &nbsp; wheel: lens</span>
+    <span id="fps"></span>
+  </div>
+  <pre id="out" hidden></pre>
+</div>
+<aside id="panel"></aside>
+<script>
+const W = 1920, H = 720;
+let schema = [], values = {};
+const stage = document.getElementById('stage'), frame = document.getElementById('frame'), stock = document.getElementById('stock');
+const panel = document.getElementById('panel');
+let pending = {}, sending = false;
+
+async function send(key, value) {
+  values[key] = value;
+  pending[key] = value;
+  if (sending) return;
+  sending = true;
+  while (Object.keys(pending).length) {
+    const body = pending; pending = {};
+    await fetch('/set', { method: 'POST', body: JSON.stringify(body) }).catch(() => {});
+  }
+  sending = false;
+}
+
+function build() {
+  panel.textContent = '';
+  let group = null;
+  const byKey = {};
+  for (const p of schema) {
+    if (p.group !== group) { group = p.group; const h = document.createElement('h2'); h.textContent = group; panel.append(h); }
+    const row = document.createElement('div');
+    const name = document.createElement('span'); name.textContent = p.label;
+    if (p.kind === 'select') {
+      row.className = 'row sel';
+      const s = document.createElement('select');
+      for (const o of p.options) { const e = document.createElement('option'); e.textContent = o; e.value = o; s.append(e); }
+      s.value = p.value;
+      s.onchange = () => send(p.key, s.value).then(refreshSoon);
+      byKey[p.key] = v => { s.value = v; };
+      row.append(name, s);
+    } else {
+      row.className = 'row';
+      const r = document.createElement('input'); r.type = 'range'; r.min = p.min; r.max = p.max; r.step = p.step; r.value = p.value;
+      const n = document.createElement('input'); n.type = 'number'; n.min = p.min; n.max = p.max; n.step = p.step; n.value = p.value;
+      r.oninput = () => { n.value = r.value; send(p.key, parseFloat(r.value)); };
+      n.onchange = () => { r.value = n.value; send(p.key, parseFloat(n.value)); };
+      byKey[p.key] = v => { r.value = v; n.value = Math.round(v * 1000) / 1000; };
+      row.append(name, r, n);
+    }
+    panel.append(row);
+  }
+  window.setControl = (k, v) => { if (byKey[k]) byKey[k](v); };
+}
+
+async function load() {
+  schema = await (await fetch('/schema')).json();
+  values = Object.fromEntries(schema.map(p => [p.key, p.value]));
+  build();
+  fetch('/stock.png').then(r => r.ok ? r.blob() : null).then(b => { if (b) { stock.src = URL.createObjectURL(b); } });
+}
+let refreshTimer;
+function refreshSoon() { clearTimeout(refreshTimer); refreshTimer = setTimeout(load, 400); }
+
+// The frame loop: ask for the next frame when the last one has arrived.
+let n = 0, t0 = performance.now(), frames = 0;
+async function loop() {
+  for (;;) {
+    try {
+      const r = await fetch('/frame.jpg?' + (n++));
+      const b = await r.blob();
+      const url = URL.createObjectURL(b);
+      await new Promise(res => { frame.onload = res; frame.src = url; });
+      URL.revokeObjectURL(url);
+      frames++;
+      const now = performance.now();
+      if (now - t0 > 1000) { document.getElementById('fps').textContent = (frames * 1000 / (now - t0)).toFixed(1) + ' fps'; t0 = now; frames = 0; }
+    } catch (e) { await new Promise(r => setTimeout(r, 500)); }
+  }
+}
+
+// Dragging the picture.
+let drag = null;
+stage.onpointerdown = e => { stage.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, turn: e.shiftKey }; stage.style.cursor = 'grabbing'; };
+stage.onpointerup = () => { drag = null; stage.style.cursor = 'grab'; };
+stage.onpointermove = e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.x = e.clientX; drag.y = e.clientY;
+  const k = stage.clientWidth / W;
+  if (drag.turn) {
+    bump('cam_yaw', dx * 0.15);
+    bump('cam_pitch', dy * 0.15);
+  } else {
+    bump('car_x', dx / (H / 2 * k));
+    bump('car_y', -dy / (H / 2 * k));
+  }
+};
+stage.onwheel = e => { e.preventDefault(); bump('cam_fov', e.deltaY * 0.02); };
+function bump(key, d) {
+  const p = schema.find(s => s.key === key);
+  if (!p) return;
+  const v = Math.min(p.max, Math.max(p.min, values[key] + d));
+  window.setControl(key, v);
+  send(key, v);
+}
+
+document.getElementById('ov').onchange = e => { stock.hidden = !e.target.checked; };
+document.getElementById('ovo').oninput = e => { stock.style.opacity = e.target.value / 100; };
+document.getElementById('reset').onclick = async () => { await fetch('/reset', { method: 'POST' }); load(); };
+document.getElementById('copy').onclick = () => {
+  const out = document.getElementById('out');
+  const lines = schema.filter(p => p.code).map(p => p.code.replace('%v', Number(values[p.key]).toFixed(3).replace(/\.?0+$/, '')));
+  out.textContent = lines.join('\n');
+  out.hidden = false;
+  navigator.clipboard?.writeText(out.textContent).catch(() => {});
+};
+load();
+loop();
+</script>

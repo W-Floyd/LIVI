@@ -11,12 +11,12 @@ extends Node3D
 
 signal moved
 
-const UPK := 0.17
-const HALF_W := 4.0
+static var UPK := 0.17
+static var HALF_W := 4.0
 ## The road narrows with distance beyond what the lens does, to the stock screen's far end: by
 ## ROAD_TAPER of its width at ROAD_TAPER_KM.
-const ROAD_TAPER := 0.6
-const ROAD_TAPER_KM := 253.0
+static var ROAD_TAPER := 0.6
+static var ROAD_TAPER_KM := 253.0
 const CAR_Z := 1.2
 const CAR_X := 1.6
 const CAR_SCALE := 1.9
@@ -31,11 +31,11 @@ const ROAD_MAX_KM := 520.0
 ## half-heights from the center, by shifting the frustum.
 const NEAR := 0.5
 const CAR_AIM := Vector3(CAR_X, 0.6, CAR_Z)
-const CAM_YAW := 20.0
-const CAM_PITCH := 21.0
-const CAM_DIST := 26.4
-const CAM_FOV := 32.0
-const CAR_NDC := Vector2(-2.03, -0.36)
+static var CAM_YAW := 20.0
+static var CAM_PITCH := 21.0
+static var CAM_DIST := 26.4
+static var CAM_FOV := 32.0
+static var CAR_NDC := Vector2(-2.03, -0.36)
 const TICK_KM := 50.0
 ## Under this the end of the lit road turns to the warning color, over its last WARN_KM.
 const LOW_RANGE_KM := 50.0
@@ -81,6 +81,7 @@ var _under: OmniLight3D
 var _env: WorldEnvironment
 var _tween: Tween
 var _msaa_before := -1
+var _lift := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -91,10 +92,7 @@ func _ready() -> void:
 	# A frustum, so the picture can be shifted without turning the camera.
 	_camera.projection = Camera3D.PROJECTION_FRUSTUM
 	_camera.keep_aspect = Camera3D.KEEP_HEIGHT
-	_camera.size = 2.0 * _camera.near * tan(deg_to_rad(CAM_FOV) / 2.0)
 	add_child(_camera)
-	_camera.look_at_from_position(cam_pos(), cam_pos() + _forward() * 50.0)
-	_camera.frustum_offset = _base_offset()
 	_camera.current = true
 	_rig = Node3D.new()
 	_rig.name = "World"
@@ -104,19 +102,10 @@ func _ready() -> void:
 	_road_mat.render_priority = -2
 	_road = MeshInstance3D.new()
 	_road.name = "Road"
-	var plane := PlaneMesh.new()
-	var x0 := -24.0
-	var x1 := ROAD_MAX_KM * UPK
-	plane.size = Vector2(x1 - x0, HALF_W * 2.0 * 1.8)
-	plane.center_offset = Vector3((x0 + x1) / 2.0, 0, 0)
-	_road.mesh = plane
+	_road.mesh = PlaneMesh.new()
 	_road.material_override = _road_mat
 	_road.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_rig.add_child(_road)
-	_road_mat.set_shader_parameter("upk", UPK)
-	_road_mat.set_shader_parameter("half_w", HALF_W)
-	_road_mat.set_shader_parameter("taper", ROAD_TAPER)
-	_road_mat.set_shader_parameter("taper_len", ROAD_TAPER_KM * UPK)
 	_road_mat.set_shader_parameter("tick_km", TICK_KM)
 
 	_blob = MeshInstance3D.new()
@@ -156,8 +145,72 @@ func _ready() -> void:
 	_env = WorldEnvironment.new()
 	add_child(_env)
 	ThemeManager.changed.connect(restyle)
+	_apply_view()
 	restyle()
 	_push()
+
+
+## Bumped when a view value below changes; a scene in the tree re-fits itself.
+static var version := 0
+var _version := 0
+
+
+func _process(_delta: float) -> void:
+	if _version != version:
+		_apply_view()
+		_push()
+
+
+## The camera, the road's shape and what depends on `UPK`, from the view values.
+func _apply_view() -> void:
+	_version = version
+	_camera.size = 2.0 * NEAR * tan(deg_to_rad(CAM_FOV) / 2.0)
+	_camera.look_at_from_position(cam_pos(), cam_pos() + _forward() * 50.0)
+	_camera.frustum_offset = _base_offset() + _lift
+	var plane: PlaneMesh = _road.mesh
+	var x0 := -24.0
+	var x1 := ROAD_MAX_KM * UPK
+	plane.size = Vector2(x1 - x0, HALF_W * 2.0 * 1.8)
+	plane.center_offset = Vector3((x0 + x1) / 2.0, 0, 0)
+	_road_mat.set_shader_parameter("upk", UPK)
+	_road_mat.set_shader_parameter("half_w", HALF_W)
+	_road_mat.set_shader_parameter("taper", ROAD_TAPER)
+	_road_mat.set_shader_parameter("taper_len", ROAD_TAPER_KM * UPK)
+	_mirror()
+	moved.emit()
+
+
+## Every view value a tool may change: key, label, range and the line of code it stands for.
+static func tunables() -> Array:
+	return [
+		{key = "cam_yaw", label = "Yaw", min = -90.0, max = 90.0, step = 0.1, value = CAM_YAW, code = "static var CAM_YAW := %v"},
+		{key = "cam_pitch", label = "Pitch", min = 0.0, max = 60.0, step = 0.1, value = CAM_PITCH, code = "static var CAM_PITCH := %v"},
+		{key = "cam_fov", label = "Lens", min = 5.0, max = 80.0, step = 0.1, value = CAM_FOV, code = "static var CAM_FOV := %v"},
+		{key = "cam_dist", label = "Distance", min = 5.0, max = 150.0, step = 0.1, value = CAM_DIST, code = "static var CAM_DIST := %v"},
+		{key = "car_x", label = "Car x", min = -3.0, max = 3.0, step = 0.005, value = CAR_NDC.x, code = "static var CAR_NDC := Vector2(%v, CAR_Y)"},
+		{key = "car_y", label = "Car y", min = -1.5, max = 1.5, step = 0.005, value = CAR_NDC.y, code = "# CAR_Y = %v"},
+		{key = "upk", label = "Units per km", min = 0.05, max = 0.5, step = 0.001, value = UPK, code = "static var UPK := %v"},
+		{key = "road_w", label = "Road half width", min = 1.0, max = 8.0, step = 0.05, value = HALF_W, code = "static var HALF_W := %v"},
+		{key = "road_taper", label = "Road taper", min = 0.0, max = 0.95, step = 0.01, value = ROAD_TAPER, code = "static var ROAD_TAPER := %v"},
+		{key = "road_taper_km", label = "Taper over km", min = 50.0, max = 520.0, step = 1.0, value = ROAD_TAPER_KM, code = "static var ROAD_TAPER_KM := %v"},
+	]
+
+
+static func tune(key: String, v: float) -> bool:
+	match key:
+		"cam_yaw": CAM_YAW = v
+		"cam_pitch": CAM_PITCH = v
+		"cam_fov": CAM_FOV = v
+		"cam_dist": CAM_DIST = v
+		"car_x": CAR_NDC.x = v
+		"car_y": CAR_NDC.y = v
+		"upk": UPK = v
+		"road_w": HALF_W = v
+		"road_taper": ROAD_TAPER = v
+		"road_taper_km": ROAD_TAPER_KM = v
+		_: return false
+	version += 1
+	return true
 
 
 func _exit_tree() -> void:
@@ -373,7 +426,8 @@ func _push() -> void:
 
 ## Moves the picture up by `px` panel pixels, to keep it clear of a taller control row.
 func lift(px: float) -> void:
-	_camera.frustum_offset = _base_offset() + Vector2(0.0, -px / get_viewport().get_visible_rect().size.y * _camera.size)
+	_lift = Vector2(0.0, -px / get_viewport().get_visible_rect().size.y * _camera.size)
+	_camera.frustum_offset = _base_offset() + _lift
 	moved.emit()
 
 

@@ -1,5 +1,5 @@
 extends Node
-## Runs the shell against livi-core, or the scenario runner with `-- --test <path>`.
+## Runs the shell against livi-core, or the scenario runner with `-- --test <path>`, or the live tuning server with `-- --live`.
 
 
 func _ready() -> void:
@@ -8,6 +8,9 @@ func _ready() -> void:
 		var runner := preload("res://test/runner.gd").new()
 		add_child(runner)
 		runner.run(args)
+		return
+	if args.has("--live"):
+		add_child(preload("res://live/live_server.gd").new())
 		return
 	var err: String = Wayland.listen("")
 	if err != "":

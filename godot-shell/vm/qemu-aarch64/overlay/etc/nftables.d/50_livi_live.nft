@@ -1,0 +1,5 @@
+table inet filter {
+	chain input {
+		tcp dport 8765 accept comment "livi shell live view"
+	}
+}

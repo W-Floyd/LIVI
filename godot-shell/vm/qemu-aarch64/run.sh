@@ -71,7 +71,7 @@ set -- \
     -drive if=pflash,format=raw,file=efi-vars.fd \
     -drive if=none,id=hd,format=qcow2,file=pmos.qcow2,discard=unmap \
     -device virtio-blk-pci,drive=hd,bootindex=0 \
-    -netdev user,id=net,hostfwd=tcp:127.0.0.1:2222-:22 \
+    -netdev user,id=net,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:8765-:8765 \
     -device virtio-net-pci,netdev=net \
     -device virtio-gpu-pci \
     -device virtio-keyboard-pci \

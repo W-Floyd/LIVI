@@ -3,7 +3,7 @@
 #   scripts/waydroid.sh start        # container + session (idempotent)
 #   scripts/waydroid.sh launch [pkg] # start, then open the app (default: the stock EV app)
 #   scripts/waydroid.sh ui           # the whole Android UI
-#   scripts/waydroid.sh size [WxH [dpi]]   # the display size and density (default 1280x720 160: the V015 EV app is laid out for that, in px), then relaunch
+#   scripts/waydroid.sh size [WxH [dpi]]   # the display size and density (default 1920x720 240: the panel, at 1.5x so the layouts' 1280x480 dp fill it), then relaunch
 #   scripts/waydroid.sh shot [file]  # the QEMU display as a PNG (default out/waydroid.png)
 #   scripts/waydroid.sh logs [N]     # the last N logcat lines (default 80), crashes first
 #   scripts/waydroid.sh sh [cmd...]  # a shell, or one command, inside Android as root
@@ -45,8 +45,8 @@ case $cmd in
         # Stopped first: the app dies if Android relaunches it on the size change (its onDestroy unregisters a
         # receiver it never registered).
         android am force-stop "$PKG"
-        android wm size "${1:-1280x720}"
-        android wm density "${2:-160}"
+        android wm size "${1:-1920x720}"
+        android wm density "${2:-240}"
         as_user "waydroid app launch $PKG" ;;
     shot)
         out=${1:-out/waydroid.png}

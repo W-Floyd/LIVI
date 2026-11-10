@@ -177,11 +177,11 @@ The EV page draws a procedural car. `car: auto` (the default outside tests; scen
 `$LIVI_SHELL_CAR` or `~/.local/share/livi-shell/car.mesh` exists. Make one from a binary STL:
 
 ```sh
-python3 tools/car-mesh/convert.py car.stl ref/models/car.mesh --front=-y --wheels --agg 4 --tris 30000   # needs numpy, fast-simplification
+python3 tools/car-mesh/convert.py car.stl ref/models/car.mesh --front=-y --wheels --remesh 0.03 --smooth 1.2 --agg 3 --tris 20000   # needs numpy, scipy, scikit-image, fast-simplification
 SHELL_CAR=ref/models/car.mesh scripts/vm.sh scripts/test.sh ev-live-car
 ```
 
-`--wheels` cuts the model's wheels out and the shell draws its own: they do not survive decimation.
+`--wheels` cuts the model's wheels out and the shell draws its own, and `--remesh` rebuilds the outer skin as one clean closed surface (voxelised, filled column by column, smoothed): the model's thin parts and interior do not survive plain decimation.
 The model is someone's work, so it is never committed (`ref/` is ignored); `ev-live-car` skips
 without it and compares nothing. The shell draws it as the same translucent shell with the
 battery block inside. Axes: front +x, up +y; `--front` and `--up` name the STL's.

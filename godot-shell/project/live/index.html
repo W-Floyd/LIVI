@@ -101,10 +101,10 @@ let n = 0, t0 = performance.now(), frames = 0;
 async function loop() {
   for (;;) {
     try {
-      const r = await fetch('/frame.jpg?' + (n++));
+      const r = await fetch('/frame.jpg?' + (n++), { signal: AbortSignal.timeout(5000) });
       const b = await r.blob();
       const url = URL.createObjectURL(b);
-      await new Promise(res => { frame.onload = res; frame.src = url; });
+      await new Promise(res => { frame.onload = frame.onerror = res; frame.src = url; });
       URL.revokeObjectURL(url);
       frames++;
       const now = performance.now();

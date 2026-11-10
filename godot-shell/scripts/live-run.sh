@@ -19,4 +19,4 @@ until [ -S "$runtime/wayland-live" ]; do
 done
 XDG_RUNTIME_DIR=$runtime WAYLAND_DISPLAY=wayland-live \
     godot --path project --display-driver wayland --rendering-driver opengl3 \
-    --audio-driver Dummy -- --live
+    --audio-driver Dummy --disable-vsync -- --live

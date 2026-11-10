@@ -11,11 +11,11 @@ extends Node3D
 
 signal moved
 
-static var UPK := 0.17
-static var HALF_W := 4.0
+static var UPK := 0.146
+static var HALF_W := 4.55
 ## The road narrows with distance beyond what the lens does, to the stock screen's far end: by
 ## ROAD_TAPER of its width at ROAD_TAPER_KM.
-static var ROAD_TAPER := 0.6
+static var ROAD_TAPER := 0.5
 static var ROAD_TAPER_KM := 253.0
 const CAR_Z := 1.2
 const CAR_X := 1.6
@@ -25,17 +25,17 @@ const CAR_FRONT := CAR_X + EvCar.LENGTH / 2.0 * CAR_SCALE
 ## at this scale, and it would sit inside the car.
 const PIN_MIN_AHEAD := 0.9
 const ROAD_MAX_KM := 520.0
-## Fitted to the stock screen by overlaying its render: the camera looks at the car from its
+## Fitted to the stock screen by overlaying its render in the live page (scripts/live.sh): the camera looks at the car from its
 ## left and a little behind. CAM_YAW is from the side view (90 is straight along the road), with a
 ## mid-length lens (little warping of the car). The car sits at CAR_NDC on the screen, in
 ## half-heights from the center, by shifting the frustum.
 const NEAR := 0.5
 const CAR_AIM := Vector3(CAR_X, 0.6, CAR_Z)
-static var CAM_YAW := 20.0
-static var CAM_PITCH := 21.0
-static var CAM_DIST := 26.4
-static var CAM_FOV := 32.0
-static var CAR_NDC := Vector2(-2.03, -0.36)
+static var CAM_YAW := 22.7
+static var CAM_PITCH := 19.9
+static var CAM_DIST := 54.3
+static var CAM_FOV := 16.3
+static var CAR_NDC := Vector2(-1.779, -0.337)
 const TICK_KM := 50.0
 ## Under this the end of the lit road turns to the warning color, over its last WARN_KM.
 const LOW_RANGE_KM := 50.0

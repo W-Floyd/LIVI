@@ -21,6 +21,18 @@ public final class HkmcStubs {
         return null;
     }
 
+    /** The stock window background (co_bg, a vendor framework drawable Android 13 maps to another image): bundled as an asset. */
+    public static void windowBackground(android.app.Activity a) {
+        try {
+            boolean night = (a.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                    == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+            java.io.InputStream in = a.getAssets().open(night ? "co_bg_night.png" : "co_bg_day.png");
+            android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(in);
+            in.close();
+            a.getWindow().setBackgroundDrawable(new android.graphics.drawable.BitmapDrawable(a.getResources(), bmp));
+        } catch (Throwable t) { /* the colour behind stays */ }
+    }
+
     /** Service.startForeground with an icon: A13 rejects the empty Notification the stock app posts. */
     @SuppressWarnings("deprecation")
     public static void startForeground(android.app.Service s, int id, android.app.Notification n) {

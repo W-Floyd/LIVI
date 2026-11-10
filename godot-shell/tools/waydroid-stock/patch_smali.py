@@ -50,6 +50,12 @@ for r, _, fs in os.walk(app):
         t2 = svc_site.sub(svc, t2)
         t2 = site.sub(fix, t2)
         if t2 != t: open(p, 'w').write(t2); n += k
+main = os.path.join(app, 'com/hkmc/daudio/app/ev3/MainActivity.smali')
+if os.path.exists(main):
+    t = open(main).read()
+    t2 = re.sub(r'(\.method [^\n]*onCreate\(Landroid/os/Bundle;\)V\n(?:\s*\.[a-z]+[^\n]*\n)*?\s*\.(?:locals|registers) \d+\n)',
+        lambda m: m.group(1) + '    invoke-static {p0}, Lcom/livi/waydroid/HkmcStubs;->windowBackground(Landroid/app/Activity;)V\n', t, count=1)
+    if t2 != t: open(main, 'w').write(t2); print('MainActivity.onCreate sets the window background')
 os.makedirs(os.path.join(stubs, 'com/livi/waydroid'), exist_ok=True)
 open(os.path.join(stubs, 'com/livi/waydroid/Missing.smali'), 'w').write('.class public Lcom/livi/waydroid/Missing;\n.super Ljava/lang/Object;\n\n' + '\n'.join(helpers) + '\n'.join(svc_helpers.values()))
 print('patched %d getSystemService + %d VehicleInfoManager.getService call sites, %d vendor-added methods redirected' % (n, nsvc, sum(1 for v in miss_cls.values() if v is not None)))

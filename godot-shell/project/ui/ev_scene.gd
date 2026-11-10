@@ -6,17 +6,19 @@ extends Node3D
 ## `screen()`; the page mirrors for a right-hand drive by reflecting the world across the
 ## camera's vertical plane, so the scene is the screen's mirror image.
 ##
-## Units: one per metre of the car at 2x, `UPK` per km of range. The camera was fitted to the
+## Units: one per metre of the car at 2x. The road is ROAD_UNITS long and always ends at the range
+## with the climate off; the range with it on is lit up to its share of that (`upk()` units per km).
+## The camera was fitted to the
 ## stock screen's road: the edges, the far end and the 50 km markers.
 
 signal moved
 
-static var UPK := 0.146
+## How long the road is: the world units from the car's origin to the range-off end.
+static var ROAD_UNITS := 36.9
 static var HALF_W := 4.55
 ## The road narrows with distance beyond what the lens does, to the stock screen's far end: by
-## ROAD_TAPER of its width at ROAD_TAPER_KM.
+## ROAD_TAPER of its width at its end.
 static var ROAD_TAPER := 0.5
-static var ROAD_TAPER_KM := 253.0
 const CAR_Z := 1.2
 const CAR_X := 1.6
 const CAR_SCALE := 1.9
@@ -24,7 +26,6 @@ const CAR_FRONT := CAR_X + EvCar.LENGTH / 2.0 * CAR_SCALE
 ## A charger closer than this ahead of the nose is drawn this far ahead: it is the same place
 ## at this scale, and it would sit inside the car.
 const PIN_MIN_AHEAD := 0.9
-const ROAD_MAX_KM := 520.0
 ## Fitted to the stock screen by overlaying its render in the live page (scripts/live.sh): the camera looks at the car from its
 ## left and a little behind. CAM_YAW is from the side view (90 is straight along the road), with a
 ## mid-length lens (little warping of the car). The car sits at CAR_NDC on the screen, in
@@ -161,7 +162,7 @@ func _process(_delta: float) -> void:
 		_push()
 
 
-## The camera, the road's shape and what depends on `UPK`, from the view values.
+## The camera, the road's shape and the road's length, from the view values.
 func _apply_view() -> void:
 	_version = version
 	_camera.size = 2.0 * NEAR * tan(deg_to_rad(CAM_FOV) / 2.0)
@@ -169,13 +170,12 @@ func _apply_view() -> void:
 	_camera.frustum_offset = _base_offset() + _lift
 	var plane: PlaneMesh = _road.mesh
 	var x0 := -24.0
-	var x1 := ROAD_MAX_KM * UPK
+	var x1 := ROAD_UNITS * 1.5
 	plane.size = Vector2(x1 - x0, HALF_W * 2.0 * 1.8)
 	plane.center_offset = Vector3((x0 + x1) / 2.0, 0, 0)
-	_road_mat.set_shader_parameter("upk", UPK)
 	_road_mat.set_shader_parameter("half_w", HALF_W)
 	_road_mat.set_shader_parameter("taper", ROAD_TAPER)
-	_road_mat.set_shader_parameter("taper_len", ROAD_TAPER_KM * UPK)
+	_road_mat.set_shader_parameter("taper_len", ROAD_UNITS)
 	_mirror()
 	moved.emit()
 
@@ -189,10 +189,9 @@ static func tunables() -> Array:
 		{key = "cam_dist", label = "Distance", min = 5.0, max = 150.0, step = 0.1, value = CAM_DIST, code = "static var CAM_DIST := %v"},
 		{key = "car_x", label = "Car x", min = -3.0, max = 3.0, step = 0.005, value = CAR_NDC.x, code = "static var CAR_NDC := Vector2(%v, CAR_Y)"},
 		{key = "car_y", label = "Car y", min = -1.5, max = 1.5, step = 0.005, value = CAR_NDC.y, code = "# CAR_Y = %v"},
-		{key = "upk", label = "Units per km", min = 0.05, max = 0.5, step = 0.001, value = UPK, code = "static var UPK := %v"},
+		{key = "road_units", label = "Road length", min = 10.0, max = 90.0, step = 0.1, value = ROAD_UNITS, code = "static var ROAD_UNITS := %v"},
 		{key = "road_w", label = "Road half width", min = 1.0, max = 8.0, step = 0.05, value = HALF_W, code = "static var HALF_W := %v"},
 		{key = "road_taper", label = "Road taper", min = 0.0, max = 0.95, step = 0.01, value = ROAD_TAPER, code = "static var ROAD_TAPER := %v"},
-		{key = "road_taper_km", label = "Taper over km", min = 50.0, max = 520.0, step = 1.0, value = ROAD_TAPER_KM, code = "static var ROAD_TAPER_KM := %v"},
 	]
 
 
@@ -204,10 +203,9 @@ static func tune(key: String, v: float) -> bool:
 		"cam_dist": CAM_DIST = v
 		"car_x": CAR_NDC.x = v
 		"car_y": CAR_NDC.y = v
-		"upk": UPK = v
+		"road_units": ROAD_UNITS = v
 		"road_w": HALF_W = v
 		"road_taper": ROAD_TAPER = v
-		"road_taper_km": ROAD_TAPER_KM = v
 		_: return false
 	version += 1
 	return true
@@ -397,15 +395,20 @@ func set_state(on: float, off: float, charger: float, soc: float, animate := tru
 
 
 ## Where the pin stands, in the world's units along the road.
+func upk() -> float:
+	return ROAD_UNITS / maxf(km_off, 1.0)
+
+
 func pin_x() -> float:
-	var x := maxf(stop_km * UPK, CAR_FRONT + PIN_MIN_AHEAD)
-	return minf(x, maxf(km_off * UPK, CAR_FRONT + PIN_MIN_AHEAD))
+	var x := maxf(stop_km * upk(), CAR_FRONT + PIN_MIN_AHEAD)
+	return minf(x, maxf(km_off * upk(), CAR_FRONT + PIN_MIN_AHEAD))
 
 
 func _push() -> void:
 	if _road == null:
 		return
 	var low_range := km_on <= LOW_RANGE_KM
+	_road_mat.set_shader_parameter("upk", upk())
 	_road_mat.set_shader_parameter("km_on", km_on)
 	_road_mat.set_shader_parameter("km_off", km_off)
 	_road_mat.set_shader_parameter("km_warn", maxf(km_on - WARN_KM, 0.0) if low_range else 1.0e6)
@@ -441,15 +444,15 @@ func screen(world: Vector3) -> Vector2:
 ## flank for the charge.
 ## The road's half width at `x` along it.
 static func road_half(x: float) -> float:
-	return HALF_W * (1.0 - ROAD_TAPER * clampf(x / (ROAD_TAPER_KM * UPK), 0.0, 1.0))
+	return HALF_W * (1.0 - ROAD_TAPER * clampf(x / ROAD_UNITS, 0.0, 1.0))
 
 
 func anchors() -> Dictionary:
 	return {
-		on = screen(Vector3(km_on * UPK, 0, road_half(km_on * UPK))),
-		off = screen(Vector3(km_off * UPK, 0, road_half(km_off * UPK))),
-		on_far = screen(Vector3(km_on * UPK, 0, -road_half(km_on * UPK))),
-		off_far = screen(Vector3(km_off * UPK, 0, -road_half(km_off * UPK))),
+		on = screen(Vector3(km_on * upk(), 0, road_half(km_on * upk()))),
+		off = screen(Vector3(km_off * upk(), 0, road_half(km_off * upk()))),
+		on_far = screen(Vector3(km_on * upk(), 0, -road_half(km_on * upk()))),
+		off_far = screen(Vector3(km_off * upk(), 0, -road_half(km_off * upk()))),
 		pin = screen(Vector3(pin_x(), 3.0, 0)),
 		car = screen(Vector3(CAR_X - 0.9, 3.0, CAR_Z)),
 	}

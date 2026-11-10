@@ -107,7 +107,7 @@ its `theme.yaml`; `ThemeManager.set_look({ev_page: ...})` and a scenario's `them
 The live page is a 3D scene (`EvScene`, `EvCar`) behind the shell's own components, with the
 labels projected from it:
 
-- **Road:** one strip with a shader (`ev_road.gdshader`), `UPK` world units per km. Lit to the
+- **Road:** one strip with a shader (`ev_road.gdshader`), `ROAD_UNITS` long, always ending at the range with climate off (the whole road is that range). Lit to the
   range with climate on (`/telemetry/rangeKm`), paler to the range with climate off, 50 km ticks, a
   warning segment over the last 25 km when the range is 50 km or less, a ring where the charger
   is, and a bright cap at the end. The charger (`/navigation/chargingStop.distanceM`) is a 3D pin;

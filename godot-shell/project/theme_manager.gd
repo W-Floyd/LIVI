@@ -121,6 +121,9 @@ func surface_material(size: Vector2) -> ShaderMaterial:
 	m.set_shader_parameter("saturation", 1.8 if glass else 1.35)
 	m.set_shader_parameter("refraction_px", px.gap * 2.0 if glass else 0.0)
 	m.set_shader_parameter("highlight", (0.35 if appearance == "night" else 0.55) if glass else 0.0)
+	m.set_shader_parameter("brightness", 0.92 if glass else 0.96)
+	m.set_shader_parameter("edge_px", px.gap * (0.7 if glass else 0.45))
+	m.set_shader_parameter("edge_brightness", 1.25 if glass else 1.1)
 	m.set_shader_parameter("rect_size", size)
 	m.set_shader_parameter("radius_px", px.radius)
 	return m

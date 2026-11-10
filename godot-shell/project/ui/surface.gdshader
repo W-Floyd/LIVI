@@ -9,6 +9,13 @@ uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
 uniform vec4 tint : source_color = vec4(0.1, 0.1, 0.1, 0.6);
 uniform float blur_px = 24.0;
 uniform float saturation = 1.35;
+uniform float brightness = 1.0;
+// The glass's thickness: a strip along the bottom edge, blurred less, lighter and a little less
+// saturated, as the lit edge of a pane. 0 for none.
+uniform float edge_px = 0.0;
+uniform float edge_brightness = 1.2;
+uniform float edge_saturation = 1.2;
+uniform float edge_blur = 0.5;
 // 0 for frosted; glass sets these.
 uniform float refraction_px = 0.0;
 uniform float highlight = 0.0;
@@ -32,7 +39,9 @@ void fragment() {
 	vec2 toward = normalize(half_size - local + vec2(0.001));
 	vec2 uv = SCREEN_UV + toward * rim * rim * refraction_px * SCREEN_PIXEL_SIZE;
 
-	vec2 step_uv = SCREEN_PIXEL_SIZE * blur_px / 3.0;
+	float edge = edge_px > 0.0 ? 1.0 - smoothstep(edge_px - 1.0, edge_px, rect_size.y - local.y) : 0.0;
+	edge *= step(0.0, inside);
+	vec2 step_uv = SCREEN_PIXEL_SIZE * blur_px * mix(1.0, edge_blur, edge) / 3.0;
 	vec3 acc = vec3(0.0);
 	float wsum = 0.0;
 	for (int x = -3; x <= 3; x++) {
@@ -44,7 +53,7 @@ void fragment() {
 	}
 	vec3 c = acc / wsum;
 	float luma = dot(c, vec3(0.299, 0.587, 0.114));
-	c = mix(vec3(luma), c, saturation);
+	c = mix(vec3(luma), c, mix(saturation, edge_saturation, edge)) * mix(brightness, edge_brightness, edge);
 	c = mix(c, tint.rgb, tint.a);
 
 	// Glass: light along the top edge and a faint rim all round.

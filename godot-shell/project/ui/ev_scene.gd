@@ -11,8 +11,8 @@ extends Node3D
 
 signal moved
 
-const UPK := 0.155
-const HALF_W := 4.5
+const UPK := 0.17
+const HALF_W := 3.7
 const CAR_Z := 1.2
 const CAR_X := 1.6
 const CAR_SCALE := 1.9
@@ -28,9 +28,9 @@ const ROAD_MAX_KM := 520.0
 const NEAR := 0.5
 const CAR_AIM := Vector3(CAR_X, 0.6, CAR_Z)
 const CAM_YAW := 20.0
-const CAM_PITCH := 19.0
-const CAM_DIST := 34.0
-const CAM_FOV := 25.0
+const CAM_PITCH := 21.0
+const CAM_DIST := 26.4
+const CAM_FOV := 32.0
 const CAR_NDC := Vector2(-2.03, -0.36)
 const TICK_KM := 50.0
 ## Under this the end of the lit road turns to the warning color, over its last WARN_KM.

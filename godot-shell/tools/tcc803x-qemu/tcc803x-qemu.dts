@@ -1,0 +1,221 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Minimal device tree for the stock TCC803x Linux 3.18 kernel on the
+ * experimental QEMU "tcc803x" machine. Addresses and interrupt numbers are
+ * those of the real SoC (see the mainline tcc803x.dtsi); only what the
+ * machine models is described.
+ */
+/dts-v1/;
+
+#define GIC_SPI 0
+#define GIC_PPI 1
+#define IRQ_TYPE_LEVEL_HIGH 4
+#define IRQ_TYPE_LEVEL_LOW 8
+
+/ {
+	compatible = "telechips,tcc803x";
+	model = "Telechips TCC8031 Evaluation Board for AVN";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	interrupt-parent = <&gic>;
+
+	aliases {
+		sdhc0 = &sdhc0;
+	};
+
+	chosen {
+		bootargs = "earlycon=pl011,mmio32,0x16600000 console=ttyTCC0,115200n8 earlyprintk ignore_loglevel maxcpus=1";
+	};
+
+	memory@20000000 {
+		device_type = "memory";
+		reg = <0x20000000 0x40000000>;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cpu@0 { device_type = "cpu"; compatible = "arm,cortex-a53"; reg = <0>; enable-method = "psci"; };
+		cpu@1 { device_type = "cpu"; compatible = "arm,cortex-a53"; reg = <1>; enable-method = "psci"; };
+		cpu@2 { device_type = "cpu"; compatible = "arm,cortex-a53"; reg = <2>; enable-method = "psci"; };
+		cpu@3 { device_type = "cpu"; compatible = "arm,cortex-a53"; reg = <3>; enable-method = "psci"; };
+	};
+
+	psci {
+		compatible = "arm,psci-0.2";
+		method = "smc";
+	};
+
+	timer {
+		compatible = "arm,armv8-timer";
+		interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_PPI 14 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_PPI 11 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_PPI 10 IRQ_TYPE_LEVEL_LOW>;
+	};
+
+	gic: interrupt-controller@17301000 {
+		compatible = "arm,cortex-a15-gic";
+		interrupt-controller;
+		#interrupt-cells = <3>;
+		reg = <0x17301000 0x1000>, <0x17302000 0x2000>;
+	};
+
+	uart0: serial@16600000 {
+		compatible = "arm,pl011", "arm,primecell";
+		reg = <0x16600000 0x1000>;
+		interrupts = <GIC_SPI 88 IRQ_TYPE_LEVEL_HIGH>;
+		clock-names = "uartclk", "apb_pclk";
+		clocks = <&uartclk>, <&uartclk>;
+	};
+
+	uartclk: clock-uart {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+
+	pinctrl: pinctrl@14200000 {
+		compatible = "telechips,tcc803x-pinctrl";
+		reg = <0x14200000 0x300>, <0x14800800 0x100>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		/* Not the real extint SPIs (unknown): the stock driver only needs a nonzero count. */
+		interrupts = <GIC_SPI 200 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 201 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 202 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 203 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 204 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 205 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 206 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 207 IRQ_TYPE_LEVEL_HIGH>;
+
+
+		gpa: gpa- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x0 0 32>;
+		};
+
+		gpb: gpb- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x40 32 29>;
+		};
+
+		gpc: gpc- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x80 61 30>;
+		};
+
+		gpe: gpe- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x100 91 20>;
+		};
+
+		gpg: gpg- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x180 111 11>;
+		};
+
+		gph: gph- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x640 122 12>;
+		};
+
+		gpk: gpk- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x680 134 19>;
+		};
+
+		gpma: gpma- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x6c0 153 30>;
+		};
+
+		gpsd0: gpsd0- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x200 183 15>;
+		};
+
+		gpsd1: gpsd1- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x240 198 11>;
+		};
+
+		gpsd2: gpsd2- {
+			compatible = "telechips,tcc803x-gpio";
+			gpio-controller;
+			#gpio-cells = <2>;
+			reg = <0x600 209 10>;
+		};
+
+		uart0_grp: uart0-grp {
+			telechips,pins = "gpsd0-11", "gpsd0-12";
+			telechips,pin-function = <7>;
+		};
+	};
+
+	/* CKC providers: ids from the U-Boot telechips,tcc803x-clks.h; rates/gates go through SiP SMC. */
+	clk_fbus: clk@14000008 {
+		compatible = "telechips,clk-fbus";
+		#clock-cells = <1>;
+	};
+
+	clk_peri: clk@14000400 {
+		compatible = "telechips,clk-peri";
+		#clock-cells = <1>;
+	};
+
+	clk_io: clk@16051000 {
+		compatible = "telechips,clk-iobus";
+		#clock-cells = <1>;
+		clocks = <&clk_fbus 11>;
+	};
+
+	/* Node name gives the platform device "16440000.sdhc" the stock init.rc symlinks as "bdm". */
+	sdhc0: sdhc@16440000 {
+		compatible = "telechips,tcc803x-sdhci";
+		reg = <0x16440000 0x100>, <0x16470000 0x200>,
+		      <0x16470200 0x100>, <0x164700fc 0x4>;
+		interrupts = <GIC_SPI 74 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&clk_peri 41>, <&clk_io 130>;
+		clock-names = "mmc_fclk", "mmc_hclk";
+		controller-id = <0>;
+		bus-width = <8>;
+		non-removable;
+		emmc-if;
+		tcc-mmc-taps = <0x8 0x7 0x7 0x7>;
+		tcc-disable-mmc-hs200;
+	};
+
+	/* The stock klogd reads /proc/lk_log; without a bound device the driver dereferences NULL. */
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		lk_log: lk-log@2f000000 {
+			reg = <0x2f000000 0x100000>;
+		};
+	};
+
+	lk-log-proc {
+		compatible = "lk-log-proc-match";
+		memory-region = <&lk_log>;
+	};
+};

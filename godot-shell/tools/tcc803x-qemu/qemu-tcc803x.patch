@@ -1,0 +1,266 @@
+diff --git a/hw/arm/Kconfig b/hw/arm/Kconfig
+index a55b44d..00761f1 100644
+--- a/hw/arm/Kconfig
++++ b/hw/arm/Kconfig
+@@ -675,3 +675,13 @@ config ARMSSE
+     select UNIMP
+     select SSE_COUNTER
+     select SSE_TIMER
++
++config TCC803X
++    bool
++    default y
++    depends on TCG && ARM
++    select ARM_GIC
++    select PL011
++    select UNIMP
++    select SDHCI
++    select SD
+diff --git a/hw/arm/meson.build b/hw/arm/meson.build
+index ac473ce..f06bcce 100644
+--- a/hw/arm/meson.build
++++ b/hw/arm/meson.build
+@@ -76,3 +76,4 @@ system_ss.add(when: 'CONFIG_VERSATILE', if_true: files('versatilepb.c'))
+ system_ss.add(when: 'CONFIG_VEXPRESS', if_true: files('vexpress.c'))
+ 
+ hw_arch += {'arm': arm_ss}
++arm_ss.add(when: 'CONFIG_TCC803X', if_true: files('tcc803x.c'))
+diff --git a/hw/arm/tcc803x.c b/hw/arm/tcc803x.c
+new file mode 100644
+index 0000000..40355b6
+--- /dev/null
++++ b/hw/arm/tcc803x.c
+@@ -0,0 +1,140 @@
++/*
++ * Telechips TCC803x (Kia EV6 Gen5W head unit) experimental machine.
++ *
++ * Only enough to run the stock Linux 3.18 AArch32 kernel: Cortex-A15 stand-in
++ * for the A53 cluster, GIC-400 at the real addresses, PL011 UARTs, generic
++ * timer, PSCI over SMC, and stubs for everything else.
++ */
++
++#include "qemu/osdep.h"
++#include "qapi/error.h"
++#include "hw/boards.h"
++#include "hw/arm/boot.h"
++#include "hw/char/pl011.h"
++#include "hw/intc/arm_gic.h"
++#include "hw/misc/unimp.h"
++#include "hw/qdev-properties.h"
++#include "hw/sysbus.h"
++#include "hw/sd/sd.h"
++#include "hw/sd/sdhci.h"
++#include "hw/block/block.h"
++#include "system/blockdev.h"
++#include "system/system.h"
++#include "exec/address-spaces.h"
++#include "target/arm/cpu.h"
++#include "target/arm/gtimer.h"
++
++#define TCC_RAM_BASE   0x20000000
++#define TCC_GIC_DIST   0x17301000
++#define TCC_GIC_CPU    0x17302000
++#define TCC_NUM_IRQS   224
++#define TCC_MAX_CPUS   4
++
++#define TCC_SDHC0_BASE 0x16440000
++#define TCC_SDHC0_SPI 74
++
++#define TCC_UART_BASE  0x16600000
++#define TCC_UART_SPI   88
++
++static struct arm_boot_info tcc803x_binfo;
++
++static void tcc803x_init(MachineState *machine)
++{
++    MemoryRegion *sysmem = get_system_memory();
++    MemoryRegion *ram = machine->ram;
++    int n, ncpus = machine->smp.cpus;
++    DeviceState *gic;
++    SysBusDevice *gicbus;
++
++    memory_region_add_subregion(sysmem, TCC_RAM_BASE, ram);
++
++    for (n = 0; n < ncpus; n++) {
++        Object *cpuobj = object_new(machine->cpu_type);
++        object_property_set_bool(cpuobj, "has_el3", false, &error_abort);
++        object_property_set_bool(cpuobj, "has_el2", false, &error_abort);
++        object_property_set_int(cpuobj, "psci-conduit", QEMU_PSCI_CONDUIT_SMC,
++                                &error_abort);
++        object_property_set_int(cpuobj, "mp-affinity", n, &error_abort);
++        if (n) {
++            object_property_set_bool(cpuobj, "start-powered-off", true,
++                                     &error_abort);
++        }
++        qdev_realize_and_unref(DEVICE(cpuobj), NULL, &error_fatal);
++    }
++
++    gic = qdev_new(TYPE_ARM_GIC);
++    qdev_prop_set_uint32(gic, "revision", 2);
++    qdev_prop_set_uint32(gic, "num-cpu", ncpus);
++    qdev_prop_set_uint32(gic, "num-irq", TCC_NUM_IRQS + 32);
++    gicbus = SYS_BUS_DEVICE(gic);
++    sysbus_realize_and_unref(gicbus, &error_fatal);
++    sysbus_mmio_map(gicbus, 0, TCC_GIC_DIST);
++    sysbus_mmio_map(gicbus, 1, TCC_GIC_CPU);
++
++    for (n = 0; n < ncpus; n++) {
++        DeviceState *cpudev = DEVICE(qemu_get_cpu(n));
++        int ppibase = TCC_NUM_IRQS + n * 32;
++        /* PPI 13/14/11/10: secure phys, phys, virt, hyp (vendor DT). */
++        qdev_connect_gpio_out(cpudev, GTIMER_SEC,
++                              qdev_get_gpio_in(gic, ppibase + 16 + 13));
++        qdev_connect_gpio_out(cpudev, GTIMER_PHYS,
++                              qdev_get_gpio_in(gic, ppibase + 16 + 14));
++        qdev_connect_gpio_out(cpudev, GTIMER_VIRT,
++                              qdev_get_gpio_in(gic, ppibase + 16 + 11));
++        qdev_connect_gpio_out(cpudev, GTIMER_HYP,
++                              qdev_get_gpio_in(gic, ppibase + 16 + 10));
++        sysbus_connect_irq(gicbus, n, qdev_get_gpio_in(cpudev, ARM_CPU_IRQ));
++        sysbus_connect_irq(gicbus, n + ncpus,
++                           qdev_get_gpio_in(cpudev, ARM_CPU_FIQ));
++    }
++
++    /* Catch-all, below every real device: reads 0, writes ignored, logged. */
++    create_unimplemented_device("tcc803x-lowio", 0x00000000, 0x10000000);
++    create_unimplemented_device("tcc803x-io", 0x10000000, 0x10000000);
++
++    for (n = 0; n < 4; n++) {
++        pl011_create(TCC_UART_BASE + n * 0x10000,
++                     qdev_get_gpio_in(gic, TCC_UART_SPI + n),
++                     serial_hd(n));
++    }
++
++    /* SDHC0: the stock firmware's eMMC (-drive if=sd,index=0). */
++    {
++        DeviceState *sdhci = qdev_new(TYPE_SYSBUS_SDHCI);
++        DriveInfo *di = drive_get(IF_SD, 0, 0);
++        DeviceState *card;
++
++        qdev_prop_set_uint8(sdhci, "sd-spec-version", 3);
++        qdev_prop_set_bit(sdhci, "ignore-sdclk-gate", true);
++        sysbus_realize_and_unref(SYS_BUS_DEVICE(sdhci), &error_fatal);
++        sysbus_mmio_map(SYS_BUS_DEVICE(sdhci), 0, TCC_SDHC0_BASE);
++        sysbus_connect_irq(SYS_BUS_DEVICE(sdhci), 0,
++                           qdev_get_gpio_in(gic, TCC_SDHC0_SPI));
++        card = qdev_new(TYPE_EMMC);
++        if (di) {
++            qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(di),
++                                    &error_fatal);
++        }
++        qdev_realize_and_unref(card, qdev_get_child_bus(sdhci, "sd-bus"),
++                               &error_fatal);
++    }
++
++    tcc803x_binfo.loader_start = TCC_RAM_BASE;
++    tcc803x_binfo.ram_size = machine->ram_size;
++    tcc803x_binfo.board_id = 0xffffffff;
++    tcc803x_binfo.psci_conduit = QEMU_PSCI_CONDUIT_SMC;
++    arm_load_kernel(ARM_CPU(first_cpu), machine, &tcc803x_binfo);
++}
++
++static void tcc803x_machine_init(MachineClass *mc)
++{
++    mc->desc = "Telechips TCC803x (Kia EV6 Gen5W), experimental";
++    mc->init = tcc803x_init;
++    mc->max_cpus = TCC_MAX_CPUS;
++    mc->default_cpus = TCC_MAX_CPUS;
++    mc->default_cpu_type = ARM_CPU_TYPE_NAME("cortex-a15");
++    mc->default_ram_size = 0x40000000;
++    mc->default_ram_id = "tcc803x.ram";
++}
++
++DEFINE_MACHINE("tcc803x", tcc803x_machine_init)
+diff --git a/hw/sd/sdhci-internal.h b/hw/sd/sdhci-internal.h
+index 9f768c4..ca39621 100644
+--- a/hw/sd/sdhci-internal.h
++++ b/hw/sd/sdhci-internal.h
+@@ -46,7 +46,7 @@
+ #define SDHC_TRNS_ACMD23               0x0008 /* since v3 */
+ #define SDHC_TRNS_READ                 0x0010
+ #define SDHC_TRNS_MULTI                0x0020
+-#define SDHC_TRNMOD_MASK               0x0037
++#define SDHC_TRNMOD_MASK               0x003f
+ 
+ /* R/W Command Register 0x0 */
+ #define SDHC_CMDREG                    0x0E
+diff --git a/hw/sd/sdhci.c b/hw/sd/sdhci.c
+index 69baf73..3af634b 100644
+--- a/hw/sd/sdhci.c
++++ b/hw/sd/sdhci.c
+@@ -345,6 +345,14 @@ static void sdhci_send_command(SDHCIState *s)
+     request.cmd = s->cmdreg >> 8;
+     request.arg = s->argument;
+ 
++    if ((s->trnmod & 0xc) == 0x8 && (s->cmdreg & SDHC_CMD_DATA_PRESENT)) {
++        SDRequest sbc = { .cmd = 23, .arg = s->sdmasysad };
++        uint8_t sbc_resp[16];
++
++        trace_sdhci_send_command(sbc.cmd, sbc.arg);
++        sdbus_do_command(&s->sdbus, &sbc, sbc_resp);
++    }
++
+     trace_sdhci_send_command(request.cmd, request.arg);
+     rlen = sdbus_do_command(&s->sdbus, &request, response);
+ 
+@@ -993,7 +1001,7 @@ static void sdhci_data_transfer(void *opaque)
+ 
+ static bool sdhci_can_issue_command(SDHCIState *s)
+ {
+-    if (!SDHC_CLOCK_IS_ON(s->clkcon) ||
++    if ((!s->ignore_sdclk_gate && !SDHC_CLOCK_IS_ON(s->clkcon)) ||
+         (((s->prnsts & SDHC_DATA_INHIBIT) || s->stopped_state) &&
+         ((s->cmdreg & SDHC_CMD_DATA_PRESENT) ||
+         ((s->cmdreg & SDHC_CMD_RESPONSE) == SDHC_CMD_RSP_WITH_BUSY &&
+@@ -1565,6 +1573,8 @@ static const Property sdhci_sysbus_properties[] = {
+                      dma_mr, TYPE_MEMORY_REGION, MemoryRegion *),
+     DEFINE_PROP_BOOL("wp-inverted", SDHCIState,
+                      wp_inverted, false),
++    DEFINE_PROP_BOOL("ignore-sdclk-gate", SDHCIState,
++                     ignore_sdclk_gate, false),
+ };
+ 
+ static void sdhci_sysbus_init(Object *obj)
+diff --git a/include/hw/sd/sdhci.h b/include/hw/sd/sdhci.h
+index 51fb30e..828bf52 100644
+--- a/include/hw/sd/sdhci.h
++++ b/include/hw/sd/sdhci.h
+@@ -105,6 +105,7 @@ struct SDHCIState {
+      * to be protected. Set wp_inverted to invert the signal.
+      */
+     bool wp_inverted;
++    bool ignore_sdclk_gate; /* issue commands with SDCLK off (tcc803x) */
+ };
+ typedef struct SDHCIState SDHCIState;
+ 
+diff --git a/target/arm/tcg/psci.c b/target/arm/tcg/psci.c
+index cabed43..3a166ae 100644
+--- a/target/arm/tcg/psci.c
++++ b/target/arm/tcg/psci.c
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include "qemu/osdep.h"
++#include "qemu/log.h"
+ #include "cpu.h"
+ #include "exec/helper-proto.h"
+ #include "kvm-consts.h"
+@@ -85,6 +86,18 @@ void arm_handle_psci_call(ARMCPU *cpu)
+         goto err;
+     }
+ 
++    /*
++     * Telechips SiP calls (secure monitor services, ids 0x8200xxxx): logged and
++     * answered 0; see hw/arm/tcc803x.c for the ids the stock kernel makes.
++     */
++    if ((param[0] >> 16) == 0x8200) {
++        qemu_log_mask(LOG_UNIMP, "tcc803x SiP SMC %#" PRIx64 " (%#" PRIx64
++                      ", %#" PRIx64 ", %#" PRIx64 ")\n",
++                      param[0], param[1], param[2], param[3]);
++        ret = 0;
++        goto err;
++    }
++
+     switch (param[0]) {
+         CPUState *target_cpu_state;
+         ARMCPU *target_cpu;

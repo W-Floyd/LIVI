@@ -16,6 +16,9 @@ var hand := "lhd"              # lhd | rhd
 var near := "projection"       # what sits nearer the driver: projection | panel
 var text_scale := 1.0
 var material := "solid"        # solid | frosted | glass: surfaces floating over the map
+var reduced_motion := false    # no animated transitions or camera moves
+var quality := "normal"        # normal | low: what the 3D pages may spend (PLAN.md, "Quality profiles")
+var ev_page := "auto"          # auto | image | live: which "Electric vehicle" page `ev` opens
 
 ## Godot's button states as the state maps of a pack's selectors name them.
 const BUTTON_STATES := {
@@ -81,7 +84,16 @@ func _spec_path(name: String) -> String:
 
 
 func defaults() -> void:
-	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid"})
+	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", ev_page = "auto"})
+
+
+## The "Electric vehicle" page `ev` stands for: the look's choice, else the theme's own
+## (`ev_page:` in theme.yaml), else the pack's image page when the pack has one, else the live one.
+func ev_page_kind() -> String:
+	var want := ev_page if ev_page != "auto" else str(spec.get("ev_page", "auto"))
+	if want == "image" or want == "live":
+		return want
+	return "image" if pack != null and pack.has_screen("ev_main") else "live"
 
 
 ## Surfaces float over the map, which then runs full-bleed beneath them.

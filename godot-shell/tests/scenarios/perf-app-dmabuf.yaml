@@ -11,5 +11,6 @@ steps:
       frames: 240
       expect:
         # Regression limits for llvmpipe in the VM, about twice what it measured (frame p95
-        # 11.7 ms, dispatch 0.04 ms, import 0.02 ms, against shm's 2.0 and 1.4 ms).
-        vm: { frame_ms_p95: 25, dispatch_ms: 0.2, import_ms: 0.2, rss_mb: 800 }
+        # 11.7 ms, dispatch 0.04 ms, import 0.02 ms, against shm's 2.0 and 1.4 ms). RSS is the whole run's: after the earlier scenarios
+        # 680 to 820 MB.
+        vm: { frame_ms_p95: 25, dispatch_ms: 0.2, import_ms: 0.2, rss_mb: 1100 }

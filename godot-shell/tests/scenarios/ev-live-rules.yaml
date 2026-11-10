@@ -1,0 +1,68 @@
+name: ev-live-rules
+# The live page's rules, in every built-in theme, day and night, both drive sides and both text
+# scales: targets at least the rule table's size and apart, labels on screen, clear of the
+# title, the targets and each other, and the drive side moving the panels but not the order.
+# Over the stock state, a low range and a long one.
+fixtures:
+  core: fixtures/ev6-main.json
+steps:
+  - page: ev_live
+  - gdscript: |
+      var bad := PackedStringArray()
+      for state in [[243.0, 50.0, 740.0], [30.0, 6.0, 9000.0], [450.0, 90.0, 300000.0]]:
+        Core.fake_set("telemetry/rangeKm", state[0])
+        Core.fake_set("telemetry/fuelPct", state[1])
+        Core.fake_set("navigation/chargingStop/distanceM", state[2])
+        for theme_name in ["instrument", "calm", "charge", "studio"]:
+            for mode in ["day", "night"]:
+                for hand in ["lhd", "rhd"]:
+                    for scale in [1.0, 1.4]:
+                        ThemeManager.set_look({theme_name = theme_name, appearance = mode, hand = hand, text_scale = scale})
+                        await runner.frames(3)
+                        var tag := "%s/%s/%s/%.1f/%d km" % [theme_name, mode, hand, scale, state[0]]
+                        var page: Control = shell.get_node("EvLive")
+                        var touch: float = ThemeManager.px.touch
+                        var tiles: Array[Control] = []
+                        for n in ["next_departure", "scheduled", "v2l", "Settings"]:
+                            tiles.append(page.get_node(n))
+                        for t in tiles:
+                            if t.size.x < touch or t.size.y < touch:
+                                bad.append("%s: %s is %s, under %.0f px" % [tag, t.name, t.size, touch])
+                        for i in tiles.size():
+                            for j in range(i + 1, tiles.size()):
+                                var a := tiles[i].get_global_rect()
+                                var b := tiles[j].get_global_rect()
+                                if a.grow(ThemeManager.px.touch_gap - 1.0).intersects(b):
+                                    bad.append("%s: %s and %s are closer than the target gap" % [tag, tiles[i].name, tiles[j].name])
+                        # Reading order stays; the gear goes to the driver's side.
+                        var xs := [tiles[0].position.x, tiles[1].position.x, tiles[2].position.x]
+                        if not (xs[0] < xs[1] and xs[1] < xs[2]):
+                            bad.append("%s: tiles out of reading order" % tag)
+                        var gear_left: bool = tiles[3].position.x < tiles[0].position.x
+                        if gear_left != (hand == "rhd"):
+                            bad.append("%s: gear on the wrong side" % tag)
+                        var boxes := {}
+                        var screen := Rect2(Vector2.ZERO, page.size)
+                        for n in ["Battery", "ChargerLabel", "RangeOn", "RangeOff"]:
+                            var box: Control = page.get_node(n)
+                            if not box.visible:
+                                continue
+                            var r := box.get_global_rect()
+                            boxes[n] = r
+                            if not screen.encloses(r):
+                                bad.append("%s: %s off screen %s" % [tag, n, r])
+                            var title: Control = page.get_node("Title")
+                            if r.position.y < title.position.y + title.size.y - 0.5:
+                                bad.append("%s: %s over the title" % [tag, n])
+                            for t in tiles:
+                                if r.intersects(t.get_global_rect()):
+                                    bad.append("%s: %s over %s" % [tag, n, t.name])
+                        for a in boxes:
+                            for b in boxes:
+                                if a < b and (boxes[a] as Rect2).intersects(boxes[b]):
+                                    bad.append("%s: %s over %s" % [tag, a, b])
+                        # The scene mirrors with the drive side: the car is on the driver's end.
+                        var an: Dictionary = page.get_node("Scene").anchors()
+                        if (an.car.x < an.off.x) != (hand == "lhd"):
+                            bad.append("%s: scene not mirrored" % tag)
+      return "\n".join(bad) if not bad.is_empty() else null

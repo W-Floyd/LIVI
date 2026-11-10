@@ -388,7 +388,9 @@ beyond colors and fonts.
   draws it), a fixed camera and lighting matched to the stock render.
 - **Range road:** a perspective road with markers placed by distance: the next charger
   (740 m), range with climate on (243 km) and off (253 km). That's a new component, a range
-  ribbon, which every theme can use, drawn in perspective by a vendor pack and flat by others.
+  ribbon, which every theme can use. It is built as a 3D scene (`ev_live`) that every theme
+  gets, with the pack's colors, strings and layout; the pack's stock images stay available as
+  the image page (`ev_main`), and `ev_page` chooses.
 - **Bottom tiles:** next departure, scheduled charging and target temperature, and EV charge
   transfer (V2G/V2L), plus a settings gear. These are tile components with the vendor's
   9-patches.
@@ -494,12 +496,17 @@ it. The Mali-G51 has a different budget from llvmpipe or a desktop.
 - 3D: render scale, shadows (off, or one baked shadow), the car model's LOD,
   and the reflection and lighting model.
 - Motion: the animation and transition budget (full, reduced, or none), and
-  whether the 3D camera may move on its own.
+  whether the 3D camera may move on its own. (So far: `reduced_motion` turns the live "Electric
+  vehicle" page's easing off.)
 - Frame pacing: the target fps, and an idle mode that redraws only on change
   (Godot's low-processor mode, woken by core events and client commits).
   Video, when it shows, sets the rate.
 - Memory: limits on texture and mesh memory, and how many window textures
   are kept.
+
+**So far** `ThemeManager.quality` is `normal` or `low`, and only the live "Electric vehicle"
+page reads it: `low` drops its fill and under-car lights, the sky's reflections and
+multisampling. Nothing picks it automatically yet.
 
 **Profiles:** `unit` (the G5W), `vm` (llvmpipe), `desktop`, and `low` for when
 the unit is under load. A profile is a file. Godot's feature-tag overrides
@@ -702,6 +709,9 @@ Every milestone lands with its scenarios.
       Packs load from `$LIVI_SHELL_THEMES` or `~/.local/share/livi-shell/themes/`; `skins:`
       in `theme.yaml` give cards and buttons (every state, from a selector) `StyleBoxTexture`s;
       a pack screen is a page of views at their rectangles (`PackScreen`).
+- [x] A pack page built from the shell's components and a live 3D scene instead of the stock
+      images: the "Electric vehicle" page, `ev_live`, beside the image page, which stays (see the
+      README). Other pack screens still go through `PackScreen`.
 - [ ] Pack pages built from the shell's components, not drawn by a dedicated page; the
       `--reference` run mode and the onion-skin and flicker output of `compare_reference`.
 - [ ] Components as logic plus skin (see "Scene themes"), with 2D skins
@@ -747,6 +757,9 @@ usable rate, stop; the work up to 6 is still usable as hosted pages under
 After the go or no-go, as the unit's numbers decide how much 3D it can
 afford.
 
+- [x] A 3D page outside the scene themes: the "Electric vehicle" range scene (road, car, charger
+      pin) with the `normal` and `low` profiles, measured in the VM. It uses a perspective camera
+      fitted to a stock screen, not the panel-plane camera.
 - [ ] The 3D layer, its panel-plane camera, and 3D skins for a few
       components, with the rendered-pixel checks.
 - [ ] One full scene theme, with its asset budget and goldens.

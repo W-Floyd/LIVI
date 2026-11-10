@@ -65,6 +65,22 @@ steps:
   - compare_reference: { name: pack-synth-page-masked, reference: reference/ev_main_day_edited.png, min: 1.0, mask: [[1600, 80, 300, 200]] }
   - theme: { appearance: night }
   - compare_reference: { name: pack-synth-page-night, reference: reference/ev_main_night.png, min: 1.0 }
+  # `ev` is the pack's image page where the pack has one, and the live page where look or
+  # theme say so. The synthetic pack lacks the live page's tap targets, so it lays out from
+  # the theme's tokens, in the pack's colors and skins.
+  - page: ev
+  - expect_node: { path: Screen/layout_main_title, text: Synth Vehicle }
+  - theme: { ev_page: live }
+  - page: ev
+  - gdscript: |
+      var tile: EvTile = shell.get_node("EvLive/next_departure")
+      var box: StyleBox = tile.get_theme_stylebox("normal")
+      if not box is StyleBoxTexture:
+          return "the live page's targets do not take the pack's button skin: %s" % box
+      if shell.get_node("Page").visible != true:
+          return "the status bar is hidden where the pack does not draw its own"
+  - screenshot: { name: pack-synth-live, compare: false }
+  - theme: { ev_page: auto }
   - page: home
   - wait: { frames: 2 }
   - screenshot: pack-synth-home-night

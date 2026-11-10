@@ -466,12 +466,14 @@ func _touch(at: Vector2) -> void:
 		await _frames(1)
 
 
-## `{ theme_name, appearance, hand, near, text_scale }`, any of them.
+## `{ theme_name, appearance, hand, near, text_scale, material, reduced_motion, quality, ev_page }`,
+## any of them.
 func _look_error(look: Dictionary) -> String:
 	const KEYS := {
 		theme_name = null, appearance = ["day", "night"],
 		hand = ["lhd", "rhd"], near = ["projection", "panel"], text_scale = null,
-		material = ["solid", "frosted", "glass"]}
+		material = ["solid", "frosted", "glass"], reduced_motion = [true, false],
+		quality = ["normal", "low"], ev_page = ["auto", "image", "live"]}
 	for k in look:
 		if not KEYS.has(k):
 			return "theme: unknown key %s" % k

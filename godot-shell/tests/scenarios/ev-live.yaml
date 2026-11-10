@@ -1,0 +1,44 @@
+name: ev-live
+# The Godot-rendered "Electric vehicle" page in the built-in themes. `ev` opens it where the
+# theme has no image page of its own. Goldens for the main combinations; the rest are for review.
+clock: 2026-11-09T17:42:00
+fixtures:
+  core: fixtures/ev6-main.json
+theme: { theme_name: instrument, appearance: night }
+steps:
+  - page: ev
+  - expect_node: { path: EvLive/Title, text: Electric vehicle }
+  - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "243" }
+  - expect_node: { path: EvLive/Battery/Row1/battery_value, text: "50" }
+  - screenshot: ev-live-instrument-night
+  - theme: { appearance: day }
+  - screenshot: ev-live-instrument-day
+  - theme: { theme_name: calm }
+  - screenshot: ev-live-calm-day
+  - theme: { appearance: night }
+  - screenshot: { name: ev-live-calm-night, compare: false }
+  - theme: { theme_name: charge }
+  - screenshot: ev-live-charge-night
+  - theme: { appearance: day }
+  - screenshot: { name: ev-live-charge-day, compare: false }
+  # The drive side mirrors the scene and moves the gear; the order of the targets stays.
+  - theme: { theme_name: instrument, appearance: night, hand: rhd }
+  - screenshot: ev-live-instrument-night-rhd
+  - theme: { theme_name: calm, appearance: day }
+  - screenshot: { name: ev-live-calm-day-rhd, compare: false }
+  - theme: { theme_name: instrument, appearance: night, hand: lhd, text_scale: 1.4 }
+  - screenshot: ev-live-instrument-night-text-1.4
+  - theme: { text_scale: 1.0, quality: low }
+  - screenshot: ev-live-instrument-night-low
+  # Surfaces over the scene, and a scene theme, which keeps its own 3D layer for the home page.
+  - theme: { quality: normal, material: frosted }
+  - screenshot: { name: ev-live-instrument-night-frosted, compare: false }
+  - theme: { material: solid, theme_name: studio }
+  - screenshot: { name: ev-live-studio-night, compare: false }
+  - gdscript: |
+      if shell.get_node("Scene").visible:
+          return "the scene theme's own layer shows behind the page"
+  - page: home
+  - gdscript: |
+      if not shell.get_node("Scene").visible or shell.get_node_or_null("EvLive") != null:
+          return "home did not come back"

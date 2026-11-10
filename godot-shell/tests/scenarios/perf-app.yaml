@@ -14,4 +14,5 @@ steps:
         # Regression limits for llvmpipe in the VM, about twice what it measured (release:
         # frame p95 12.7 ms, dispatch 1.7 ms and upload 1 ms mean, RSS 405 MB). Means and
         # p95s only: a single frame's maximum on a VM is noise (upload's has been 4 to 14 ms).
-        vm: { frame_ms_p95: 25, dispatch_ms: 4, upload_ms: 3, rss_mb: 800 }
+        # RSS is the whole run's: alone 418 MB, after the earlier scenarios 680 to 820.
+        vm: { frame_ms_p95: 25, dispatch_ms: 4, upload_ms: 3, rss_mb: 1100 }

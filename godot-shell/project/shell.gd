@@ -13,6 +13,10 @@ extends Control
 @onready var _stop: StopCard = $Page/Body/Side/Panel/Stop
 @onready var _player: MiniPlayer = $Page/Body/Side/Panel/Player
 
+## A tap on the "Electric vehicle" page's targets (`next_departure`, `scheduled`, `v2l`,
+## `settings`). The core has no action for any of them yet.
+signal ev_action(id: String)
+
 ## Mapped windows, oldest first; the newest is shown until the window layouts land.
 var _windows: Array[int] = []
 
@@ -27,6 +31,7 @@ var _scene: SceneSkin
 
 ## A pack's page standing in for the home page, while one is open.
 var _page: Control
+var _live_bar := false
 
 
 func _init() -> void:
@@ -89,7 +94,7 @@ func _process(_delta: float) -> void:
 
 func _draw() -> void:
 	# A scene theme's 3D world shows through instead.
-	if not ThemeManager.is_scene():
+	if not ThemeManager.is_scene() and not _page is EvLive:
 		draw_rect(Rect2(Vector2.ZERO, size), ThemeManager.c.bg)
 
 
@@ -104,6 +109,11 @@ func _style() -> void:
 	elif not ThemeManager.is_scene() and _scene != null:
 		_scene.queue_free()
 		_scene = null
+	if _scene:
+		_scene.visible = _page == null
+	# A pack that comes or goes changes who draws the live page's title bar.
+	if _page is EvLive and _live_bar != _own_bar():
+		open_page("ev_live")
 	var g: float = ThemeManager.px.gap
 	_side.custom_minimum_size.x = ThemeManager.px.side
 	for k in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
@@ -118,22 +128,49 @@ func _style() -> void:
 	_place_projection.call_deferred()
 
 
-## "home", or a screen of the theme's pack, which replaces the home page until "home" again.
-## An error message when the theme has no such page.
+## "home"; a screen of the theme's pack, which replaces the home page until "home" again
+## (`ev_main`, the pack's image page); `ev_live`, the Godot-rendered "Electric vehicle" page,
+## which every theme has; or `ev`, whichever of the two the theme and the look choose
+## (`ThemeManager.ev_page_kind`). An error message when there is no such page.
 func open_page(page: String) -> String:
-	if page != "home" and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
+	if page == "ev":
+		page = "ev_live" if ThemeManager.ev_page_kind() == "live" else "ev_main"
+	if page == "ev_live":
+		if _powertrain() != "electric":
+			return "ev_live needs an electric car"
+	elif page != "home" and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
 		return "theme %s has no page %s" % [ThemeManager.theme_name, page]
 	if _page:
 		remove_child(_page)
 		_page.free()
 		_page = null
-	$Page.visible = page == "home"
-	_projection.visible = page == "home"
-	if page != "home":
+	var home := page == "home"
+	var live := page == "ev_live"
+	var own_bar := live and _own_bar()
+	_live_bar = own_bar
+	# The live page keeps the status bar unless its pack draws its own title bar.
+	$Page.visible = home or (live and not own_bar)
+	_body.visible = home
+	_projection.visible = home
+	if _scene:
+		_scene.visible = home
+	if live:
+		var ev := EvLive.new()
+		ev.top_inset = 0.0 if own_bar else _status.get_combined_minimum_size().y
+		ev.tile_pressed.connect(func(id): ev_action.emit(id))
+		_page = ev
+		add_child(_page)
+	elif not home:
 		_page = PackScreen.new()
 		_page.screen_name = page
 		add_child(_page)
+	queue_redraw()
 	return ""
+
+
+## Whether the active pack draws the live page's title bar itself: it has the stock layout.
+func _own_bar() -> bool:
+	return not EvLive.pack_layout().is_empty()
 
 
 func _place_projection() -> void:

@@ -1,0 +1,35 @@
+name: ev-live-taps
+# Taps on the live page's targets say which was tapped. The core has no action behind any of
+# them yet, so the page only emits `ev_action`.
+fixtures:
+  core: fixtures/ev6-main.json
+theme: { theme_name: calm, appearance: day }
+steps:
+  - page: ev_live
+  - gdscript: |
+      shell.set_meta("taps", [])
+      shell.ev_action.connect(func(id): shell.get_meta("taps").append(id))
+  - tap: { node: EvLive/next_departure }
+  - tap: { node: EvLive/scheduled, with: touch }
+  - tap: { node: EvLive/v2l }
+  - tap: { node: EvLive/Settings, with: touch }
+  - gdscript: |
+      var taps: Array = shell.get_meta("taps")
+      if taps != ["next_departure", "scheduled", "v2l", "settings"]:
+          return "taps were %s" % [taps]
+  # Pressed shows while the finger is down: the accent fill and its foreground.
+  - gdscript: |
+      var tile: EvTile = shell.get_node("EvLive/v2l")
+      tile.button_down.emit()
+      await runner.frames(2)
+      var held: Color = tile.find_child("Title", true, false).get_theme_color("font_color")
+      tile.button_up.emit()
+      await runner.frames(2)
+      var rest: Color = tile.find_child("Title", true, false).get_theme_color("font_color")
+      if held != ThemeManager.c.on_accent or rest != ThemeManager.c.text:
+          return "pressed foreground is %s then %s" % [held, rest]
+  # A tap outside every target does nothing.
+  - tap: { x: 960, y: 300 }
+  - gdscript: |
+      if shell.get_meta("taps").size() != 4:
+          return "a tap on the scene was taken as a target"

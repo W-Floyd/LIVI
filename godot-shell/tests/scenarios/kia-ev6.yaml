@@ -13,3 +13,39 @@ steps:
   - theme: { appearance: day }
   - compare_reference: { name: kia-ev6-main-day, reference: reference/ev_main_day.png, min: 0.99 }
   - screenshot: { name: kia-ev6-main-day, compare: false }
+  # The same screen drawn live: the 3D scene, the shell's own components and the pack's strings,
+  # type and layout. Live 3D is not the stock artwork: the road, the car and the pin differ in
+  # every pixel they cover, which is a fifth of the panel, so the bar is 0.80 (it measures 0.85).
+  # The title bar, text and targets are the stock rectangles.
+  - page: ev_live
+  # The core's charging stop has no name yet: the stock screen's own.
+  - set: { core: { navigation: { chargingStop: { name: Digital Energy Solutions } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/Title, text: Electric Vehicle, rect: [792, 94, 337, 90] }
+  - expect_node: { path: EvLive/next_departure, rect: [21, 620, 547, 81] }
+  - expect_node: { path: EvLive/Settings, rect: [1800, 609, 96, 96] }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_name, text: Digital Energy Solutions }
+  - theme: { appearance: night }
+  - compare_reference: { name: kia-ev6-live-night, reference: reference/ev_main_night.png, min: 0.80 }
+  - screenshot: { name: kia-ev6-live-night, compare: false }
+  - theme: { appearance: day }
+  - compare_reference: { name: kia-ev6-live-day, reference: reference/ev_main_day.png, min: 0.80 }
+  - screenshot: { name: kia-ev6-live-day, compare: false }
+  # Right-hand drive: the scene and the gear mirror, the order of the targets does not.
+  - theme: { hand: rhd }
+  - screenshot: { name: kia-ev6-live-day-rhd, compare: false }
+  - theme: { appearance: night }
+  - screenshot: { name: kia-ev6-live-night-rhd, compare: false }
+  - gdscript: |
+      var gear: Control = shell.get_node("EvLive/Settings")
+      var first: Control = shell.get_node("EvLive/next_departure")
+      var last: Control = shell.get_node("EvLive/v2l")
+      if not (gear.position.x < first.position.x and first.position.x < last.position.x):
+          return "gear %s, targets %s %s" % [gear.position.x, first.position.x, last.position.x]
+  # The page the theme asks for by default is the image page, where the pack has one.
+  - theme: { hand: lhd }
+  - page: ev
+  - expect_node: { path: Screen/layout_main_title, text: Electric Vehicle }
+  - theme: { ev_page: live }
+  - page: ev
+  - expect_node: { path: EvLive/Title, text: Electric Vehicle }

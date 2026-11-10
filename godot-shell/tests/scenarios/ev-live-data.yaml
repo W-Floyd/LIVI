@@ -1,0 +1,110 @@
+name: ev-live-data
+# The live page follows the core: charge, range and the charger's distance move the road, the
+# pin, the battery and the labels, eased unless motion is reduced.
+clock: 2026-11-09T17:42:00
+fixtures:
+  core: fixtures/to-charger.json
+theme: { theme_name: instrument, appearance: night, reduced_motion: true }
+steps:
+  - page: ev_live
+  - expect_node: { path: EvLive/Battery/Row1/battery_value, text: "31" }
+  - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "148" }
+  # No climate-off range in the telemetry yet: 4 % over the climate-on range.
+  - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "154" }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "42" }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_unit, text: km }
+  - screenshot: ev-live-data-far-charger
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      var road: ShaderMaterial = s.get_node("World/Road").material_override
+      var fill: float = s.get_node("World/Car/Battery").material_override.get_shader_parameter("fill")
+      if not (is_equal_approx(s.km_on, 148.0) and is_equal_approx(s.stop_km, 42.0) and is_equal_approx(s.charge, 0.31)):
+          return "scene state %s %s %s" % [s.km_on, s.stop_km, s.charge]
+      if not is_equal_approx(fill, 0.31):
+          return "battery block fill %s, not the charge" % fill
+      if not is_equal_approx(road.get_shader_parameter("km_on"), 148.0) or not is_equal_approx(road.get_shader_parameter("stop_x"), 42.0 * EvScene.UPK):
+          return "road does not follow the range and the charger"
+      var a: Dictionary = s.anchors()
+      if not (a.on.x < a.off.x and a.pin.x < a.on.x):
+          return "anchors out of order: %s" % a
+      # The labels sit by what they label.
+      var on: Control = shell.get_node("EvLive/RangeOn")
+      var off: Control = shell.get_node("EvLive/RangeOff")
+      if absf(on.position.x + on.size.x - a.on.x) > 30.0 or absf(off.position.x - a.off.x) > 30.0:
+          return "range labels not at the road ends: %s %s" % [on.get_global_rect(), a]
+      shell.set_meta("before", a)
+  # Charge, range and distance change: all follow.
+  - set: { core: { telemetry: { fuelPct: 80, rangeKm: 320 }, navigation: { chargingStop: { distanceM: 90000 } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/Battery/Row1/battery_value, text: "80" }
+  - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "320" }
+  - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "333" }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "90" }
+  - screenshot: ev-live-data-long-range
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      var fill: float = s.get_node("World/Car/Battery").material_override.get_shader_parameter("fill")
+      if not (is_equal_approx(s.km_on, 320.0) and is_equal_approx(s.stop_km, 90.0) and is_equal_approx(fill, 0.8)):
+          return "scene did not follow: %s %s %s" % [s.km_on, s.stop_km, fill]
+      var before: Dictionary = shell.get_meta("before")
+      var a: Dictionary = s.anchors()
+      if not (a.on.x > before.on.x and a.off.x > before.off.x and a.pin.x > before.pin.x):
+          return "the road ends and the pin did not move out: %s %s" % [before, a]
+      if a.car != before.car:
+          return "the car moved"
+  # A charger under a kilometre is in metres, and one nearer than a car length stays ahead of
+  # the nose.
+  - set: { core: { navigation: { chargingStop: { distanceM: 740 } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "740" }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_unit, text: m }
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      if s.pin_x() < EvScene.CAR_FRONT:
+          return "pin inside the car"
+  # Beyond the range: the pin stops at the end of the road and says so in the warning color.
+  - set: { core: { navigation: { chargingStop: { distanceM: 600000 } } } }
+  - wait: { frames: 2 }
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      if not s.stop_unreachable or not is_equal_approx(s.pin_x(), s.km_off * EvScene.UPK):
+          return "an unreachable charger is not at the end of the road"
+  - screenshot: { name: ev-live-data-unreachable, compare: false }
+  # Low range: the end of the lit road is the warning color, and the label has the icon too.
+  - set: { core: { telemetry: { fuelPct: 6, rangeKm: 30 }, navigation: { chargingStop: { distanceM: 9000 } } } }
+  - wait: { frames: 2 }
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      var road: ShaderMaterial = s.get_node("World/Road").material_override
+      if not is_equal_approx(road.get_shader_parameter("km_warn"), 30.0 - EvScene.WARN_KM):
+          return "no warning segment: %s" % road.get_shader_parameter("km_warn")
+      var icon: TextureRect = shell.get_node("EvLive/RangeOn/Row0/fan")
+      if icon.get_meta("icon")[0] != "warn":
+          return "the low-range label has no warning icon"
+  - screenshot: ev-live-data-low-range
+  # No charging stop: no pin and no label.
+  - set: { core: { navigation: { chargingStop: { distanceM: null } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/ChargerLabel, visible: "false" }
+  - expect_node: { path: EvLive/Scene/World/Charger, visible: "false" }
+  # With motion on, a change eases in: partway after a few frames, there after the ease.
+  - theme: { reduced_motion: false }
+  - set: { core: { telemetry: { rangeKm: 200 } } }
+  - wait: { frames: 8 }
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      if not (s.km_on > 30.0 and s.km_on < 199.0):
+          return "not easing: %s" % s.km_on
+  - wait: { frames: 60 }
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      if not is_equal_approx(s.km_on, 200.0):
+          return "did not arrive: %s" % s.km_on
+  # With it reduced, the first frame is the last.
+  - theme: { reduced_motion: true }
+  - set: { core: { telemetry: { rangeKm: 90 } } }
+  - wait: { frames: 1 }
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      if not is_equal_approx(s.km_on, 90.0):
+          return "animated under reduced motion: %s" % s.km_on

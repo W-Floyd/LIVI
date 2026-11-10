@@ -1,0 +1,22 @@
+name: perf-ev-live
+# What the 3D page costs: its own frames, under each quality profile.
+fixtures:
+  core: fixtures/ev6-main.json
+theme: { theme_name: instrument, appearance: night }
+steps:
+  - page: ev_live
+  - measure:
+      name: ev-live-normal
+      frames: 240
+      expect:
+        # Regression limits for llvmpipe in the VM, about twice what it measured (release:
+        # frame p50 18.6 ms, p95 21 ms, render 17.5 ms p95, RSS 573 MB). Multisampling is about
+        # half of it; `low` drops it.
+        vm: { frame_ms_p95: 45, render_cpu_ms_p95: 40, rss_mb: 1100 }
+  - theme: { quality: low }
+  - measure:
+      name: ev-live-low
+      frames: 240
+      expect:
+        # Measured: frame p50 8.4 ms, p95 11.2 ms, render 7.3 ms p95, RSS 573 MB.
+        vm: { frame_ms_p95: 25, render_cpu_ms_p95: 16, rss_mb: 1100 }

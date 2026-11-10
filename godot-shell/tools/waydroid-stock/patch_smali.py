@@ -50,6 +50,18 @@ for r, _, fs in os.walk(app):
         t2 = svc_site.sub(svc, t2)
         t2 = site.sub(fix, t2)
         if t2 != t: open(p, 'w').write(t2); n += k
+# targetSdk >= 24 rejects MODE_WORLD_READABLE/WRITEABLE (and the stock 0x7 etc.): make those private.
+mode_site = re.compile(r'(const(?:/4|/16) (v\d+), )0x[1-7]\n(\s*\n\s*invoke-virtual(?:/range)? \{([^}]*)\}, Landroid/content/Context;->(?:getSharedPreferences\(Ljava/lang/String;I\)|openFileOutput\(Ljava/lang/String;I\)|getDir\(Ljava/lang/String;I\)))')
+def mode_fix(m):
+    last = re.split(r'[,\s.]+', m.group(4).strip())[-1]
+    return m.group(1) + '0x0\n' + m.group(3) if last == m.group(2) else m.group(0)
+nmode = 0
+for r, _, fs in os.walk(app):
+    for f in fs:
+        if f.endswith('.smali'):
+            p = os.path.join(r, f); t = open(p).read(); t2 = mode_site.sub(mode_fix, t)
+            if t2 != t: open(p, 'w').write(t2); nmode += 1
+print('file modes made private in %d files' % nmode)
 main = os.path.join(app, 'com/hkmc/daudio/app/ev3/MainActivity.smali')
 if os.path.exists(main):
     t = open(main).read()

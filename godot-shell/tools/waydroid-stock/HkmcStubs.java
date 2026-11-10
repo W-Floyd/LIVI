@@ -36,7 +36,11 @@ public final class HkmcStubs {
     /** Service.startForeground with an icon: A13 rejects the empty Notification the stock app posts. */
     @SuppressWarnings("deprecation")
     public static void startForeground(android.app.Service s, int id, android.app.Notification n) {
-        if (n.icon == 0) n.icon = android.R.drawable.ic_dialog_info;
+        // targetSdk 26+: a notification needs a channel; the stock one has neither that nor an icon.
+        android.app.NotificationManager nm = (android.app.NotificationManager) s.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm.getNotificationChannel("livi") == null)
+            nm.createNotificationChannel(new android.app.NotificationChannel("livi", "Vehicle", android.app.NotificationManager.IMPORTANCE_LOW));
+        n = new android.app.Notification.Builder(s, "livi").setSmallIcon(android.R.drawable.ic_dialog_info).build();
         s.startForeground(id, n);
     }
 

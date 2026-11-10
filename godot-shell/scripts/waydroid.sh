@@ -21,7 +21,15 @@ as_user() { $SSH "$ENVS; $*"; }
 as_root() { $SSH "echo nura | sudo -S -p '' $*" 2>&1; }
 android() { as_root waydroid shell -- "$@"; }
 
+# The stock apps read ro.device.splitscreen: anything but "disable" is the wide (1920x720) platform, else they lay out for 1281 px.
+ensure_props() {
+    for f in waydroid_base.prop waydroid.prop; do
+        as_root "sh -c 'grep -q ro.device.splitscreen /var/lib/waydroid/$f || { echo ro.device.splitscreen=enable >> /var/lib/waydroid/$f; echo added; }'"
+    done
+}
+
 start() {
+    if ensure_props | grep -q added; then as_user 'systemctl --user stop waydroid-session' || true; as_root systemctl restart waydroid-container >/dev/null; fi
     as_root systemctl start waydroid-container >/dev/null
     as_user 'systemctl --user is-active waydroid-session >/dev/null 2>&1 || systemd-run --user --unit=waydroid-session -E WAYLAND_DISPLAY -E XDG_RUNTIME_DIR waydroid session start >/dev/null 2>&1'
     i=0

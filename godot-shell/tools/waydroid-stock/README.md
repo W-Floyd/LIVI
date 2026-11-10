@@ -16,8 +16,10 @@ What the build does:
   Layout tags are seeded from the decoded resources. `stub-values.example` shows how to pin return values (`$OUT/stub-values.txt`).
 - Rewrites call sites: `getSystemService` and `VehicleInfoManager.getService` fall back to stubs; vendor-added methods on AOSP
   classes (`Notification.Builder.set*`, ...) become no-ops; `startForeground` gets a notification icon.
-- Manifest: `<uses-library>` elements disabled (the libs are bundled as stubs), targetSdk raised 19 -> 23 (below that Android 13
-  forces a permission-review screen). Re-signed with a debug key.
+- Manifest: `<uses-library>` elements disabled (the libs are bundled as stubs), targetSdk raised 19 -> 26 (below 23 Android 13 forces a permission-review screen; below 26 it letterboxes the
+  app to 1.86:1, so file modes are made private and the foreground notification gets a channel for the new target).
+  The binary manifest's attributes are re-sorted by resource id after the renames (the framework reads them in that order).
+  The wide (1920x720) layout needs `ro.device.splitscreen=enable`, which `scripts/waydroid.sh start` adds. Re-signed with a debug key.
 
 Known not to work / caveats:
 - No vehicle data: every manager is a stub, so the UI shows placeholder values. Return values that gate the app need pinning

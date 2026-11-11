@@ -55,6 +55,7 @@ const PATHS := {
 	shift = "M12 3 2 13h6v8h8v-8h6zm0 2.8L17.2 11H14v8h-4v-8H6.8z",
 	shift_on = "M12 3 2 13h6v8h8v-8h6z",
 	caps = "M12 2 3 11h5v6h8v-6h5zM8 19h8v2H8z",
+	battery = "M4 7h3V5h3v2h4V5h3v2h3v13H4zm2 2v9h12V9zm1 3.2h4v1.6H7zm6 0h1.7V10.5h1.6v1.7H18v1.6h-1.7v1.7h-1.6v-1.7H13z",
 	keyboard = "M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm1 3v2h2V8zm3 0v2h2V8zm3 0v2h2V8zm3 0v2h2V8zm3 0v2h2V8zM5 11v2h2v-2zm3 0v2h2v-2zm3 0v2h2v-2zm3 0v2h2v-2zm3 0v2h2v-2zM8 15v2h8v-2z",
 }
 

@@ -10,6 +10,8 @@ var top_inset := 0.0
 
 var _title: Label
 var _note: Label
+## Says why tiles are greyed while the car is driven.
+var _parked_only: HBoxContainer
 var _running: HBoxContainer
 var _scroll: DragScroll
 var _grid: GridContainer
@@ -32,6 +34,10 @@ func _init() -> void:
 	_note = UI.label("", "body", "caption", "dim")
 	_note.name = "Note"
 	add_child(_note)
+	_parked_only = UI.hbox([UI.icon("lock", "icon", "dim"), UI.label("Greyed apps are available when parked", "body", "caption", "dim")], 0.5)
+	_parked_only.name = "ParkedOnly"
+	_parked_only.visible = false
+	add_child(_parked_only)
 	# A finger drags the grid; a drag never opens the tile it ends on.
 	_scroll = DragScroll.new()
 	_scroll.name = "Scroll"
@@ -46,6 +52,7 @@ func _ready() -> void:
 	resized.connect(_layout)
 	visibility_changed.connect(close_menu)
 	launcher.changed.connect(_update)
+	Drive.changed.connect(_update)
 	launcher.refresh()
 	_style()
 
@@ -85,8 +92,14 @@ func _layout() -> void:
 	_note.position = Vector2(rx, y + (head_h - _note.get_combined_minimum_size().y) / 2.0)
 	_note.size = Vector2(maxf(0.0, right - rx), _note.get_combined_minimum_size().y)
 	var top := y + head_h + g * 3.0
+	var foot := 0.0
+	if _parked_only.visible:
+		var ph := _parked_only.get_combined_minimum_size().y
+		_parked_only.position = Vector2(x, size.y - g * 2.0 - ph)
+		_parked_only.size = Vector2(maxf(0.0, right - x), ph)
+		foot = ph + g * 3.0
 	_scroll.position = Vector2(x, top)
-	_scroll.size = Vector2(maxf(0.0, right - x), maxf(0.0, size.y - top))
+	_scroll.size = Vector2(maxf(0.0, right - x), maxf(0.0, size.y - top - foot))
 	var tile_w: float = ThemeManager.px.touch * 4.0
 	var sep: float = g * 2.0
 	_grid.columns = maxi(1, int((_scroll.size.x + sep) / (tile_w + sep)))
@@ -97,6 +110,7 @@ func _update() -> void:
 		return
 	var keep := {}
 	var i := 0
+	var greyed := false
 	for a in launcher.apps:
 		keep[a.id] = true
 		var t: AppTile = _tiles.get(a.id)
@@ -112,6 +126,10 @@ func _update() -> void:
 		t.icon_path = a.icon
 		t.slow = launcher.slow(a.id)
 		t.state = launcher.state(a.id)
+		# Parked only, while the car is driven: it opens under the cover.
+		var parked_only: bool = Drive.locked() and not a.get("drive_safe", false)
+		t.modulate.a = 0.45 if parked_only else 1.0
+		greyed = greyed or parked_only
 		_grid.move_child(t, i)
 		i += 1
 	for id in _tiles.keys():
@@ -121,6 +139,7 @@ func _update() -> void:
 	_update_running()
 	var err := launcher.config_error()
 	_note.text = err if err != "" else "No apps found" if launcher.apps.is_empty() and _running.get_child_count() == 0 else ""
+	_parked_only.visible = greyed
 	_note.get_meta("look")[2] = "crit" if err != "" else "dim"
 	UI.style_label(_note)
 	_layout.call_deferred()

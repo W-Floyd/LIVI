@@ -64,3 +64,19 @@ static func speed_unit() -> String:
 ## "88 km/h", "55 mph".
 static func speed_text(kph: float) -> String:
 	return "%d %s" % [speed_value(kph), speed_unit()]
+
+
+## "45 min", "1 h 25 min", "7 h".
+static func duration_text(minutes: float) -> String:
+	var m := maxi(0, roundi(minutes))
+	if m < 60:
+		return "%d min" % m
+	var h := int(m / 60.0)
+	return "%d h" % h if m % 60 == 0 else "%d h %d min" % [h, m % 60]
+
+
+## "350 W", "1.4 kW".
+static func power_text(w: float) -> String:
+	if absf(w) < 1000.0:
+		return "%d W" % roundi(w)
+	return "%s kW" % ("%.1f" % (w / 1000.0)).trim_suffix(".0")

@@ -1,0 +1,32 @@
+{
+  "config": { "carType": 10 },
+  "telemetry": {
+    "fuelPct": 46.0,
+    "rangeKm": 221.0,
+    "rangeClimateOffKm": 232.0,
+    "ambientC": 6.0,
+    "batteryCapacityKwh": 77.4,
+    "batteryLevelKwh": 35.6,
+    "gear": "P",
+    "drivingRegulation": false,
+    "ignition": true,
+    "charging": true,
+    "chargerReady": true,
+    "chargePortOpen": true,
+    "chargeTimeToFullMin": 85,
+    "chargeTimeAcMin": 430,
+    "chargeTimeDcMin": 38,
+    "chargeLimitAcPct": 90,
+    "chargeLimitDcPct": 80,
+    "rangeAtChargeLimitAcKm": 431,
+    "rangeAtChargeLimitDcKm": 383,
+    "auxBatteryPct": 87,
+    "doorDriverOpen": false,
+    "doorPassengerOpen": false,
+    "doorRearLeftOpen": false,
+    "doorRearRightOpen": false,
+    "trunkOpen": false,
+    "hoodOpen": false
+  },
+  "precondition": { "manualUntil": null }
+}

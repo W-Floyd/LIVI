@@ -4,6 +4,7 @@ pub mod apps;
 mod apps_node;
 #[cfg(target_os = "linux")]
 pub mod compositor;
+pub mod driving;
 pub mod fake_core;
 #[cfg(target_os = "linux")]
 mod gl_import;

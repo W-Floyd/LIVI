@@ -9,6 +9,8 @@ extends Control
 signal back_pressed
 
 const LOOK := "look"
+## The driving lockout's choices (Drive).
+const DRIVING := "driving"
 ## Choices with up to this many options, all short, are set in place.
 const INLINE_OPTIONS := 4
 const INLINE_CHARS := 28
@@ -104,6 +106,7 @@ func _ready() -> void:
 	ThemeManager.changed.connect(_style)
 	Core.changed.connect(_on_core_changed)
 	Core.welcome.connect(func(_v): _refresh())
+	Drive.changed.connect(func(): if _driving(): _refresh(true))
 	resized.connect(_place)
 	_apps = load_apps()
 	Core.settings_section(int(section) if section is int else -1)
@@ -228,7 +231,7 @@ func _build() -> void:
 	var titles: Array = _view.get("titles", [])
 	if look:
 		_heading_label.text = str(_apps[section].get("title", "")) if _app_open() and _look_pick == "" \
-			else "Look" if _look_pick == "" else _look_row(_look_pick).label
+			else ("Driving" if _driving() else "Look") if _look_pick == "" else _look_row(_look_pick).label
 		_up.visible = _look_pick != ""
 		if _look_pick == "":
 			for r in _look_rows():
@@ -248,7 +251,7 @@ func _build_sections() -> void:
 		c.queue_free()
 	_sections.list.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.5))
 	# The shell's own first: LIVI's list runs past the panel's height.
-	var items: Array = [[LOOK, "Look", "brush"]]
+	var items: Array = [[LOOK, "Look", "brush"], [DRIVING, "Driving", "car"]]
 	for id in _apps:
 		var icon := str(_apps[id].get("icon", ""))
 		items.append([id, str(_apps[id].get("title", id)), icon if Icons.PATHS.has(icon) else "gear"])
@@ -874,6 +877,8 @@ func _look_rows() -> Array:
 		return _app_rows()
 	var themes := []
 	for t in ThemeManager.theme_names():
+	if _driving():
+		return _driving_rows()
 		themes.append([t, t.capitalize()])
 	var rows := [
 		_look_choice("theme_name", "Theme", themes),
@@ -920,12 +925,61 @@ func _look_set(key: String, value: Variant) -> void:
 	var look := {}
 	look[key] = value
 	ThemeManager.set_look(look)
+	if _driving():
+		if key == "developer":
+			Drive.set_developer(bool(value))
+		else:
+			Drive.set_mode(str(value))
+		return
 	ThemeManager.save_look()
 
 
 ## `$XDG_DATA_HOME`, then each of `$XDG_DATA_DIRS`, under `livi-shell/settings`.
 static func default_app_dirs() -> PackedStringArray:
 	var home := OS.get_environment("XDG_DATA_HOME")
+func _driving() -> bool:
+	return section is String and section == DRIVING
+
+
+## The lockout while driving (Drive). While the car is driven its choice can only go back to
+## following the car, and the developer options wait until it parks.
+func _driving_rows() -> Array:
+	var by := {regulation = "the car's driving lockout", gear = "the gear", parking_brake = "the parking brake and speed",
+		speed = "speed", ignition = "the ignition"}
+	var facts := []
+	var gear = Core.get_value("/telemetry/gear")
+	if gear != null:
+		facts.append("gear %s" % str(gear))
+	var now := "Driving" if Drive.moving else "Parked"
+	if Drive.override() == "passenger":
+		now = "Driving, unlocked for a passenger"
+	var detail: String = ("By %s" % by[Drive.source]) if by.has(Drive.source) else "No driving data from the car"
+	if not facts.is_empty():
+		detail += " · " + ", ".join(facts)
+	var modes := [["car", "Follow the car"], ["passenger", "Passenger mode"]]
+	if Drive.developer:
+		modes.append(["offroad", "Always offroad"])
+	var details := {car = "Locks apps and typing as the car says", passenger = "A passenger can unlock each drive",
+		offroad = "Never locks: for testing only"}
+	var options := []
+	var shown := ""
+	for m in modes:
+		var sel: bool = Drive.mode == m[0]
+		options.append({label = m[1], value = m[0], selected = sel, offline = not Drive.may_set_mode(m[0]) and not sel})
+		if sel:
+			shown = m[1]
+	var mode_detail: String = details[Drive.mode]
+	if Drive.moving and Drive.mode == "car":
+		mode_detail = "Change it when parked"
+	return [
+		{key = "now", kind = "info", label = now, detail = detail, enabled = true},
+		{key = "mode", kind = "value", label = "While driving", detail = mode_detail, value = "" if _inline(options) else shown,
+			options = options, enabled = not Drive.moving or Drive.mode != "car"},
+		{key = "developer", kind = "switch", label = "Developer options", detail = "Offers Always offroad" if not Drive.moving else "Change it when parked",
+			checked = Drive.developer, enabled = not Drive.moving},
+	]
+
+
 	var dirs := PackedStringArray([home if home != "" else OS.get_environment("HOME").path_join(".local/share")])
 	var data := OS.get_environment("XDG_DATA_DIRS")
 	dirs.append_array((data if data != "" else "/usr/local/share:/usr/share").split(":", false))

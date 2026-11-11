@@ -92,6 +92,11 @@ func _init() -> void:
 	keyboard.erased.connect(_erase)
 	keyboard.submitted.connect(_done)
 	keyboard.cancelled.connect(close.bind(false))
+	# No typing while the car is driven.
+	var lock := DriveCover.new()
+	lock.typing = true
+	lock.dismissed.connect(close.bind(false))
+	keyboard.add_child(lock)
 
 
 func _ready() -> void:

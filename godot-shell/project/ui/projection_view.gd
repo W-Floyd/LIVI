@@ -4,6 +4,8 @@ extends Control
 ## theme's projection color.
 
 var window: WindowView
+## Over a hosted app the driver may not use while the car is driven.
+var cover: DriveCover
 
 
 func _init() -> void:
@@ -14,6 +16,8 @@ func _init() -> void:
 	window.name = "Window"
 	window.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(window)
+	cover = DriveCover.new()
+	add_child(cover)
 
 
 func _ready() -> void:
@@ -36,4 +40,6 @@ func _draw() -> void:
 func show_window(id: int, projection := false) -> void:
 	window.window_id = id
 	window.to_core = projection
+	# Android Auto and CarPlay lock their own.
+	cover.window_id = -1 if projection else id
 	_style()

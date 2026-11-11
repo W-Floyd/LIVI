@@ -68,6 +68,9 @@ var _on := {}
 var _off := {}
 var _tiles := {}
 var _settings: EvTile
+## What is open, the 12 V battery, the climate and battery heater; and while plugged in, charging.
+var _car_status: CarStatus
+var _charge_card: ChargeCard
 var _bound := false
 var _row_top := 0.0
 var _numeral_base := {}   # label -> its font size before any fitting
@@ -108,6 +111,10 @@ func _ready() -> void:
 		[_label("on_value", "display", "display", "accent"), _label("on_unit", "body", "title", "accent")]])
 	_off = _block("RangeOff", [[_icon("fan", "text"), _label("off_name", "body", "caption", "text")],
 		[_label("off_value", "display", "title", "text"), _label("off_unit", "body", "caption", "text")]])
+	_car_status = CarStatus.new()
+	add_child(_car_status)
+	_charge_card = ChargeCard.new()
+	add_child(_charge_card)
 	for id in TILES:
 		var t := EvTile.new()
 		t.name = id
@@ -148,6 +155,8 @@ func _apply_hidden() -> void:
 	for t in _tiles.values():
 		(t as Control).visible = false
 	_settings.visible = false
+	_car_status.visible = false
+	_charge_card.visible = false
 	queue_redraw()
 
 
@@ -402,7 +411,7 @@ func _bind() -> void:
 	var stop = Core.get_value("/navigation/chargingStop")
 	# As stock: the climate-on range only while the blower runs, else the climate-off one alone.
 	# Lacking that, the car's range alone, under no climate name.
-	var blower := _blower_running()
+	var blower := blower_running()
 	var shown = km if blower or off == null else off
 	var range_name := ""
 	if blower:
@@ -448,6 +457,10 @@ func _bind() -> void:
 			l.remove_theme_color_override("font_color")
 			_override(l, {on_value = "mainview_text_climateon_range_value", on_unit = "mainview_text_climateon_range_unit",
 				on_name = "mainview_text_range_climateon"}[n])
+	var t = Core.get_value("/telemetry")
+	_car_status.side = -1.0 if ThemeManager.hand == "rhd" else 1.0
+	_car_status.show_for(t if t is Dictionary else {})
+	_charge_card.show_for(t if t is Dictionary else {})
 	_show_charger = stop_km >= 0.0
 	if _show_charger:
 		var d := Units.distance(stop_km)
@@ -460,7 +473,7 @@ func _bind() -> void:
 
 
 ## Whether the car's blower runs (stock: its level 1 to 14). False when nothing reported it.
-func _blower_running() -> bool:
+static func blower_running() -> bool:
 	var c = Core.get_value("/telemetry/climate")
 	if not c is Dictionary or str(c.get("source", "")) in CLIMATE_UNREPORTED:
 		return false
@@ -575,6 +588,21 @@ func _place() -> void:
 	for b in [_battery, _charger, _on, _off]:
 		var box: Control = b.box
 		box.size = box.get_combined_minimum_size()
+	# The car's state under the title on the car's side; charging at the top in the middle.
+	var placed: Array[Rect2] = []
+	if _car_status.visible:
+		_car_status.size = _car_status.get_combined_minimum_size()
+		_car_status.position = Vector2(edge if side > 0 else w - edge - _car_status.size.x, floor_y + gap * 0.5).round()
+		placed.append(Rect2(_car_status.position, _car_status.size))
+	if _charge_card.visible:
+		_charge_card.size = _charge_card.get_combined_minimum_size()
+		var cx := (w - _charge_card.size.x) / 2.0
+		# Clear of the car's state, on its side of the page.
+		if _car_status.visible:
+			cx = maxf(cx, _car_status.position.x + _car_status.size.x + gap * 2.0) if side > 0 \
+				else minf(cx, _car_status.position.x - gap * 2.0 - _charge_card.size.x)
+		_charge_card.position = Vector2(cx, floor_y + gap).round()
+		placed.append(Rect2(_charge_card.position, _charge_card.size))
 	var bat: Control = _battery.box
 	bat.position = (a.car as Vector2) - bat.size / 2.0
 	if not _spec.is_empty():
@@ -582,7 +610,11 @@ func _place() -> void:
 		var at := Vector2(_rect("mainview_text_battery_percentage_value").position.x, _rect("ev_mainview_battery_text").position.y)
 		bat.position = Vector2(at.x if side > 0 else w - at.x - bat.size.x, at.y)
 	_fit_in(bat, bounds)
-	var placed: Array[Rect2] = [Rect2(bat.position, bat.size)]
+	# Below the car's state rather than off the car.
+	for r in placed:
+		if Rect2(bat.position, bat.size).intersects(r):
+			bat.position.y = r.end.y + gap * 0.5
+	placed.append(Rect2(bat.position, bat.size))
 	# The charger: its block over the pin, the pin a third in from the side the road runs from.
 	var ch: Control = _charger.box
 	ch.visible = _show_charger

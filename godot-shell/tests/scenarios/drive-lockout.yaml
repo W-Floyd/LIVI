@@ -1,0 +1,108 @@
+name: drive-lockout
+# Driving locks what the driver may not use (Drive): a hosted app not marked DriveSafe is covered
+# and keeps running, the launcher greys it and says why, typing is off. A DriveSafe app stays
+# usable (the bars entry has X-LIVI-DriveSafe), and so does the phone's projection. The car's
+# driving regulation decides first, then the gear; a parked signal lifts the lockout after a
+# hold, so a shuffle through P does not flash it off.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  apps: fixtures/apps
+  clients:
+    - { role: app, app_id: org.livi.test.grid, pattern: grid, size: 640x360 }
+    - { role: app, app_id: bars-window, pattern: bars, size: 640x360 }
+steps:
+  # The launcher's list names each window's app.
+  - page: apps
+  - wait: { window: org.livi.test.grid }
+  - wait: { window: bars-window }
+  - gdscript: &grid |
+      shell.bring_forward(Wayland.find_window("org.livi.test.grid"))
+      await runner.frames(2)
+      if Drive.app_of(Wayland.find_window("org.livi.test.grid")) != "org.livi.test.grid":
+          return "the grid window's app is %s" % Drive.app_of(Wayland.find_window("org.livi.test.grid"))
+  - expect_node: { path: Projection/DriveCover, visible: "false" }
+  # The car leaves Park: its lockout signal.
+  - set: { core: { telemetry: { drivingRegulation: true, gear: D, speedKph: 42 } } }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if not Drive.moving or Drive.source != "regulation" or not Drive.locked():
+          return "moving %s by %s, locked %s" % [Drive.moving, Drive.source, Drive.locked()]
+  - expect_node: { path: Projection/DriveCover, visible: "true" }
+  - expect_node: { path: Projection/DriveCover/Box/Title, text: Available when parked }
+  - expect_node: { path: Projection/DriveCover/Box/Detail, text: Grid pattern keeps running and is back when the car parks. }
+  # Following the car (the default) offers no unlock.
+  - expect_node: { path: Projection/DriveCover/Box/Buttons/Unlock, visible: "false" }
+  - expect_node: { path: KeysButton, visible: "false" }
+  - screenshot: drive-cover
+  # A touch lands on the cover, not the app.
+  - gdscript: |
+      var cover: Control = shell.get_node("Projection/DriveCover")
+      var m := InputEventMouseMotion.new()
+      m.position = cover.get_global_rect().get_center() + Vector2(300, 200)
+      shell.get_viewport().push_input(m)
+      await runner.frames(1)
+      if shell.get_viewport().gui_get_hovered_control() != cover:
+          return "%s takes the touch, not the cover" % shell.get_viewport().gui_get_hovered_control()
+  # The DriveSafe app is not covered; its keyboard is, with a way out.
+  - gdscript: |
+      var w = Wayland.find_window("bars-window")
+      shell.bring_forward(w)
+      await runner.frames(2)
+      if shell.get_node("Projection/DriveCover").visible:
+          return "a DriveSafe app is covered"
+      shell.open_keyboard(w, {})
+      await runner.frames(20)
+      var lock: Control = shell.app_keyboard.get_node("DriveCover")
+      if not lock.visible or lock.get_node("Box/Title").text != "Typing is available when parked":
+          return "typing is not locked"
+      if not lock.get_node("Box/Buttons/Close").visible:
+          return "no way out of a locked keyboard"
+  - screenshot: { name: drive-keyboard, compare: false }
+  - gdscript: |
+      shell.app_keyboard.get_node("DriveCover/Box/Buttons/Close").pressed.emit()
+      await runner.frames(30)
+      if shell.app_keyboard != null:
+          return "Close left the keyboard up"
+  # The launcher greys what waits for Park, and says so.
+  - page: apps
+  - wait: { frames: 2 }
+  - expect_node: { path: Apps/ParkedOnly, visible: "true" }
+  - gdscript: |
+      var grid: Control = shell.get_node("Apps/Scroll/List/Grid/org_livi_test_grid")
+      var bars: Control = shell.get_node("Apps/Scroll/List/Grid/org_livi_test_bars")
+      if not (grid.modulate.a < 0.5 and bars.modulate.a == 1.0):
+          return "grid %s, bars %s" % [grid.modulate.a, bars.modulate.a]
+  - screenshot: drive-apps
+  # Back in Park: the lockout lifts only once Park has held, so a shuffle keeps it.
+  - gdscript: *grid
+  - set: { core: { telemetry: { drivingRegulation: false, gear: P, speedKph: 0 } } }
+  - wait: { frames: 30 }
+  - set: { core: { telemetry: { drivingRegulation: true, gear: R } } }
+  - wait: { frames: 2 }
+  - set: { core: { telemetry: { drivingRegulation: false, gear: P } } }
+  - wait: { frames: 60 }
+  - expect_node: { path: Projection/DriveCover, visible: "true" }
+  - wait: { frames: 40 }
+  - expect_node: { path: Projection/DriveCover, visible: "false" }
+  - gdscript: |
+      if Drive.moving:
+          return "still driving after the hold"
+  # Without the regulation, the gear decides; then speed alone, with its longer hold.
+  - set: { core: { telemetry: { drivingRegulation: null, gear: N } } }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if not Drive.moving or Drive.source != "gear":
+          return "N: moving %s by %s" % [Drive.moving, Drive.source]
+  - set: { core: { telemetry: { gear: null, speedKph: 30 } } }
+  - wait: { frames: 2 }
+  - set: { core: { telemetry: { speedKph: 0 } } }
+  - wait: { frames: 300 }
+  - expect_node: { path: Projection/DriveCover, visible: "true" }
+  - wait: { frames: 320 }
+  - expect_node: { path: Projection/DriveCover, visible: "false" }
+  # Night, and the right-hand drive.
+  - set: { core: { telemetry: { drivingRegulation: true } } }
+  - theme: { appearance: night, hand: rhd }
+  - wait: { frames: 2 }
+  - screenshot: drive-cover-night-rhd

@@ -143,6 +143,7 @@ func _init() -> void:
 	_keys_button.visible = false
 	_keys_button.pressed.connect(_on_keys_button)
 	add_child(_keys_button)
+	add_child(DriveBadge.new())
 
 
 func _ready() -> void:
@@ -166,6 +167,7 @@ func _ready() -> void:
 	Wayland.window_unmapped.connect(_on_window_unmapped)
 	Wayland.text_input_wanted.connect(_on_text_wanted)
 	Wayland.text_input_released.connect(func(id): if app_keyboard and app_keyboard.window_id == id: app_keyboard.close())
+	Drive.changed.connect(_update_keys_button)
 	launcher.show_window.connect(bring_forward)
 	_style()
 	_refresh()
@@ -648,7 +650,7 @@ func _place_keyboard() -> void:
 ## In the app's bottom corner on the driver's side, for an app that has no text input to ask with.
 func _update_keys_button() -> void:
 	var id := _projection.window.window_id
-	var on := _page_name == "app" and id >= 0 and not _is_projection(id) and app_keyboard == null and not Wayland.has_text_input(id)
+	var on := _page_name == "app" and id >= 0 and not _is_projection(id) and app_keyboard == null and not Wayland.has_text_input(id) and not Drive.covers_window(id)
 	_keys_button.visible = on
 	if not on:
 		return
@@ -717,6 +719,11 @@ func _refresh(sections := {}) -> void:
 	_status.charge_icon = "bolt" if power == "electric" else "fuel"
 	_status.phone = "Pixel"
 
+	# No typing while the car is driven.
+	var lock := DriveCover.new()
+	lock.typing = true
+	lock.dismissed.connect(k.close)
+	k.add_child(lock)
 	var on := _preconditioning()
 	_precondition.set_pressed_no_signal(on)
 	_precondition.label = "Warming battery" if on else "Precondition battery"

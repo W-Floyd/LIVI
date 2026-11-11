@@ -142,6 +142,16 @@ labels projected from it:
   are real buttons with pressed states. The core has no action behind any of them, so a tap
   only emits `Shell.ev_action(id)`; their details ("Not available", "–") say what the
   core does not tell yet.
+- **The car's state** (`CarStatus`), under the title on the car's side, each once micom-livi
+  reports it: what is open (`door*Open`, `trunkOpen`, `hoodOpen`, `chargePortOpen`) on a top view
+  of the car (the driver's door on the driver's side) and in words, past two parts a count, in the
+  warning color unless only the charge port is; the 12 V battery (`auxBatteryPct`, warning under
+  30 %); the climate while its blower runs (the same rule as the range's name) with its draw
+  (`climatePowerW`); the battery heater while it draws (`batteryHeaterW`).
+- **Charging** (`ChargeCard`), at the top beside it while `charging` or `chargerReady`: "Charging"
+  with the time to full (`chargeTimeToFullMin`) or "Plugged in", and for AC and DC the limit,
+  the range at it and the time estimate (`chargeLimit*Pct`, `rangeAtChargeLimit*Km`,
+  `chargeTime*Min`), a row only when the car reports either. Scenario `ev-live-car-state`.
 - **Quality:** `quality: normal` (the default) has a key light, a fill, a light under the car,
   the sky's reflections and 2x multisampling; `quality: low` has the key light only, no
   reflections and no multisampling. Selected with `ThemeManager.set_look({quality: low})`; nothing
@@ -261,14 +271,15 @@ rather than starting another. Projection video (`livi-video*`) is not listed.
 
 - **Desktop entries** from the XDG data dirs (`LIVI_SHELL_APPS_DIRS` replaces them): `NoDisplay`,
   `Hidden`, `OnlyShowIn`/`NotShowIn` (the shell is `LIVI`), `TryExec`, `X-LIVI-Hidden`; terminal
-  apps are left out. Icons from `hicolor` (SVG, else the PNG nearest above 128 px), then `pixmaps`;
-  none is a monogram tile.
+  apps are left out. `X-LIVI-DriveSafe=true` marks one usable while driving (see "While
+  driving"). Icons from `hicolor` (SVG, else the PNG nearest above 128 px), then `pixmaps`; none is
+  a monogram tile.
 - **Waydroid's apps** (`waydroid app list`, read in the background while its session runs).
   Waydroid also writes desktop entries, by the same IDs (`waydroid.<package>`), which win.
 - **`~/.config/livi-shell/apps.yaml`** (`LIVI_SHELL_APPS` replaces it):
   `order: [id, ...]` first, the rest by name; `waydroid: false`; and per ID
-  `apps: { <id>: { name, icon, exec, app_id, hidden, timeout_s } }`, where an ID nothing provides
-  and an `exec` (desktop `Exec` syntax) adds a command.
+  `apps: { <id>: { name, icon, exec, app_id, hidden, timeout_s, scale, drive_safe } }`, where an
+  ID nothing provides and an `exec` (desktop `Exec` syntax) adds a command.
 
 Apps start in Rust (`AppCatalog`), each in its own process group, with `WAYLAND_DISPLAY` set to
 the shell's socket, `DISPLAY` unset and the toolkits told to use Wayland; output goes to
@@ -311,6 +322,42 @@ or closing, or another page. A tap on the field while the app still wants text b
 An app with no text input (`Wayland.has_text_input`) gets a keyboard button in its driver-side
 corner instead, and typing reaches it as key presses on a US layout. Projection windows never get
 it: the phone draws its own.
+
+## While driving
+
+`Drive` (an autoload) says whether the car is driven and what that locks, as PLAN.md's "What a
+screen visible to the driver may show" asks. Driving is not being in Park (NHTSA): a car stopped
+at a light is still driven. `DriveState` (Rust, `driving.rs`, table-tested) decides from the core's
+telemetry, strongest first: `ignition` false is parked at once; `drivingRegulation`, the car's own
+video and keyboard lockout (micom-livi's, out of Park in D, N and R alike); `reverse`; an
+automatic's `gear` letter; the `parkingBrake` released or 5 km/h; speed alone from 5 km/h. It
+locks at once and lifts only once parked has held 1.5 s (speed alone: under 1 km/h for 10 s), so a
+shuffle through P does not flash the covers off. Nothing reported is parked.
+
+While it locks:
+- a hosted app not marked DriveSafe is covered on the app page ("Available when parked"; the
+  app keeps running and gets no touch or key) and greyed in the launcher, which says why;
+  a window no launched app owns counts as not DriveSafe;
+- typing is off: the app keyboard and Settings' text and number entry show the same cover, with
+  Close; an app's keys button hides while its app is covered;
+- the phone's projection is never covered: Android Auto and CarPlay apply their own limits.
+
+Settings → Driving's "While driving" chooses the override, kept in
+`$XDG_CONFIG_HOME/livi-shell/driving.json` (not in tests):
+- **Follow the car** (the default).
+- **Passenger mode**: the cover offers "A passenger is using it"; a second tap confirms ("Only a
+  passenger should use the screen while the car moves") and unlocks until the car parks, or at
+  once when `ignition` or `vehicleReady` goes off; each drive asks again. A "Passenger" pill shows
+  at the top while it lasts.
+- **Always offroad**: never locks, for testing on a bench or in a car that reports driving wrongly;
+  offered only once "Developer options" is on, and an "Always offroad" pill in the warning color
+  shows for as long as it is chosen.
+
+While the car is driven the choice can only go back to Follow the car, and the developer options
+wait until it parks. The section's first row says what the shell thinks (Parked, Driving) and
+what decided it. Not done yet: a per-app DriveSafe choice in Settings, the region profiles (album
+art, JAMA's 30 characters), and the stock head unit's list of settings it locks while driving
+(only typing is locked here). Scenarios `drive-lockout`, `drive-override`.
 
 ## Settings
 

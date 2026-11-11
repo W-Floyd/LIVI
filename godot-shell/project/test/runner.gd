@@ -140,6 +140,7 @@ func _run_one(path: String) -> String:
 	add_child(_vp)
 	# Each scenario starts from the default look, then its own `theme:`.
 	ThemeManager.defaults()
+	Drive.reset()
 	var look: Dictionary = sc.get("theme", {})
 	if sc.has("appearance"):
 		look.appearance = sc.appearance

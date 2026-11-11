@@ -14,6 +14,7 @@ Core="*res://core.gd"
 Clock="*res://clock.gd"
 Wayland="*res://wayland.gd"
 ThemeManager="*res://theme_manager.gd"
+Drive="*res://drive.gd"
 
 [display]
 

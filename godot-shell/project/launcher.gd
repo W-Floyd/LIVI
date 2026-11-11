@@ -20,7 +20,7 @@ const CLOSE_GRACE_S := 3.0
 ## The scales, in percent, the settings offer apps.
 const SCALES := [100, 125, 150, 175, 200]
 
-## `{id, name, icon, argv, cwd, app_ids, source, timeout_s}`, in the order to show.
+## `{id, name, icon, argv, cwd, app_ids, source, timeout_s, scale, drive_safe}`, in the order to show.
 var apps: Array = []
 ## Hosted windows by id: `{app_id, title, app}`, `app` the catalog id or "".
 var windows := {}
@@ -46,6 +46,9 @@ var _log_file: FileAccess
 
 
 func _ready() -> void:
+	# Which app a window is decides whether it is covered while driving.
+	Drive.launcher = self
+	changed.connect(Drive.changed.emit)
 	Wayland.window_mapped.connect(_on_mapped)
 	Wayland.window_unmapped.connect(_on_unmapped)
 	ThemeManager.changed.connect(_rescale)

@@ -1,0 +1,98 @@
+name: drive-override
+# Settings → Driving: "Passenger mode" lets a passenger unlock for one drive, after a second tap
+# confirms; a pill says so while it lasts, and parking or the ignition going off ends it, so the
+# next drive asks again. "Always offroad" (offered with the developer options) never locks and
+# says so for as long as it is chosen. While the car is driven the choice can only go back to
+# following the car.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  apps: fixtures/apps
+  clients:
+    - { role: app, app_id: org.livi.test.grid, pattern: grid, size: 640x360 }
+steps:
+  - page: settings
+  - tap: { node: Settings/Sections/List/Driving }
+  - expect_node: { path: Settings/Heading/Title, text: Driving }
+  - expect_node: { path: Settings/Rows/List/Parked, visible: "true" }
+  - screenshot: settings-driving
+  - tap: { node: Settings/Rows/List/While driving/Box/Choice/Passenger mode }
+  - gdscript: |
+      if Drive.mode != "passenger":
+          return "mode %s" % Drive.mode
+  - page: apps
+  - wait: { window: org.livi.test.grid }
+  - gdscript: &grid |
+      shell.bring_forward(Wayland.find_window("org.livi.test.grid"))
+      await runner.frames(2)
+  - set: { core: { telemetry: { drivingRegulation: true, gear: D, ignition: true, vehicleReady: true } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Projection/DriveCover, visible: "true" }
+  - expect_node: { path: Projection/DriveCover/Box/Buttons/Unlock, text: A passenger is using it }
+  - expect_node: { path: DriveBadge, visible: "false" }
+  # The first tap asks; Cancel goes back.
+  - tap: { node: Projection/DriveCover/Box/Buttons/Unlock }
+  - expect_node: { path: Projection/DriveCover/Box/Buttons/Unlock, text: Unlock }
+  - expect_node: { path: Projection/DriveCover/Box/Buttons/Cancel, visible: "true" }
+  - screenshot: drive-passenger-confirm
+  - tap: { node: Projection/DriveCover/Box/Buttons/Cancel }
+  - expect_node: { path: Projection/DriveCover/Box/Buttons/Unlock, text: A passenger is using it }
+  # Ask and confirm: unlocked, and the pill says so.
+  - tap: { node: Projection/DriveCover/Box/Buttons/Unlock }
+  - tap: { node: Projection/DriveCover/Box/Buttons/Unlock }
+  - expect_node: { path: Projection/DriveCover, visible: "false" }
+  - expect_node: { path: DriveBadge, visible: "true" }
+  - expect_node: { path: DriveBadge/Row/Label, text: Passenger }
+  - gdscript: |
+      if Drive.override() != "passenger":
+          return "override %s" % Drive.override()
+  - screenshot: drive-passenger
+  # While driving, the choice can only go back to following the car.
+  - gdscript: |
+      if Drive.set_mode("offroad") or Drive.set_developer(true) or Drive.mode != "passenger":
+          return "changed while driving"
+  # Parking ends it; the next drive asks again.
+  - set: { core: { telemetry: { drivingRegulation: false, gear: P } } }
+  - wait: { frames: 100 }
+  - expect_node: { path: DriveBadge, visible: "false" }
+  - set: { core: { telemetry: { drivingRegulation: true, gear: D } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Projection/DriveCover, visible: "true" }
+  - tap: { node: Projection/DriveCover/Box/Buttons/Unlock }
+  - tap: { node: Projection/DriveCover/Box/Buttons/Unlock }
+  - expect_node: { path: Projection/DriveCover, visible: "false" }
+  # So does the ignition going off, at once.
+  - set: { core: { telemetry: { ignition: false } } }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if Drive.passenger or Drive.moving:
+          return "ignition off: passenger %s, moving %s" % [Drive.passenger, Drive.moving]
+  - set: { core: { telemetry: { ignition: true } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Projection/DriveCover, visible: "true" }
+  # Always offroad: only with the developer options, chosen while parked.
+  - set: { core: { telemetry: { drivingRegulation: false, gear: P } } }
+  - wait: { frames: 100 }
+  - page: settings
+  - tap: { node: Settings/Sections/List/Driving }
+  - gdscript: |
+      if shell.has_node("Settings/Rows/List/While driving/Box/Choice/Always offroad"):
+          return "offroad offered without the developer options"
+  - tap: { node: Settings/Rows/List/Developer options }
+  - tap: { node: Settings/Rows/List/While driving }
+  - tap: { node: Settings/Rows/List/Always offroad }
+  - gdscript: |
+      if Drive.mode != "offroad" or not Drive.developer:
+          return "mode %s, developer %s" % [Drive.mode, Drive.developer]
+  - expect_node: { path: DriveBadge/Row/Label, text: Always offroad }
+  - screenshot: settings-driving-offroad
+  - gdscript: *grid
+  - set: { core: { telemetry: { drivingRegulation: true, gear: D } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Projection/DriveCover, visible: "false" }
+  - theme: { appearance: night }
+  - screenshot: drive-offroad-night
+  # Back to following the car is allowed while driving.
+  - gdscript: |
+      if not Drive.set_mode("car") or not Drive.locked():
+          return "could not go back to following the car"

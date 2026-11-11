@@ -71,6 +71,8 @@ pub struct App {
     pub timeout_s: u32,
     /// apps.yaml's `scale`, a percentage; else the shell's own choice.
     pub scale: Option<u32>,
+    /// Usable while driving: `X-LIVI-DriveSafe=true`, or apps.yaml's `drive_safe`.
+    pub drive_safe: bool,
 }
 
 /// The `[Desktop Entry]` group's keys, values unescaped at the string level.
@@ -333,6 +335,7 @@ pub fn desktop_app(id: &str, file: &Path, text: &str, data_dirs: &[PathBuf], lan
         source: "desktop",
         timeout_s: if id.starts_with("waydroid.") { WAYDROID_TIMEOUT_S } else { TIMEOUT_S },
         scale: None,
+        drive_safe: is_true(&e, "X-LIVI-DriveSafe"),
     })
 }
 
@@ -401,6 +404,7 @@ pub fn waydroid_apps(list: &str, icons_dir: &Path) -> Vec<App> {
             source: "waydroid",
             timeout_s: WAYDROID_TIMEOUT_S,
             scale: None,
+            drive_safe: false,
         });
     };
     for line in list.lines() {
@@ -434,13 +438,14 @@ pub struct Overlay {
     pub hidden: bool,
     pub timeout_s: Option<u32>,
     pub scale: Option<u32>,
+    pub drive_safe: Option<bool>,
 }
 
 /// Percentages `scale` may be: the compositor's range, in its steps or not.
 pub const SCALE_PCT: std::ops::RangeInclusive<u64> = 50..=400;
 
 /// `order: [id, ...]`, `waydroid: bool`, `apps: { <id>: { name, icon, exec, app_id, hidden,
-/// timeout_s, scale } }`. Unknown keys are errors, so a typo does not pass silently.
+/// timeout_s, scale, drive_safe } }`. Unknown keys are errors, so a typo does not pass silently.
 pub fn parse_config(text: &str) -> Result<Config, String> {
     let mut cfg = Config { waydroid: true, ..Default::default() };
     let v: Value = serde_norway::from_str(text).map_err(|e| e.to_string())?;
@@ -464,6 +469,7 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
                             "exec" => ov.exec = Some(s(fv, f)?),
                             "app_id" => ov.app_id = Some(s(fv, f)?),
                             "hidden" => ov.hidden = fv.as_bool().ok_or(format!("apps.{id}.hidden: not true or false"))?,
+                            "drive_safe" => ov.drive_safe = Some(fv.as_bool().ok_or(format!("apps.{id}.drive_safe: not true or false"))?),
                             "timeout_s" => ov.timeout_s = Some(fv.as_u64().ok_or(format!("apps.{id}.timeout_s: not a number"))? as u32),
                             "scale" => {
                                 let pct = fv.as_u64().filter(|p| SCALE_PCT.contains(p));
@@ -503,6 +509,7 @@ pub fn merge(found: Vec<App>, cfg: &Config, data_dirs: &[PathBuf]) -> Vec<App> {
                     source: "config",
                     timeout_s: TIMEOUT_S,
                     scale: None,
+                    drive_safe: false,
                 });
                 apps.len() - 1
             }
@@ -526,6 +533,7 @@ pub fn merge(found: Vec<App>, cfg: &Config, data_dirs: &[PathBuf]) -> Vec<App> {
             a.timeout_s = t;
         }
         a.scale = o.scale.or(a.scale);
+        a.drive_safe = o.drive_safe.unwrap_or(a.drive_safe);
     }
     apps.retain(|a| !cfg.apps.get(&a.id).is_some_and(|o| o.hidden));
     let rank = |a: &App| cfg.order.iter().position(|o| o == &a.id).unwrap_or(usize::MAX);
@@ -631,6 +639,10 @@ mod tests {
         assert_eq!(a.app_ids, vec!["org.x.Y", "yy"]);
         assert_eq!(a.cwd.as_deref(), Some("/tmp"));
         assert_eq!(a.timeout_s, TIMEOUT_S);
+        assert!(!a.drive_safe);
+        for (extra, safe) in [("X-LIVI-DriveSafe=true\n", true), ("X-LIVI-DriveSafe=false\n", false)] {
+            assert_eq!(desktop_app("t", Path::new("/t"), &format!("{base}{extra}"), &[], &[], &path).unwrap().drive_safe, safe, "{extra:?}");
+        }
     }
 
     fn tmp(name: &str) -> PathBuf {
@@ -712,13 +724,13 @@ mod tests {
     }
 
     fn app(id: &str, name: &str) -> App {
-        App { id: id.into(), name: name.into(), icon: None, argv: vec![id.into()], cwd: None, app_ids: vec![id.into()], source: "desktop", timeout_s: TIMEOUT_S, scale: None }
+        App { id: id.into(), name: name.into(), icon: None, argv: vec![id.into()], cwd: None, app_ids: vec![id.into()], source: "desktop", timeout_s: TIMEOUT_S, scale: None, drive_safe: false }
     }
 
     #[test]
     fn config_merge() {
         let cfg = parse_config(
-            "order: [z, new]\nwaydroid: false\napps:\n  a: { name: Renamed, app_id: a-window, timeout_s: 5, scale: 150 }\n  b: { hidden: true }\n  new: { name: New, exec: \"run --x %U\" }\n  ghost: { name: Ghost }\n",
+            "order: [z, new]\nwaydroid: false\napps:\n  a: { name: Renamed, app_id: a-window, timeout_s: 5, scale: 150 }\n  b: { hidden: true }\n  c: { drive_safe: true }\n  new: { name: New, exec: \"run --x %U\" }\n  ghost: { name: Ghost }\n",
         )
         .unwrap();
         assert!(!cfg.waydroid);
@@ -728,11 +740,13 @@ mod tests {
         assert_eq!(ids, ["z", "new", "c", "a"]);
         let a = got.iter().find(|a| a.id == "a").unwrap();
         assert_eq!((a.name.as_str(), a.app_ids.clone(), a.timeout_s, a.scale), ("Renamed", vec!["a".to_string(), "a-window".to_string()], 5, Some(150)));
+        let safe: Vec<&str> = got.iter().filter(|a| a.drive_safe).map(|a| a.id.as_str()).collect();
+        assert_eq!(safe, ["c"]);
         let n = got.iter().find(|a| a.id == "new").unwrap();
         assert_eq!((n.argv.clone(), n.source), (vec!["run".to_string(), "--x".to_string()], "config"));
         assert!(parse_config("bogus: 1\n").is_err());
-        for bad in ["1.5", "20", "x"] {
-            assert!(parse_config(&format!("apps:\n  a: {{ scale: {bad} }}\n")).is_err(), "scale {bad}");
+        for bad in ["scale: 1.5", "scale: 20", "scale: x", "drive_safe: 1"] {
+            assert!(parse_config(&format!("apps:\n  a: {{ {bad} }}\n")).is_err(), "{bad}");
         }
         assert!(parse_config("").unwrap().waydroid);
         assert!(parse_config("order: [a]\n").unwrap().waydroid);

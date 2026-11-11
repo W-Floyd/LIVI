@@ -36,7 +36,7 @@ fn env(k: &str) -> Option<String> {
 impl AppCatalog {
     /// The apps in `dirs` (data dirs in precedence order; empty for the XDG ones) with the config
     /// at `config_path` applied, as `{id, name, icon, argv, cwd, app_ids, source, timeout_s,
-    /// scale}` (`scale` a percentage, 0 for none). Also starts listing Waydroid's apps, when the
+    /// scale, drive_safe}` (`scale` a percentage, 0 for none). Also starts listing Waydroid's apps, when the
     /// config allows and `waydroid` is installed: those arrive through `poll_scan`.
     #[func]
     fn scan(&mut self, dirs: PackedStringArray, config_path: GString) -> VarArray {
@@ -234,6 +234,7 @@ fn to_dict(a: &App) -> VarDictionary {
     d.set("source", &gs(a.source));
     d.set("timeout_s", a.timeout_s as i64);
     d.set("scale", a.scale.unwrap_or(0) as i64);
+    d.set("drive_safe", a.drive_safe);
     d
 }
 

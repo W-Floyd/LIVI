@@ -1,9 +1,10 @@
 class_name MiniPlayer
 extends Card
 ## What's playing, with the three controls a driver needs. One line each for title and
-## source, cut with an ellipsis: no scrolling text.
+## source, cut with an ellipsis: no scrolling text. A tap elsewhere on the card opens the media page.
 
 signal control(name: String)  # playPause | next | prev
+signal opened
 
 var title := "":
 	set(v):
@@ -17,8 +18,21 @@ var playing := false:
 	set(v):
 		playing = v
 		if _play: _style()
+## The cover; null shows the placeholder.
+var art: Texture2D:
+	set(v):
+		art = v
+		if _art: _art.texture = v
+var initials := "":
+	set(v):
+		initials = v
+		if _art: _art.initials = v
+var badge := Color(0, 0, 0, 0):
+	set(v):
+		badge = v
+		if _art: _art.fill = v
 
-var _art: Panel
+var _art: ArtView
 var _title: Label
 var _subtitle: Label
 var _prev: Button
@@ -27,7 +41,8 @@ var _next: Button
 
 
 func _build() -> void:
-	_art = Panel.new()
+	_art = ArtView.new()
+	_art.name = "Art"
 	_title = UI.label(title, "strong", "body")
 	_subtitle = UI.label(subtitle, "body", "caption", "dim")
 	for l in [_title, _subtitle]:
@@ -45,6 +60,13 @@ func _build() -> void:
 	var buttons := UI.hbox([_prev, _play, _next], 0)
 	buttons.set_meta("gap", 0.0)
 	add_child(UI.hbox([_art, meta, buttons], 1.0))
+
+
+func _gui_input(event: InputEvent) -> void:
+	# The buttons take their own taps; a release on the rest of the card opens the page.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		accept_event()
+		opened.emit()
 
 
 func has_content() -> bool:
@@ -65,12 +87,7 @@ func _button(icon: String, name: String) -> Button:
 func _style() -> void:
 	var t: float = ThemeManager.px.touch
 	_art.custom_minimum_size = Vector2(t, t)
-	var art := StyleBoxFlat.new()
-	art.bg_color = ThemeManager.c.surface2
-	art.border_color = ThemeManager.c.accent
-	art.set_border_width_all(roundi(t * 0.08))
-	art.set_corner_radius_all(roundi(ThemeManager.px.radius))
-	_art.add_theme_stylebox_override("panel", art)
+	_art.radius = ThemeManager.px.radius
 	_play.set_meta("icon_name", "pause" if playing else "play")
 	_play.tooltip_text = "Pause" if playing else "Play"
 	(_play.get_parent() as BoxContainer).add_theme_constant_override("separation", roundi(ThemeManager.px.touch_gap))

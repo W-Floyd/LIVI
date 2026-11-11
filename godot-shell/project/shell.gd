@@ -53,6 +53,8 @@ var _following_front := false
 var _front := ""
 ## Lists and starts apps, and knows which hosted window is whose (the "apps" page).
 var launcher: Launcher
+## What plays, for home's player and the media page.
+var now_playing: NowPlaying
 ## Home's split, 0 to 1: the phone's picture beside the cards, or (no picture) the cards over the
 ## whole width. Tweened between; `_split_to` is where it is going.
 var _split := 1.0
@@ -130,6 +132,9 @@ func _init() -> void:
 	launcher = Launcher.new()
 	launcher.name = "Launcher"
 	add_child(launcher)
+	now_playing = NowPlaying.new()
+	now_playing.name = "NowPlaying"
+	add_child(now_playing)
 	_keys_button = Button.new()
 	_keys_button.name = "KeysButton"
 	_keys_button.tooltip_text = "Keyboard"
@@ -152,7 +157,11 @@ func _ready() -> void:
 	_projection.visible = false
 	_precondition.icon_name = "therm"
 	_precondition.pressed.connect(_on_precondition)
-	_player.control.connect(func(c): Core.act({kind = "media", control = c}))
+	_player.control.connect(func(c): now_playing.pressed(c); Core.act({kind = "media", control = c}))
+	_player.opened.connect(func(): open_page.call_deferred("media"))
+	now_playing.changed.connect(_update_player)
+	now_playing.art_changed.connect(_update_player)
+	_update_player()
 	Wayland.window_mapped.connect(func(id, app_id, title): print("window %d mapped: app_id \"%s\" title \"%s\"" % [id, app_id, title]); _windows.append(id); _app_ids[id] = app_id; _show_app())
 	Wayland.window_unmapped.connect(_on_window_unmapped)
 	Wayland.text_input_wanted.connect(_on_text_wanted)
@@ -248,7 +257,7 @@ func open_page(page: String) -> String:
 			return "ev_live needs an electric car"
 	elif page == "settings":
 		pass
-	elif page not in ["home", "app", "apps", "projection"] and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
+	elif page not in ["home", "app", "apps", "projection", "media"] and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
 		return "theme %s has no page %s" % [ThemeManager.theme_name, page]
 	if _page:
 		remove_child(_page)
@@ -268,7 +277,7 @@ func open_page(page: String) -> String:
 	var own_bar := live and _own_bar()
 	_live_bar = own_bar
 	# The live page keeps the status bar unless its pack draws its own title bar.
-	$Page.visible = home or page == "apps" or (live and not own_bar)
+	$Page.visible = home or page == "apps" or page == "media" or (live and not own_bar)
 	_body.visible = home
 	# Off home, the split is where it will be when home shows again.
 	if not home and _split_tween:
@@ -295,6 +304,12 @@ func open_page(page: String) -> String:
 		settings.back_pressed.connect(func(): open_page.call_deferred(_settings_from))
 		$Page.visible = true
 		_page = settings
+		add_child(_page)
+	elif page == "media":
+		var media := MediaPage.new()
+		media.now_playing = now_playing
+		media.top_inset = _status.get_combined_minimum_size().y
+		_page = media
 		add_child(_page)
 	elif page == "apps":
 		var apps := AppsPage.new()
@@ -380,6 +395,13 @@ func _on_core_page(path: String) -> void:
 	if first == "" or first == "projection":
 		if not _on_projection():
 			open_page("projection")
+	elif first == "media":
+		# /media/phone, /media/dabplus, /media/fm: that tab, without putting it on air.
+		if _page_name != "media":
+			open_page("media")
+		var tab: String = {phone = "phone", dabplus = "dab", fm = "fm"}.get(path.trim_prefix("/").get_slice("/", 1), "")
+		if tab != "" and _page is MediaPage and now_playing.receiver:
+			(_page as MediaPage).show_view(tab)
 	else:
 		print("core asks for %s: the shell has no such page" % path)
 
@@ -708,11 +730,27 @@ func _refresh(sections := {}) -> void:
 			stop.arrivalPct = stop.arrivalWh / (cap * 10.0)
 		_stop.stop = stop
 
-	var np = Core.get_value("/nowPlaying") if sections.is_empty() or sections.has("nowPlaying") else null
-	if np is Dictionary and np.get("title"):
+	_fit.call_deferred()
+
+
+## Home's player: the phone's track, or the radio station on air.
+func _update_player() -> void:
+	var np := now_playing
+	var band: Dictionary = np.dab if np.on_air() == "dab" else np.fm if np.on_air() == "fm" else {}
+	if band.is_empty():
 		_player.title = np.title
-		_player.subtitle = " · ".join([np.get("artist", ""), np.get("album", "")].filter(func(s): return s))
-		_player.playing = np.get("playing", false) == true
+		_player.subtitle = " · ".join([np.artist, np.album].filter(func(s): return s))
+		_player.playing = np.playing()
+		_player.art = np.art
+		_player.initials = ""
+		_player.badge = Color(0, 0, 0, 0)
+	else:
+		_player.title = band.title if band.title != "" else ("DAB+" if np.on_air() == "dab" else "FM")
+		_player.subtitle = " · ".join([band.text, band.detail].filter(func(s): return s))
+		_player.playing = band.playing
+		_player.art = NowPlaying.logo(band.logo) if band.logo != "" else null
+		_player.initials = band.initials
+		_player.badge = band.badge
 	_fit.call_deferred()
 
 

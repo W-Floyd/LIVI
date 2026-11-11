@@ -1,0 +1,193 @@
+name: media
+# What plays: home's player with the cover (decoded off the main thread), its tap and the rail
+# to the media page, the page's transport, seek and volume as core actions, the position running
+# on between reports, holding on a stall, a new cover and none, and the radio tabs as stock's.
+clock: 2026-11-09T08:30:00
+nav: true
+fixtures:
+  core: fixtures/media.json
+theme: { theme_name: instrument, appearance: day, reduced_motion: true }
+steps:
+  - gdscript: &art |
+      var np = shell.now_playing
+      for i in 120:
+          if np.art != null:
+              break
+          await runner.frames(1)
+      if np.art == null:
+          return "the cover was not decoded"
+      await runner.frames(2)
+  - gdscript: |
+      var np = shell.now_playing
+      if np.art.get_size() != Vector2(96, 96) or np.backdrop == null:
+          return "cover %s, backdrop %s" % [np.art.get_size(), np.backdrop]
+      var art = shell.get_node("Page/Body/Side/Panel/Player").find_child("Art", true, false)
+      if art.texture != np.art:
+          return "home's player shows %s" % art.texture
+  - screenshot: media-home
+  # Home's own buttons go to whichever source is on air.
+  - gdscript: |
+      await runner._tap(shell.get_node("Page/Body/Side/Panel/Player").find_child("Next", true, false).get_global_rect().get_center())
+  - expect_action: { Media: { control: next } }
+  # A tap on the rest of the card opens the page.
+  - gdscript: |
+      await runner._tap(shell.get_node("Page/Body/Side/Panel/Player").find_child("Art", true, false).get_global_rect().get_center())
+      await runner.frames(2)
+  - expect_node: { path: Media, visible: true }
+  - expect_node: { path: ../NavRail/Items/media, button_pressed: true }
+  - expect_node: { path: Media/Info/Meta/Title, text: Lantern Road }
+  - expect_node: { path: Media/Info/Meta/Head/Source, text: PODCASTS · CARPLAY }
+  - expect_node: { path: Media/Info/Meta/Head/Tabs, visible: true }
+  - expect_node: { path: Media/Info/Meta/Head/Tabs/phone, button_pressed: true }
+  - gdscript: |
+      var page: Control = shell.get_node("Media")
+      if page.get_node("Art").texture != shell.now_playing.art:
+          return "the page's cover is not the track's"
+      var rail: Rect2 = runner._vp.get_node("NavRail").get_global_rect()
+      for n in ["Art", "Info"]:
+          if page.get_node(n).get_global_rect().intersects(rail):
+              return "%s under the rail" % n
+  # The position runs on between reports while playing: a second of frames is a second.
+  - gdscript: |
+      var np = shell.now_playing
+      Core.fake_set("nowPlaying/elapsedMs", 30000)
+      await runner.frames(2)
+      var a: float = np.elapsed_ms()
+      await runner.frames(60)
+      var b: float = np.elapsed_ms()
+      if absf(b - a - 1000.0) > 40.0:
+          return "ran %d ms in a second" % roundi(b - a)
+      var shown: String = shell.get_node("Media/Info/Position").find_child("Elapsed", true, false).text
+      if shown != NowPlaying.clock(b):
+          return "elapsed label %s, position %d" % [shown, roundi(b)]
+      # Paused: it holds.
+      Core.fake_set("nowPlaying/playing", false)
+      await runner.frames(2)
+      a = np.elapsed_ms()
+      await runner.frames(30)
+      if np.elapsed_ms() != a:
+          return "ran while paused"
+      # Playing with no report for 3 s: stalled, back at the last report, and shown paused.
+      Core.fake_set("nowPlaying/playing", true)
+      await runner.frames(2)
+      await runner.frames(200)
+      if np.elapsed_ms() != 30000.0 or np.playing():
+          return "a stall: at %d, playing %s" % [roundi(np.elapsed_ms()), np.playing()]
+      # A report resumes it.
+      Core.fake_set("nowPlaying/elapsedMs", 45000)
+      await runner.frames(30)
+      if np.elapsed_ms() <= 45000.0 or not np.playing():
+          return "after a report: at %d, playing %s" % [roundi(np.elapsed_ms()), np.playing()]
+  - tap: { node: Media/Info/Controls/Transport/Play }
+  - expect_action: { PhoneMedia: { control: playPause } }
+  # Shown paused at once, until the core says otherwise.
+  - expect_node: { path: Media/Info/Controls/Transport/Play, tooltip_text: Play }
+  - tap: { node: Media/Info/Controls/Transport/Prev }
+  - expect_action: { PhoneMedia: { control: prev } }
+  - tap: { node: Media/Info/Controls/Transport/Next }
+  - expect_action: { PhoneMedia: { control: next } }
+  # The bar's middle is half the track; the bar shows there at once.
+  - tap: { node: Media/Info/Position/Seek }
+  - expect_action: { Seek: { positionMs: 100000 } }
+  - gdscript: |
+      var e: float = shell.now_playing.elapsed_ms()
+      if absf(e - 100000.0) > 200.0:
+          return "after the seek at %d" % roundi(e)
+  - expect_node: { path: Media/Info/Controls/Volume/Percent, text: 50 % }
+  - tap: { node: Media/Info/Controls/Volume/Mute }
+  - expect_action: { SetConfig: { patch: { huVolume: 0 } } }
+  - set: { core: { config: { huVolume: 0 }, nowPlaying: { elapsedMs: 100000, playing: true } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Media/Info/Controls/Volume/Percent, text: 0 % }
+  - tap: { node: Media/Info/Controls/Volume/Mute }
+  - expect_action: { SetConfig: { patch: { huVolume: 0.5 } } }
+  - set: { core: { config: { huVolume: 0.5 } } }
+  # Past the volume overlay the level brought up.
+  - wait: { frames: 150 }
+  - screenshot: media-page
+  - theme: { appearance: night }
+  - screenshot: media-page-night
+  # Android Auto takes no position: the bar only shows it.
+  - set: { core: { sessions: { active: androidauto } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Media/Info/Position/Seek, seekable: false }
+  - expect_node: { path: Media/Info/Meta/Head/Source, text: PODCASTS · ANDROID AUTO }
+  # A new cover replaces the old; none is the placeholder, on the page and at home.
+  - gdscript: |
+      var np = shell.now_playing
+      var old: Texture2D = np.art
+      Core.fake_set("nowPlaying/artwork", FileAccess.get_file_as_string(runner._tests.path_join("fixtures/media-art-b.b64")).strip_edges())
+      for i in 120:
+          if np.art != old:
+              break
+          await runner.frames(1)
+      if np.art == null or np.art.get_size() != Vector2(80, 80):
+          return "the JPEG cover: %s" % np.art
+      if shell.get_node("Media/Art").texture != np.art:
+          return "the page kept the old cover"
+      Core.fake_set("nowPlaying/artwork", null)
+      await runner.frames(2)
+      if np.art != null or shell.get_node("Media/Art").texture != null:
+          return "no cover, but %s" % np.art
+  - tap: { node: ../NavRail/Items/home }
+  - wait: { frames: 2 }
+  - screenshot: media-home-no-art
+  # The core opens a band's tab (a key, stock's /media/fm) without putting it on air.
+  - gdscript: |
+      Core.fake_open_page("/media/fm")
+      await runner.frames(3)
+      var page = shell.get_node_or_null("Media")
+      if page == null or page.view != "fm":
+          return "the FM tab is not open"
+      var resumes: Array = Core.fake_sent().filter(func(m): return m.get("type") == "action" and str(m.action.kind).ends_with("Resume"))
+      if not resumes.is_empty():
+          return "opening a tab sent %s" % JSON.stringify(resumes)
+  - expect_node: { path: Media/Info/Meta/Title, text: Coast FM }
+  - expect_node: { path: Media/Info/Stations, visible: true }
+  # Transport on a band that is not on air resumes it, as stock's.
+  - tap: { node: Media/Info/Controls/Transport/Play }
+  - expect_action: { FmResume: }
+  - tap: { node: Media/Info/Meta/Head/Tabs/dab }
+  - expect_action: { DabResume: }
+  - expect_node: { path: Media/Info/Meta/Title, text: Radio Test One }
+  - tap: { node: Media/Info/Stations/List/Grid/102 }
+  - expect_action: { DabPlay: { serviceId: 102 } }
+  - tap: { node: Media/Info/Controls/Transport/Favorite }
+  - expect_action: { DabFavorite: { serviceId: 101, favorite: false } }
+  # On air: the band's transport goes to the core's media control; its tuned station pauses.
+  - set: { core: { dab: { active: true, playing: true, text: Now on test one } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Media/Info/Meta/Head/Tabs/dab, button_pressed: true }
+  - tap: { node: Media/Info/Controls/Transport/Next }
+  - expect_action: { Media: { control: next } }
+  - tap: { node: Media/Info/Stations/List/Grid/101 }
+  - expect_action: { DabPause: }
+  - screenshot: media-dab-night
+  - tap: { node: Media/Info/Meta/Head/Tabs/phone }
+  - expect_action: { PhoneResume: }
+  # Home's player shows the station on air.
+  - tap: { node: ../NavRail/Items/home }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Player, title: Radio Test One }
+  - screenshot: media-home-dab-night
+  # Without a stick: no tabs, the phone's page.
+  - set: { core: { dab: { receiver: null, active: false } } }
+  - tap: { node: ../NavRail/Items/media }
+  - wait: { frames: 2 }
+  - expect_node: { path: Media/Info/Meta/Head/Tabs, visible: false }
+  - expect_node: { path: Media/Info/Stations, visible: false }
+  - tap: { node: Media/Info/Controls/Transport/Next }
+  - expect_action: { PhoneMedia: { control: next } }
+  # The cover back, in the other built-in themes, and under glass at home.
+  - gdscript: |
+      var fx = JSON.parse_string(FileAccess.get_file_as_string(runner._tests.path_join("fixtures/media.json")))
+      Core.fake_set("nowPlaying/artwork", fx.nowPlaying.artwork)
+  - gdscript: *art
+  - theme: { theme_name: studio, appearance: day }
+  - screenshot: media-page-studio
+  - theme: { theme_name: charge, appearance: night }
+  - screenshot: media-page-charge-night
+  - tap: { node: ../NavRail/Items/home }
+  - theme: { theme_name: calm, appearance: night, material: glass }
+  - wait: { frames: 2 }
+  - screenshot: media-home-glass-night

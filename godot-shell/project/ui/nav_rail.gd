@@ -1,14 +1,14 @@
 class_name NavRail
 extends PanelContainer
 ## A column docked on the driver's side, full height, that jumps between pages: home, the
-## electric vehicle page, the app launcher, the phone's window, and the phone's picture alone on
-## the panel, where the rail hides (the page has its own way back). The shell lays every other
-## page out beside it (`Shell.rail_width`). Not part of any theme's layout; a unit turns it on
-## with LIVI_SHELL_NAV until the shell has its real navigation.
+## electric vehicle page, the media page, the app launcher, the phone's window, and the phone's
+## picture alone on the panel, where the rail hides (the page has its own way back). The shell
+## lays every other page out beside it (`Shell.rail_width`). Not part of any theme's layout; a
+## unit turns it on with LIVI_SHELL_NAV until the shell has its real navigation.
 
 signal selected(page: String)
 
-const ITEMS := [["home", "Home", "home"], ["ev", "EV", "bolt"], ["apps", "Apps", "grid"], ["projection", "Phone", "phone"], ["settings", "Settings", "gear"]]
+const ITEMS := [["home", "Home", "home"], ["ev", "EV", "bolt"], ["media", "Media", "note"], ["apps", "Apps", "grid"], ["projection", "Phone", "phone"], ["settings", "Settings", "gear"]]
 
 var _buttons := {}
 

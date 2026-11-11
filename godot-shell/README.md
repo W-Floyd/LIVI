@@ -43,7 +43,7 @@ Wayland program. `apps: <dir under tests/>` is the launcher's only data dir, wit
 (see "App launcher"). A scenario's `nav: true` docks the rail LIVI_SHELL_NAV turns on (`NavRail`),
 which every page but the phone's lays out beside.
 
-Steps: `page: home | ev | ev_live | app | apps | projection | <pack screen>` (see "Electric vehicle page"), `compare_reference` (below), `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`
+Steps: `page: home | ev | ev_live | media | app | apps | projection | <pack screen>` (see "Electric vehicle page"), `compare_reference` (below), `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`
 for a finger), `key`, `expect_client: { app_id, lines: [...] }`,
 `theme: { theme_name, appearance, hand, near, text_scale, material, reduced_motion, quality, ev_page }`,
 `set: { core: {...} }`, `expect_action`, `expect_input`, `expect_node: { path, <property>:
@@ -238,6 +238,18 @@ as the stock UI does: opening the projection page (or `app` with a projection wi
 (Android Auto's own exit, or the end of the phone's ask) leaves it for the page before. A core
 `OpenPage` of `/projection` (or `/`) opens it too; other paths are logged, as the shell has no
 such pages.
+
+## Media
+
+`NowPlaying` reads the core's `nowPlaying`, `sessions`, `dab` and `fm` for home's player and the
+media page (rail item, or a tap on the player; the core's `/media`, `/media/phone|dabplus|fm`
+open it). The cover (base64 PNG, JPEG or WebP) is decoded on a worker thread only when the string
+changes. The position runs on between reports as stock's `Playback` does: held after 3 s without
+progress, still for a second after a seek. As stock: seeking (`seek`) only under CarPlay and
+AirPlay; with a DAB+ stick, Phone, DAB+ and FM tabs (`phoneResume`, `dabResume`, `fmResume`), a
+band's stations (`dabPlay`/`fmPlay`, the tuned one playing `dabPause`) and favourite; transport
+is `phoneMedia` on the phone's tab, a band's resume when it is not on air, else `media`. Volume
+is `huVolume`, as the hard keys. The core has no shuffle or repeat. Scenario `media`.
 
 ## App launcher
 

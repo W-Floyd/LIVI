@@ -1,0 +1,81 @@
+{
+  "config": {
+    "carType": 10,
+    "huVolume": 0.5
+  },
+  "telemetry": {
+    "fuelPct": 50.0,
+    "rangeKm": 243.0,
+    "batteryCapacityKwh": 77.4
+  },
+  "sessions": {
+    "active": "carplay",
+    "video": false,
+    "held": false,
+    "position": 0,
+    "total": 1
+  },
+  "nowPlaying": {
+    "title": "Lantern Road",
+    "artist": "The Night Shift",
+    "album": "Episode 41",
+    "app": "Podcasts",
+    "durationMs": 200000,
+    "elapsedMs": 30000,
+    "playing": true,
+    "artwork": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAIAAABt+uBvAAACsklEQVR42u2byUoDQRCGuwdPoomCigu4nXwIbz6DDyAiqIeAGyIuuIwziRkXgokbIorP5Z4Zt4sXr/EwEkVNMpnpKpPJX/Qt0On6+P9KVxeRA90xgSgcdVLkQKEYIE0CQnFAUBAUFBAQFFTCYghYDBYjvQchoCAUaRRpWAwWg4JQg2r1HgQFQUEo0ijSsFgFWwwKgoIACPcgKAhFGgrCRRGtxn/F2U620Ecj0121a7HT7ax3dqMzXTVksRPL9kdzbLaT+aiaFIJ5+aDznSzzabkVdJh0Au5wbNnjcx18CtKEYFvB6eQp8x1bk4JnZRTRcSOTdHiOzWSxVOJR+Z77W05svj0MFqOgk+fOYLEc6dojo+PGXuKR9Pxh6MVIU9CkyNEty3xiAGSZT3QphKSbp8siJHMxuiwIi7RpPLMBMo1nFOn/cVl4nlyJEoGCACggoNDMxSQshiKNIl2FCiK8KFprzWx0rLVmsosiWo1asBhdFrQPZqmNJgY6qY0mwgezEAiINAXKIu3Ymsyl9SgpnbQeJX5yJTh03P6c8GzZjhBC0zsmlt4o6BzoUeofGXk4NKxqLyNbbPJ1m6lXe/SjzSiDf9XMxfSH0qOLnsl3hZhOjAjpRC+fUSCLrT+UPdJxMQUkdWpEiJz1OyOfClq9Dzqu8C2oM7NRuXaKpFPeRXHlTvEYp1xM5/FGhXdCL+l4fQ9aviN8gfeC6SLeoOrRp6xcSiho8ZZvMvEnpstEg6pmwl8uBYv0AiOa35jMnjZVXWjARH4W6fmbl0roHtysEr2tvndQlciXxeauKwLNn0km+7ySUp6F7B4YrJamdLuvpdBHM9evVK1GFQFyY7f/C9PU1Sv111UfIObAn54BCIAACIAACIAACIAQAARAAARAAARAAARACAACIAACIAACoFDEB4hLLkkuy3TAAAAAAElFTkSuQmCC"
+  },
+  "dab": {
+    "receiver": "stick",
+    "active": false,
+    "playing": false,
+    "station": 101,
+    "stations": [
+      {
+        "serviceId": 101,
+        "label": "Radio Test One",
+        "shortLabel": "Test One",
+        "ensemble": "Test Mux",
+        "channel": "11D",
+        "frequencyHz": 222064000,
+        "favorite": true,
+        "logo": "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAPklEQVR42mPcp2HEQEvAxEBjMGrBqAWUAxZcEjaXTpBq1hE9i9E4GLVg1IJRC0YtGLUAO2AcbXiNWjD4LQAAhz8FcWwoN8YAAAAASUVORK5CYII="
+      },
+      {
+        "serviceId": 102,
+        "label": "Second Signal",
+        "shortLabel": "Second",
+        "ensemble": "Test Mux",
+        "channel": "11D",
+        "frequencyHz": 222064000,
+        "favorite": false
+      },
+      {
+        "serviceId": 103,
+        "label": "Third Wave",
+        "shortLabel": "",
+        "ensemble": "Test Mux",
+        "channel": "11D",
+        "frequencyHz": 222064000,
+        "favorite": false
+      }
+    ]
+  },
+  "fm": {
+    "active": false,
+    "playing": false,
+    "station": 98500,
+    "name": null,
+    "stations": [
+      {
+        "khz": 98500,
+        "name": "Coast FM",
+        "favorite": true
+      },
+      {
+        "khz": 101100,
+        "name": ""
+      }
+    ]
+  }
+}

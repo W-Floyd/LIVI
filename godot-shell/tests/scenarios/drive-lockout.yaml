@@ -64,6 +64,16 @@ steps:
       await runner.frames(30)
       if shell.app_keyboard != null:
           return "Close left the keyboard up"
+  # The navigation app counts as DriveSafe: designated, its cover lifts; undesignated, it is back.
+  - gdscript: |
+      shell.bring_forward(Wayland.find_window("org.livi.test.grid"))
+      await runner.frames(2)
+      var cover: Control = shell.get_node("Projection/DriveCover")
+      for nav in ["", "org.livi.test.grid", ""]:
+          ThemeManager.set_look({nav_app = nav})
+          await runner.frames(2)
+          if cover.visible != (nav == "") or Drive.app_safe("org.livi.test.grid") != (nav != ""):
+              return "navigation app %s: covered %s" % [nav, cover.visible]
   # The launcher greys what waits for Park, and says so.
   - page: apps
   - wait: { frames: 2 }

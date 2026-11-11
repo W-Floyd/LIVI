@@ -353,6 +353,19 @@ Terminals and multiline fields (the `multiline` hint) get Enter in Done's place:
 and the keyboard stays, and a hide key on the bar puts it away. A web address's field says Go;
 the rest say Done (text-input-v3 has no search purpose, so a search field cannot say Search).
 
+### The navigation app
+
+Settings → Look → "Navigation app" (or "Use for navigation" in an app's menu) makes a launcher app,
+godot-maps typically, home's other occupant of the phone's slot (`nav_app` in the look). While the
+phone and it are both there, a "Phone | <app>" pill under the cards, on the slot's side, picks which
+the slot shows (`home_source`, kept); the cards fit above it. With no phone the slot is the app's. Picked, the app
+starts without the app page if it is not running and stays running when the phone is picked again;
+the phone keeps video focus only while it is shown. Its window is configured to the slot
+(`Wayland.set_window_area`, a window's own area over the app area) whenever the split settles, as
+the phone is asked for its area; opened from Apps, the same window moves to the app page at the app
+area, and back to the slot on home. Its keyboard covers the cards. It counts as DriveSafe.
+Scenario `home-phone-toggle`.
+
 ## While driving
 
 `Drive` (an autoload) says whether the car is driven and what that locks, as PLAN.md's "What a
@@ -365,7 +378,7 @@ locks at once and lifts only once parked has held 1.5 s (speed alone: under 1 km
 shuffle through P does not flash the covers off. Nothing reported is parked.
 
 While it locks:
-- a hosted app not marked DriveSafe is covered on the app page ("Available when parked"; the
+- a hosted app not marked DriveSafe (nor the navigation app) is covered on the app page ("Available when parked"; the
   app keeps running and gets no touch or key) and greyed in the launcher, which says why;
   a window no launched app owns counts as not DriveSafe;
 - typing is off: the app keyboard and Settings' text and number entry show the same cover, with

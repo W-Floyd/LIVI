@@ -141,6 +141,9 @@ pub struct Window {
     pub buffer_scale: f64,
     /// The app asked to be fullscreen (and not since to leave it); else maximized and tiled.
     pub fullscreen: bool,
+    /// Its own place in panel pixels instead of the app area (`State::set_window_area`): home's
+    /// slot, for the navigation app.
+    area: Option<(i32, i32)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -855,11 +858,11 @@ impl State {
         self.reconfigure(|w| w.toplevel.wl_surface().client().as_ref() == Some(&client));
     }
 
-    /// The size a window is configured at: the app area (the panel, for projection video) over
-    /// its client's scale.
+    /// The size a window is configured at: its own area, else the app area (the panel, for
+    /// projection video) over its client's scale.
     fn window_size(&self, w: &Window) -> (i32, i32) {
         let video = is_video(&toplevel_app_id(w.toplevel.wl_surface()));
-        logical_size(if video { PANEL_PX } else { self.app_area }, w.scale)
+        logical_size(if video { PANEL_PX } else { w.area.unwrap_or(self.app_area) }, w.scale)
     }
 
     /// Configures the matching windows at their size again, those whose size changed.
@@ -898,6 +901,17 @@ impl State {
         if area != self.app_area {
             self.app_area = area;
             self.reconfigure(|_| true);
+        }
+    }
+
+    /// The window's own area in panel pixels, configured at once; `None` puts it back in the app
+    /// area. Projection video keeps the panel.
+    pub fn set_window_area(&mut self, id: u64, area: Option<(i32, i32)>) {
+        let area = area.map(|(w, h)| (w.clamp(1, PANEL_PX.0), h.clamp(1, PANEL_PX.1)));
+        let Some(w) = self.windows.iter_mut().find(|w| w.id == id) else { return };
+        if w.area != area {
+            w.area = area;
+            self.reconfigure(|w| w.id == id);
         }
     }
 
@@ -1314,6 +1328,7 @@ impl XdgShellHandler for State {
             fullscreen,
             scale,
             buffer_scale: 1.0,
+            area: None,
         });
     }
 
@@ -1679,8 +1694,8 @@ mod tests {
         }
     }
 
-    /// A window is configured at the app area over its scale, projection video at the panel's;
-    /// a new area reconfigures open windows. The client draws at what it is configured to, also
+    /// A window is configured at the app area over its scale, or at its own area once it has
+    /// one, projection video at the panel's; a new area reconfigures open windows. The client draws at what it is configured to, also
     /// when it asks to be maximized before its first commit. Windows are maximized and tiled
     /// unless launched fullscreen or the app asks; its last ask, or the shell's live change,
     /// holds through later configures.
@@ -1738,6 +1753,18 @@ mod tests {
             server.state.set_window_fullscreen(1, !fullscreen);
             assert_eq!(server.state.windows[0].toplevel.with_pending_state(|st| st.size), Some(then.into()), "{case} switched");
             assert_eq!(states(&server), want_states(!fullscreen), "{case} switched");
+            // Its own area (home's slot at each width) wins over the app area, which moves under it;
+            // video keeps the panel. Cleared, the app area again.
+            let size = |server: &Server| server.state.windows[0].toplevel.with_pending_state(|st| st.size);
+            let own = |slot: (i32, i32)| if is_video(app_id) { (1920, 720) } else { logical_size(slot, s) };
+            for slot in [(680, 657), (912, 657), (1117, 657)] {
+                server.state.set_window_area(1, Some(slot));
+                assert_eq!(size(&server), Some(own(slot).into()), "{case} in {slot:?}");
+            }
+            server.state.set_app_area(area.0, area.1);
+            assert_eq!(size(&server), Some(own((1117, 657)).into()), "{case} in its own area, the app area {area:?}");
+            server.state.set_window_area(1, None);
+            assert_eq!(size(&server), Some(want.into()), "{case} back in {area:?}");
         }
     }
 

@@ -143,7 +143,7 @@ func _update() -> void:
 		t.slow = launcher.slow(a.id)
 		t.state = launcher.state(a.id)
 		# Parked only, while the car is driven: it opens under the cover.
-		var parked_only: bool = Drive.locked() and not a.get("drive_safe", false)
+		var parked_only: bool = Drive.locked() and not Drive.app_safe(a.id)
 		t.modulate.a = 0.45 if parked_only else 1.0
 		greyed = greyed or parked_only
 		_grid.move_child(t, i)
@@ -179,7 +179,8 @@ func _update_running() -> void:
 
 ## The app's menu over the page: its size on the panel, `Default` (apps.yaml's, else the shell's)
 ## or one of `Launcher.SCALES`, each a button `Menu/Panel/Box/Sizes/s<percent>` (`s0` the default),
-## and its window, `Menu/Panel/Box/Modes/maximized` or `fullscreen`. A tap beside it closes it.
+## its window, `Menu/Panel/Box/Modes/maximized` or `fullscreen`, and `Menu/Panel/Box/Modes/navigation`,
+## which makes it home's navigation app (again: none). A tap beside it closes it.
 func open_menu(id: String) -> void:
 	close_menu()
 	var a := launcher.app(id)
@@ -212,6 +213,10 @@ func open_menu(id: String) -> void:
 	for m in ["maximized", "fullscreen"]:
 		var mode: String = m
 		modes.add_child(_choice(m, m.capitalize(), launcher.window_mode_of(id) == m, func(): launcher.set_app_window_mode(id, mode)))
+	# On the window's row, the menu's height kept within the panel's.
+	modes.add_child(UI.spacer())
+	var is_nav: bool = ThemeManager.nav_app == id
+	modes.add_child(_choice("navigation", "Use for navigation", is_nav, func(): ThemeManager.set_look({nav_app = "" if is_nav else id}); ThemeManager.save_look()))
 	var col := UI.vbox([UI.label(a.name, "display", "title"), UI.label("Size on the panel", "body", "caption", "dim"), sizes,
 		UI.label("Window", "body", "caption", "dim"), modes], 1.5)
 	col.name = "Box"

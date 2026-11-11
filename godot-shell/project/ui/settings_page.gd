@@ -897,13 +897,29 @@ func _look_rows() -> Array:
 		_look_choice("volume_style", "Volume indicator", [["card", "Card"], ["glow", "Line"]]),
 		_look_choice("app_scale", "App size", [[0, "Auto (%d %%)" % Launcher.auto_scale()]] + Launcher.SCALES.map(func(p): return [p, "%d %%" % p]),
 			"Apps from the launcher; hold an app's tile for its own"),
-		{key = "home_phone", kind = "switch", label = "Phone on home", detail = "Android Auto or CarPlay beside the cards", checked = ThemeManager.home_phone, enabled = true},
+		{key = "home_phone", kind = "switch", label = "Phone on home", detail = "Android Auto, CarPlay or the navigation app beside the cards", checked = ThemeManager.home_phone, enabled = true},
+		_look_choice("nav_app", "Navigation app", _nav_apps(), "On home beside the phone, and usable while driving"),
 		_look_choice("status_position", "Status bar", [["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"], ["off", "Off"]]),
 	]
 	if _rail():
 		rows.append({key = RAIL, kind = "value", label = "Navigation rail", detail = "The order of its items; or hold one on the rail and drag it", opens = true, enabled = true})
 	rows.append_array(_driving_rows())
 	return rows
+
+
+## None, or any app the launcher lists, for home's slot (`ThemeManager.nav_app`).
+func _nav_apps() -> Array:
+	var opts := [["", "None"]]
+	var launcher: Launcher = get_parent().get("launcher") if get_parent() else null
+	if launcher == null:
+		return opts
+	if launcher.apps.is_empty():
+		launcher.refresh()
+	for a in launcher.apps:
+		opts.append([a.id, a.name])
+	if ThemeManager.nav_app != "" and launcher.app(ThemeManager.nav_app).is_empty():
+		opts.append([ThemeManager.nav_app, ThemeManager.nav_app])
+	return opts
 
 
 func _look_choice(key: String, label: String, opts: Array, detail := "") -> Dictionary:

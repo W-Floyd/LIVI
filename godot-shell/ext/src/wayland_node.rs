@@ -461,6 +461,16 @@ impl WaylandCompositor {
         }
     }
 
+    /// The window's own place, in panel pixels, instead of the app area (home's slot); 0 puts it
+    /// back in the app area. Configured at once.
+    #[func]
+    fn set_window_area(&mut self, id: i64, width: i64, height: i64) {
+        if let Some(s) = self.server.as_mut() {
+            let area = (width > 0 && height > 0).then_some((width as i32, height as i32));
+            s.state.set_window_area(id as u64, area);
+        }
+    }
+
     /// Clients whose PID or process group is `pid` start their windows fullscreen rather than
     /// maximized; false forgets the PID.
     #[func]

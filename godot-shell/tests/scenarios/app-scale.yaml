@@ -92,6 +92,8 @@ steps:
   # The window's mode, from the same menu: fullscreen at once, kept with the look, and back.
   - page: apps
   - gdscript: shell.get_node("Apps").open_menu("org.livi.test.extra")
+  # Laid out before a tap goes by its rect.
+  - wait: { frames: 2 }
   - expect_node: { path: Apps/Menu/Panel/Box/Modes/maximized, text: Maximized }
   - tap: { node: Apps/Menu/Panel/Box/Modes/fullscreen }
   - gdscript: |
@@ -103,3 +105,17 @@ steps:
       shell.launcher.set_app_window_mode("org.livi.test.extra", "maximized")
       if Wayland.window_fullscreen(w) or ThemeManager.app_window_modes != {}:
           return "still fullscreen %s, saved %s" % [Wayland.window_fullscreen(w), ThemeManager.app_window_modes]
+  # Home's navigation app, from the same menu: chosen, then again for none.
+  - page: apps
+  - gdscript: shell.get_node("Apps").open_menu("org.livi.test.extra")
+  - wait: { frames: 2 }
+  - tap: { node: Apps/Menu/Panel/Box/Modes/navigation }
+  - gdscript: |
+      if ThemeManager.nav_app != "org.livi.test.extra" or shell.get_node_or_null("Apps/Menu") != null:
+          return "navigation app %s" % ThemeManager.nav_app
+      shell.get_node("Apps").open_menu("org.livi.test.extra")
+  - wait: { frames: 2 }
+  - tap: { node: Apps/Menu/Panel/Box/Modes/navigation }
+  - gdscript: |
+      if ThemeManager.nav_app != "":
+          return "navigation app %s after a second tap" % ThemeManager.nav_app

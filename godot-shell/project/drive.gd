@@ -154,8 +154,9 @@ func app_of(window: int) -> String:
 	return str(launcher.windows.get(window, {}).get("app", "")) if is_instance_valid(launcher) else ""
 
 
+## DriveSafe by its entry, or as the navigation app (Settings → Look, "Navigation app").
 func app_safe(id: String) -> bool:
-	return is_instance_valid(launcher) and id != "" and bool(launcher.app(id).get("drive_safe", false))
+	return is_instance_valid(launcher) and id != "" and (id == ThemeManager.nav_app or bool(launcher.app(id).get("drive_safe", false)))
 
 
 func _update(pushed: bool) -> void:

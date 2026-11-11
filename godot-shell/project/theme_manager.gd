@@ -31,9 +31,11 @@ var app_scale := 0             # launched apps' scale in percent; 0: the panel's
 var app_scales := {}           # app id -> percent, over apps.yaml's `scale` and app_scale
 var app_window_modes := {}     # app id -> maximized | fullscreen, over apps.yaml's `window`; maximized by default
 var rail_order := []           # the rail's item ids, top first, as saved (NavRail.ordered reads it); []: its default
+var nav_app := ""              # the launcher app home's slot shows beside the phone (Shell.nav_app); "": none
+var home_source := "phone"     # phone | nav: what home's slot shows while both are there
 
 ## The driver's choices that `save_look` keeps; `look_file` is where ("" keeps nothing: tests).
-const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "home_phone", "home_split", "status_position", "app_scale", "app_scales", "app_window_modes", "rail_order"]
+const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "home_phone", "home_split", "status_position", "app_scale", "app_scales", "app_window_modes", "rail_order", "nav_app", "home_source"]
 var look_file := ""
 ## The resolved look for apps the shell hosts, rewritten on every change (`write_tokens`); "" writes
 ## none. Beside `look_file`.
@@ -172,7 +174,7 @@ func defaults() -> void:
 	# Scenarios and the live tuner get a fixed look: the core's night (a fake core's default) does
 	# not repaint them. A theme step with appearance_mode "auto" opts back in.
 	appearance_mode = "day"
-	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto", volume_style = "card", home_phone = true, home_split = 0.0, status_position = "top", app_scale = 0, app_scales = {}, app_window_modes = {}, rail_order = []})
+	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto", volume_style = "card", home_phone = true, home_split = 0.0, status_position = "top", app_scale = 0, app_scales = {}, app_window_modes = {}, rail_order = [], nav_app = "", home_source = "phone"})
 
 
 ## The "Electric vehicle" page `ev` stands for: the look's choice, else the theme's own

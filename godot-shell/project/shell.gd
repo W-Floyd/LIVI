@@ -9,6 +9,7 @@ extends Control
 @onready var _projection: ProjectionView = $Projection
 @onready var _side: MarginContainer = $Page/Body/Side
 @onready var _handle: PhoneHandle = $Page/PhoneHandle
+@onready var _source: SourceToggle = $Page/Source
 @onready var _stat: StatTile = $Page/Body/Side/Panel/Stat
 @onready var _precondition: ToggleRow = $Page/Body/Side/Panel/Precondition
 @onready var _stop: StopCard = $Page/Body/Side/Panel/Stop
@@ -71,6 +72,14 @@ var _split_tween: Tween
 var _dragging := false
 var _drag_w0 := 0.0
 var _phone_present := false
+## Home's slot has something to show: the phone's picture, or the navigation app.
+var _slot_present := false
+## The navigation app's window last given the slot's size, else -1 (`_size_nav`).
+var _nav_window := -1
+## The look's `nav_app` and `home_source` as last applied (`_on_nav_look`).
+var _nav_seen := []
+## The launcher's list was read for the navigation app (`nav_app`).
+var _apps_scanned := false
 const SPLIT_S := 0.35
 ## The keyboard for a hosted app's field (AppKeyboard), over the driver's side of the app page
 ## while the app wants text; the app is configured to the rest of the width meanwhile, so it lays
@@ -138,6 +147,11 @@ func _init() -> void:
 	handle.reset.connect(_on_handle_reset)
 	body.sort_children.connect(_place_handle)
 	page.add_child(handle)
+	# Under the cards on the slot's side, while the phone and the navigation app are both there.
+	var source := SourceToggle.new()
+	source.visible = false
+	body.sort_children.connect(_place_source)
+	page.add_child(source)
 	add_child(page)
 	launcher = Launcher.new()
 	launcher.name = "Launcher"
@@ -182,10 +196,17 @@ func _ready() -> void:
 	Wayland.text_input_released.connect(func(id): if app_keyboard and app_keyboard.window_id == id: app_keyboard.close())
 	Drive.changed.connect(_update_keys_button)
 	launcher.show_window.connect(bring_forward)
+	launcher.changed.connect(_update_source)
+	_source.picked.connect(_pick_source)
+	ThemeManager.changed.connect(_on_nav_look)
+	_nav_seen = [ThemeManager.nav_app, ThemeManager.home_source]
 	_status.edge = ThemeManager.status_position
 	_style()
 	_refresh()
 	_tell_app_area()
+	# The navigation app shows in the slot from the start, with no phone yet.
+	if ThemeManager.nav_app != "":
+		_show_app.call_deferred()
 
 
 func _process(_delta: float) -> void:
@@ -204,7 +225,7 @@ func _style() -> void:
 	if ThemeManager.is_scene() and _scene == null:
 		_scene = SceneSkin.new()
 		_scene.name = "Scene"
-		_scene.surfaces = [_status, _stat, _precondition, _stop, _player, _handle.pill]
+		_scene.surfaces = [_status, _stat, _precondition, _stop, _player, _handle.pill, _source]
 		add_child(_scene)
 		move_child(_scene, 0)
 	elif not ThemeManager.is_scene() and _scene != null:
@@ -218,6 +239,7 @@ func _style() -> void:
 	var g: float = ThemeManager.px.gap
 	for k in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
 		_side.add_theme_constant_override(k, roundi(g * 1.5))
+	_update_source()
 	var cards: HomeCards = _side.get_node("Panel")
 	cards.gap = roundi(g * 1.5)
 	cards.column = ThemeManager.px.side - roundi(g * 1.5) * 2
@@ -473,9 +495,10 @@ func _tell_front() -> void:
 
 
 ## Pages with the phone's picture on them: home has it in its slot, so the phone keeps video
-## focus there too (and the slot's picture exists only while it does).
+## focus there too (and the slot's picture exists only while it does), unless the slot shows the
+## navigation app.
 func _shows_projection() -> bool:
-	return _on_projection() or (_page_name == "home" and ThemeManager.home_phone)
+	return _on_projection() or (_page_name == "home" and ThemeManager.home_phone and slot_source() == "phone")
 
 
 ## Day or night as the core has it for the main screen's UI: the car's lights (its night mode,
@@ -593,15 +616,18 @@ func _place_projection(ask := true) -> void:
 		r.size.x -= kw
 		if _driver_left():
 			r.position.x += kw
-	elif ThemeManager.floating():
+	elif ThemeManager.floating() and not _slot_nav():
 		# Under the floating panel: the whole projection screen, 1:1 with the panel, under a docked
-		# rail too; the shell's own rect would scale it into the rest.
+		# rail too; the shell's own rect would scale it into the rest. The navigation app keeps the
+		# slot: its own controls would be under the cards.
 		r = Rect2(get_viewport_rect().position - global_position, get_viewport_rect().size)
 	_projection.position = r.position
 	_projection.size = r.size
-	# The picture follows the slot every frame; the phone is asked for where it settles.
+	# The picture follows the slot every frame; the phone, or the navigation app, is asked for
+	# where it settles.
 	if ask and _split_tween == null and not _dragging:
 		_ask_area()
+		_size_nav()
 
 
 ## Once this frame's deferred layout passes (minimum size, then sort) have run.
@@ -622,16 +648,20 @@ func _notification(what: int) -> void:
 ## Opens home's slot while there is a phone's picture, else gives the cards the whole width:
 ## animated on home, at once elsewhere or under reduced motion.
 func _update_split() -> void:
-	var present := has_phone()
-	if present != _phone_present:
-		_phone_present = present
+	var phone := has_phone()
+	var present := phone or nav_app() != ""
+	if present != _slot_present:
+		_slot_present = present
 		_handle.visible = present
 		_resplit()
 		_place_handle.call_deferred()
-		phone_changed.emit(present)
+	if phone != _phone_present:
+		_phone_present = phone
+		phone_changed.emit(phone)
 	# The driver can keep home to the cards while a phone is connected (Look → Phone on home).
 	var want := 0.0 if present and ThemeManager.home_phone else 1.0
 	_slide(want, _side_target(want))
+	_update_source()
 
 
 ## The phone's widths home snaps to: about a third, a half and two thirds of the body, none
@@ -708,6 +738,9 @@ func _set_side(w: float) -> void:
 	var m: float = _side.get_theme_constant("margin_left") * 2.0
 	cards.column = maxf(0.0, lerpf(minf(w, least), ThemeManager.px.side, _split) - m)
 	_place_handle()
+	_place_source()
+	if app_keyboard:
+		_place_keyboard()
 
 
 ## The handle dragged `dx` since the press: the divider follows the finger, the picture stretched
@@ -748,7 +781,7 @@ func _on_handle_release() -> void:
 
 ## A double tap: the phone back at the default width, from any width or hidden.
 func _on_handle_reset() -> void:
-	if not has_phone():
+	if not _slot_present:
 		return
 	ThemeManager.set_look({home_phone = true, home_split = 0.0})
 	ThemeManager.save_look()
@@ -792,6 +825,113 @@ func _place_handle() -> void:
 ## A projection video window (Android Auto or CarPlay streaming) is mapped.
 func has_phone() -> bool:
 	return _windows.any(_is_projection)
+
+
+## The navigation app (Settings → Look, or its tile's menu) while the launcher lists it, else "".
+func nav_app() -> String:
+	var id := ThemeManager.nav_app
+	if id == "":
+		return ""
+	if launcher.apps.is_empty() and not _apps_scanned:
+		_apps_scanned = true
+		launcher.refresh()
+	return id if not launcher.app(id).is_empty() else ""
+
+
+## What home's slot shows: "phone" (the projection) or "nav" (the navigation app). The look's
+## choice while both are there, else whichever is.
+func slot_source() -> String:
+	if nav_app() == "":
+		return "phone"
+	if not has_phone():
+		return "nav"
+	return "nav" if ThemeManager.home_source == "nav" else "phone"
+
+
+## Home with the navigation app in its slot.
+func _slot_nav() -> bool:
+	return _page_name == "home" and slot_source() == "nav"
+
+
+## The navigation app's newest window, or -1.
+func _nav_window_id() -> int:
+	var id := nav_app()
+	var mine: Array = launcher.windows_of(id) if id != "" else []
+	return mine[-1] if not mine.is_empty() else -1
+
+
+## The toggle's segment tapped: kept in the look, which shows it (`_on_nav_look`).
+func _pick_source(source: String) -> void:
+	if source == "nav":
+		# Again after a launch that failed: the driver asked for it.
+		launcher.failed.erase(nav_app())
+	ThemeManager.set_look({home_source = source})
+	ThemeManager.save_look()
+	_show_app()
+
+
+## The navigation app or the slot's choice changed: the slot shows the other, the phone keeps
+## video focus only while it is the one shown, and is asked for the slot again when it comes back.
+func _on_nav_look() -> void:
+	var now := [ThemeManager.nav_app, ThemeManager.home_source]
+	if now == _nav_seen:
+		return
+	_nav_seen = now
+	launcher.failed.erase(ThemeManager.nav_app)
+	_show_app()
+	_tell_front()
+	_ask_area(true)
+
+
+## The toggle shows on home while the phone and the navigation app are both there and the slot
+## is open. Its band is the side's bottom margin, so the cards fit above it, the tall player too.
+func _update_source() -> void:
+	if _source == null:
+		return
+	var nav := nav_app()
+	var band := nav != "" and has_phone() and ThemeManager.home_phone
+	if band:
+		_source.nav_name = str(launcher.app(nav).get("name", nav))
+		_source.source = slot_source()
+	var m := roundi(ThemeManager.px.gap * 1.5)
+	var bottom := m + (roundi(_source.get_combined_minimum_size().y) + m if band else 0)
+	_source.visible = band and _page_name == "home"
+	if _side.get_theme_constant("margin_bottom") != bottom:
+		_side.add_theme_constant_override("margin_bottom", bottom)
+		_fit.call_deferred()
+	_place_source()
+
+
+## At the bottom of the cards' column, on the slot's side.
+func _place_source() -> void:
+	if _source == null or not _source.visible:
+		return
+	var side := _side.get_global_rect()
+	var m := float(roundi(ThemeManager.px.gap * 1.5))
+	var s := _source.get_combined_minimum_size()
+	s.x = minf(s.x, side.size.x - m * 2.0)
+	var x := side.end.x - m - s.x if ThemeManager.side_left() else side.position.x + m
+	_source.size = s
+	_source.global_position = Vector2(x, side.end.y - m - s.y).round()
+
+
+## The navigation app's window is configured to where it shows: home's slot (once the split
+## settles, as the phone is asked) or the app page's area, as any hosted app. Elsewhere it keeps
+## the last.
+func _size_nav() -> void:
+	var nav := _nav_window_id()
+	# No longer the navigation app's: the app area again.
+	if _nav_window >= 0 and _nav_window != nav:
+		Wayland.set_window_area(_nav_window, 0, 0)
+		_nav_window = -1
+	if nav < 0 or _projection.window.window_id != nav:
+		return
+	if _page_name == "app":
+		Wayland.set_window_area(nav, 0, 0)
+		_nav_window = -1
+	elif _slot_nav() and _split_tween == null and not _dragging and _slot.size.x >= 1.0:
+		Wayland.set_window_area(nav, roundi(_slot.size.x), roundi(_slot.size.y))
+		_nav_window = nav
 
 
 ## The last area asked of the phone, in the projection screen's pixels.
@@ -866,13 +1006,22 @@ func _on_window_unmapped(id: int) -> void:
 
 func _show_app() -> void:
 	_update_split()
-	# Home's slot is the phone's alone: a hosted app is the app page's.
-	var phone := _projection_page or _page_name == "home"
-	var shown: Array = _windows.filter(_is_projection) if phone else _windows.filter(func(w): return not _is_projection(w)) if _page_name == "app" else Array(_windows)
-	var id: int = shown[-1] if not shown.is_empty() else -1
+	var id := -1
+	if _slot_nav():
+		# One window in one place: the navigation app's moves here from the app page. Started
+		# when it is not running, without the app page.
+		id = _nav_window_id()
+		if id < 0 and ThemeManager.home_phone and launcher.state(nav_app()) == "":
+			launcher.open(nav_app(), false)
+	else:
+		# Home's slot is otherwise the phone's: a hosted app is the app page's.
+		var phone := _projection_page or _page_name == "home"
+		var shown: Array = _windows.filter(_is_projection) if phone else _windows.filter(func(w): return not _is_projection(w)) if _page_name == "app" else Array(_windows)
+		id = shown[-1] if not shown.is_empty() else -1
 	_projection.show_window(id, id >= 0 and _is_projection(id))
+	_size_nav()
 	# The keyboard types into the app showing, on its page only.
-	if app_keyboard and (_page_name != "app" or app_keyboard.window_id != id):
+	if app_keyboard and (not _typing_page() or app_keyboard.window_id != id):
 		app_keyboard.close()
 	_update_keys_button()
 
@@ -881,15 +1030,30 @@ func _driver_left() -> bool:
 	return ThemeManager.hand != "rhd"
 
 
+## What the app page's keyboard takes of its width; on home it covers the cards instead.
 func _keyboard_width() -> float:
-	return roundf(size.x * APP_KEYBOARD_SHARE) if app_keyboard and not app_keyboard.closing() else 0.0
+	return roundf(size.x * APP_KEYBOARD_SHARE) if app_keyboard and not app_keyboard.closing() and _page_name == "app" else 0.0
 
 
-## A hosted app showing on the app page wants text: the keyboard comes up for it. Never for the
-## phone's picture, whose own keyboard is on the phone's UI.
+## The pages a hosted app is typed into: the app page, and home with the navigation app.
+func _typing_page() -> bool:
+	return _page_name == "app" or _slot_nav()
+
+
+## Over the cards on home, beside the navigation app; else full height on the driver's side of
+## the shell's rect.
+func _keyboard_rect() -> Rect2:
+	if _page_name == "home":
+		return Rect2(_side.get_global_rect().position - global_position, _side.size)
+	var kw := roundf(size.x * APP_KEYBOARD_SHARE)
+	return Rect2(0.0 if _driver_left() else size.x - kw, 0.0, kw, size.y)
+
+
+## A hosted app showing on the app page, or the navigation app in home's slot, wants text: the
+## keyboard comes up for it. Never for the phone's picture, whose own keyboard is on the phone's UI.
 func _on_text_wanted(id: int) -> void:
 	print("keyboard: window %d (%s) wants text: %s" % [id, _app_ids.get(id, ""), Wayland.text_field(id)])
-	if _page_name != "app" or _projection.window.window_id != id or _is_projection(id):
+	if not _typing_page() or _projection.window.window_id != id or _is_projection(id):
 		return
 	open_keyboard(id, Wayland.text_field(id))
 
@@ -910,7 +1074,8 @@ func open_keyboard(id: int, field: Dictionary) -> void:
 	k.terminal = _terminal(id)
 	k.configure(id, field)
 	_place_keyboard()
-	k.slide_in(k.position.x, _driver_left())
+	# On home from the cards' edge.
+	k.slide_in(k.position.x, ThemeManager.side_left() if _page_name == "home" else _driver_left())
 	_tell_app_area()
 	_place_projection(false)
 	_update_keys_button()
@@ -926,14 +1091,14 @@ func _on_keyboard_closed(_submitted: bool, k: AppKeyboard) -> void:
 	_update_keys_button()
 
 
-## Full height on the driver's side of the shell's rect, beside a docked rail.
+## At `_keyboard_rect`, beside a docked rail.
 func _place_keyboard() -> void:
 	if app_keyboard == null or app_keyboard.closing():
 		return
-	var kw := _keyboard_width()
-	app_keyboard.size = Vector2(kw, size.y)
+	var r := _keyboard_rect()
+	app_keyboard.size = r.size
 	if not app_keyboard.moving():
-		app_keyboard.position = Vector2(0.0 if _driver_left() else size.x - kw, 0.0)
+		app_keyboard.position = r.position
 	_place_projection(false)
 	_update_keys_button()
 

@@ -4,10 +4,12 @@ name: home-phone-toggle
 # edge hides it (Look → Phone on home) and leaves a tab there to drag it out again. A release
 # snaps to the nearest of the phone's widths or none, kept in the look, and asks the phone once
 # for the area. A tap does nothing. Its target is a full touch size laid over both sides. No
-# phone, no handle.
+# phone, no handle. A navigation app shares the slot: a toggle under the cards picks it or the
+# phone; its window is configured to the slot and moves to the app page from Apps.
 clock: 2026-11-09T08:30:00
 fixtures:
   core: fixtures/parked.json
+  apps: fixtures/apps
   clients:
     - { role: app, app_id: livi-video-main, pattern: grid, size: 1920x1080, buffer: nv12, video: true }
 theme: { reduced_motion: true }
@@ -197,6 +199,192 @@ steps:
       var pill: Control = shell.get_node("Page/PhoneHandle/Pill")
       if not shell._scene or not pill in shell._scene.surfaces:
           return "no slab for the pill"
+  # A navigation app (the test client's grid, following each configure and logging it) designated:
+  # with the phone there the slot stays the phone's and the app does not start; a toggle under the
+  # cards on the slot's side, clear of both, picks between them.
+  - theme: { theme_name: instrument, appearance: day, hand: lhd, home_split: 0.0 }
+  - gdscript: |
+      shell.launcher.refresh()
+      for a in shell.launcher.apps:
+          if a.id == "org.livi.test.grid":
+              a.argv[a.argv.find("--size") + 1] = "0x0"
+              a.argv.append_array(["--events", runner._client_events("org.livi.test.grid")])
+      DirAccess.make_dir_recursive_absolute(runner._client_events("org.livi.test.grid").get_base_dir())
+      ThemeManager.set_look({nav_app = "org.livi.test.grid"})
+      await runner.frames(3)
+      if shell.slot_source() != "phone" or not shell._projection.window.to_core:
+          return "with the phone: the slot shows %s" % shell.slot_source()
+      if shell.launcher.state("org.livi.test.grid") != "":
+          return "the navigation app started before it was picked"
+  - gdscript: &source |
+      var t: Control = shell.get_node("Page/Source")
+      var r := t.get_global_rect()
+      var side: Rect2 = shell.get_node("Page/Body/Side").get_global_rect()
+      var slot: Rect2 = shell.get_node("Page/Body/Slot").get_global_rect()
+      var cards: Rect2 = shell.get_node("Page/Body/Side/Panel").get_global_rect()
+      if not t.is_visible_in_tree() or r.size.y < ThemeManager.px.touch - 0.5:
+          return "the toggle at %s, visible %s" % [r, t.is_visible_in_tree()]
+      if not side.encloses(r) or r.intersects(slot) or r.intersects(cards) or r.intersects(shell.get_node("Page/PhoneHandle/Pill").get_global_rect()):
+          return "the toggle %s, the side %s, the slot %s, the cards %s" % [r, side, slot, cards]
+      # On the slot's side of the column.
+      var m := float(roundi(ThemeManager.px.gap * 1.5))
+      var off := side.end.x - m - r.end.x if ThemeManager.side_left() else r.position.x - side.position.x - m
+      if absf(off) > 0.5:
+          return "the toggle %s off the slot's side of %s by %s" % [r, side, off]
+      for b in t.get_node("Box").get_children():
+          if b.size.y < ThemeManager.px.touch - 0.5 or b.size.x < ThemeManager.px.touch:
+              return "%s is %s" % [b.name, b.size]
+  - screenshot: home-nav-toggle-phone
+  # Picked: started without the app page, shown in the slot, configured to it at each snap; the
+  # phone gives up video focus. A drag reconfigures it once, on the release.
+  - tap: { node: Page/Source/Box/Nav }
+  - wait: { window: org.livi.test.grid }
+  - gdscript: &nav_sizes |
+      var w: int = Wayland.find_window("org.livi.test.grid")
+      var slot: Control = shell.get_node("Page/Body/Slot")
+      var events: String = runner._client_events("org.livi.test.grid")
+      var last := func() -> String:
+          var got := ""
+          for line in FileAccess.get_file_as_string(events).split("\n", false):
+              if line.begins_with("configure "):
+                  got = line
+          return got
+      var full: float = shell.get_node("Page/Body").size.x
+      if shell._page_name != "home" or shell.slot_source() != "nav" or ThemeManager.home_source != "nav":
+          return "page %s, the slot %s" % [shell._page_name, shell.slot_source()]
+      if shell._shows_projection():
+          return "the phone keeps video focus beside the navigation app"
+      for s in shell._snaps():
+          ThemeManager.set_look({home_split = s / full})
+          await runner.frames(3)
+          var k: float = Wayland.window_scale(w)
+          var want := "configure %dx%d" % [roundi(slot.size.x / k), roundi(slot.size.y / k)]
+          for i in 120:
+              if last.call() == want:
+                  break
+              await runner.frames(1)
+          if last.call() != want:
+              return "at %s (%s): %s, not %s" % [s, ThemeManager.hand, last.call(), want]
+          if shell._projection.window.window_id != w or shell._projection.window.to_core or shell._projection.get_global_rect() != slot.get_global_rect():
+              return "at %s the slot shows %d over %s" % [s, shell._projection.window.window_id, shell._projection.get_global_rect()]
+      var at: Vector2 = shell.get_node("Page/PhoneHandle/Pill").get_global_rect().get_center()
+      var d := Vector2(-140.0 if not ThemeManager.side_left() else 140.0, 0.0)
+      var before: String = last.call()
+      for i in 9:
+          var m := InputEventMouseMotion.new()
+          m.position = at + d * (i / 8.0)
+          m.button_mask = MOUSE_BUTTON_MASK_LEFT if i > 0 else 0
+          runner._vp.push_input(m)
+          if i == 0:
+              var b := InputEventMouseButton.new()
+              b.position = m.position
+              b.button_index = MOUSE_BUTTON_LEFT
+              b.pressed = true
+              b.button_mask = MOUSE_BUTTON_MASK_LEFT
+              runner._vp.push_input(b)
+          await runner.frames(2)
+      if last.call() != before:
+          return "reconfigured mid-drag: %s" % last.call()
+      var u := InputEventMouseButton.new()
+      u.position = at + d
+      u.button_index = MOUSE_BUTTON_LEFT
+      runner._vp.push_input(u)
+      await runner.frames(3)
+      var k: float = Wayland.window_scale(w)
+      var want := "configure %dx%d" % [roundi(slot.size.x / k), roundi(slot.size.y / k)]
+      for i in 120:
+          if last.call() == want:
+              break
+          await runner.frames(1)
+      if last.call() != want:
+          return "released at %s: %s, not %s" % [slot.size, last.call(), want]
+      ThemeManager.set_look({home_split = 0.0})
+      await runner.frames(3)
+  - gdscript: *source
+  - screenshot: home-nav-toggle-nav
+  # A finger in the slot reaches the app.
+  - tap: { node: Projection/Window, with: touch }
+  - gdscript: |
+      for i in 60:
+          if FileAccess.get_file_as_string(runner._client_events("org.livi.test.grid")).contains("touch down 0"):
+              return ""
+          await runner.frames(1)
+      return "no touch reached the navigation app"
+  # Back to the phone: the app keeps running; the phone has video focus and the slot again.
+  - tap: { node: Page/Source/Box/Phone }
+  - wait: { frames: 30 }
+  - gdscript: |
+      if not shell._projection.window.to_core or not shell._shows_projection() or ThemeManager.home_source != "phone":
+          return "the slot shows %d" % shell._projection.window.window_id
+      if Wayland.find_window("org.livi.test.grid") < 0 or shell.launcher.state("org.livi.test.grid") != "running":
+          return "the navigation app stopped: %s" % shell.launcher.state("org.livi.test.grid")
+      var asked: Array = Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea")
+      if asked.is_empty():
+          return "the phone was not asked for the slot again"
+  # Opened from Apps: the one window moves to the app page at the app area, and back to the slot.
+  - tap: { node: Page/Source/Box/Nav }
+  - wait: { frames: 3 }
+  - page: apps
+  - tap: { node: Apps/Scroll/List/Grid/org_livi_test_grid }
+  - wait: { frames: 3 }
+  - gdscript: |
+      var w: int = Wayland.find_window("org.livi.test.grid")
+      if shell._page_name != "app" or shell._projection.window.window_id != w or Wayland.window_count() != 2:
+          return "page %s shows %d of %d windows" % [shell._page_name, shell._projection.window.window_id, Wayland.window_count()]
+      var k: float = Wayland.window_scale(w)
+      var want := "configure %dx%d" % [roundi(1920.0 / k), roundi(720.0 / k)]
+      var got := ""
+      for i in 120:
+          for line in FileAccess.get_file_as_string(runner._client_events("org.livi.test.grid")).split("\n", false):
+              if line.begins_with("configure "):
+                  got = line
+          if got == want:
+              return ""
+          await runner.frames(1)
+      return "on the app page %s, not %s" % [got, want]
+  - page: home
+  - gdscript: *nav_sizes
+  # RHD: mirrored, the toggle on the slot's side still.
+  - theme: { hand: rhd }
+  - gdscript: *source
+  - gdscript: *nav_sizes
+  - theme: { hand: lhd, status_position: left }
+  - gdscript: *source
+  - theme: { status_position: top, material: glass }
+  - gdscript: *source
+  - gdscript: |
+      if shell._projection.get_global_rect() != shell.get_node("Page/Body/Slot").get_global_rect():
+          return "under glass the navigation app is %s, not the slot" % shell._projection.get_global_rect()
+  - theme: { material: solid }
+  # Settings → Look names it and says it counts as safe while driving; kept with the look.
+  - page: settings
+  - gdscript: |
+      var s: SettingsPage = shell.get_node("Settings")
+      s.open_section(SettingsPage.LOOK)
+      await runner.frames(2)
+      var row: Dictionary = s._look_row("nav_app")
+      if row.get("value") != "Grid pattern" or not str(row.get("detail")).contains("driving") or not s.get_node("Rows/List").has_node("Navigation app"):
+          return "the row %s" % row
+      var file := OS.get_user_data_dir().path_join("home-nav-look.json")
+      ThemeManager.look_file = file
+      ThemeManager.save_look()
+      ThemeManager.set_look({nav_app = "", home_source = "phone"})
+      ThemeManager.load_look(file)
+      DirAccess.remove_absolute(file)
+      DirAccess.remove_absolute(ThemeManager.tokens_file)
+      ThemeManager.look_file = ""
+      ThemeManager.tokens_file = ""
+      if ThemeManager.nav_app != "org.livi.test.grid" or ThemeManager.home_source != "nav":
+          return "restarted: %s, %s" % [ThemeManager.nav_app, ThemeManager.home_source]
+  - page: home
+  - wait: { frames: 3 }
+  - gdscript: |
+      if shell._projection.window.window_id != Wayland.find_window("org.livi.test.grid"):
+          return "the slot shows %d after the restart" % shell._projection.window.window_id
+      ThemeManager.set_look({nav_app = ""})
+      await runner.frames(3)
+      if not shell._projection.window.to_core or shell.get_node("Page/Source").visible:
+          return "no navigation app: the slot shows %d" % shell._projection.window.window_id
   # The phone gone: no handle.
   - gdscript: |
       for pid in runner._clients:
@@ -208,3 +396,12 @@ steps:
       await runner.frames(2)
       if shell.get_node("Page/PhoneHandle").visible:
           return "the handle shows with no phone"
+  # No phone, a navigation app: the slot and its handle are the app's, with no toggle.
+  - gdscript: |
+      ThemeManager.set_look({nav_app = "org.livi.test.grid", home_source = "phone"})
+      await runner.frames(3)
+      var w: int = Wayland.find_window("org.livi.test.grid")
+      if shell.slot_source() != "nav" or shell._projection.window.window_id != w or not shell.get_node("Page/PhoneHandle").visible:
+          return "no phone: the slot shows %d (%s), the handle %s" % [shell._projection.window.window_id, shell.slot_source(), shell.get_node("Page/PhoneHandle").visible]
+      if shell.get_node("Page/Source").visible:
+          return "a toggle with nothing to toggle to"

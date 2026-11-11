@@ -151,12 +151,15 @@ func slow(id: String) -> bool:
 
 
 ## Shows the app's window when it runs; otherwise starts it, unless it is starting already.
-func open(id: String) -> void:
+## `show` false starts it without bringing its window forward when it maps (home's slot shows it).
+func open(id: String, show := true) -> void:
 	var mine := windows_of(id)
 	if not mine.is_empty():
-		bring(mine[-1])
+		if show:
+			bring(mine[-1])
 		return
 	if launching.has(id):
+		launching[id].show = launching[id].show or show
 		return
 	var a := app(id)
 	if a.is_empty():
@@ -182,7 +185,7 @@ func open(id: String) -> void:
 		Wayland.set_process_fullscreen(pid, window_mode_of(id) == "fullscreen")
 		_modes[id] = window_mode_of(id)
 		_pids[id] = pid
-		launching[id] = {pid = pid, started = Time.get_ticks_msec(), timeout_s = int(a.timeout_s), exit = -1, slow = false}
+		launching[id] = {pid = pid, started = Time.get_ticks_msec(), timeout_s = int(a.timeout_s), exit = -1, slow = false, show = show}
 	changed.emit()
 
 
@@ -276,7 +279,8 @@ func _on_mapped(id: int, app_id: String, title: String) -> void:
 		_log("launcher: launched %s in %d ms%s" % [owner, Time.get_ticks_msec() - l.started, from])
 		launching.erase(owner)
 		# After the shell has the window too: it connected to the same signal later.
-		show_window.emit.call_deferred(id)
+		if l.show:
+			show_window.emit.call_deferred(id)
 	elif failed.erase(owner):
 		# Given up on, then up after all: running now, but not pulled forward this late.
 		_log("launcher: %s's window came after its launch was given up (process %d)" % [owner, pid])

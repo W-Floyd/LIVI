@@ -79,6 +79,7 @@ var _rows: VBoxContainer
 var _top: HBoxContainer
 ## Beside the cover in `wide`: the text, the bar and the controls.
 var _col: VBoxContainer
+var _col_fill: Control
 var _buttons: HBoxContainer
 
 
@@ -117,7 +118,11 @@ func _build() -> void:
 	_col = UI.vbox([], 1.0)
 	_col.name = "Column"
 	_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	# Spreads the column to the cover's height: text at its top, controls at its foot.
+	_col_fill = Control.new()
+	_col_fill.name = "Fill"
+	_col_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_col_fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_rows = UI.vbox([_top], 1.0)
 	_rows.name = "Rows"
 	_rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -283,9 +288,9 @@ func _choose() -> Array:
 	var sep := float(_rows.get_theme_constant("separation"))
 	for fit in [[2, t * 1.25, true], [1, t * 1.25, true], [1, t, true], [1, t, false]]:
 		var stack := _large_stack_height(fit[0], fit[1], fit[2])
-		# Beside the text: the card's height, leaving the text 1.5 MIN_CHARS at the title's size
-		# and room for the controls.
-		var beside := minf(room.y, room.x - sep - maxf(min_text_width() * ThemeManager.px.title / ThemeManager.px.body * 1.5, _buttons_width(3, fit[1])))
+		# Beside the text: the card's height, leaving the text MIN_CHARS at the title's size and
+		# room for the controls.
+		var beside := minf(room.y, room.x - sep - maxf(min_text_width() * ThemeManager.px.title / ThemeManager.px.body, _buttons_width(3, fit[1])))
 		if room.y >= stack and beside >= t * 2.0:
 			return ["wide", floorf(beside), fit[0], fit[1], fit[2]]
 		var over := minf(room.x, room.y - stack - sep)
@@ -320,7 +325,8 @@ func _arrange() -> void:
 		_seek.seekable = now_playing.can_seek
 		_seek.fraction = now_playing.fraction()
 	_prev.visible = line >= _buttons_width(3, big) if layout != "one" else one_row_text_width() >= min_text_width()
-	_buttons.alignment = BoxContainer.ALIGNMENT_BEGIN if layout == "one" else BoxContainer.ALIGNMENT_CENTER
+	# Under the text, from its edge (beside the cover); under a centred card, centred.
+	_buttons.alignment = BoxContainer.ALIGNMENT_CENTER if layout in ["two", "tall"] else BoxContainer.ALIGNMENT_BEGIN
 	for l in [_title, _subtitle, _album]:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER if layout == "tall" else HORIZONTAL_ALIGNMENT_LEFT
 	# A large card's title in two lines at the title size before an ellipsis.
@@ -335,11 +341,13 @@ func _arrange() -> void:
 		_title.autowrap_mode = TextServer.AUTOWRAP_OFF
 		_title.max_lines_visible = -1
 		_title.clip_text = true
-	# The large cover is drawn square in what its box gets (ArtView); only its width is a
-	# minimum, as one from the height would hold the panel at it.
+	# The tall card's cover is drawn square in what its box gets (ArtView). Beside the text it is
+	# its side square, from the room the panel gives (never from this card's own minimum), the
+	# text column as high, text at the cover's top and controls at its foot.
 	match layout:
 		"wide":
-			_art.custom_minimum_size = Vector2(pick[1], t)
+			_art.custom_minimum_size = Vector2(pick[1], pick[1])
+			_col.custom_minimum_size.y = pick[1]
 		"tall":
 			_art.custom_minimum_size = Vector2(t, t)
 		_:
@@ -348,13 +356,14 @@ func _arrange() -> void:
 
 ## Moves the cover, text and controls into the layout's boxes.
 func _place() -> void:
-	for n in [_art, _meta, _seek, _buttons, _top, _col]:
+	for n in [_art, _meta, _seek, _col_fill, _buttons, _top, _col]:
 		if n.get_parent():
 			n.get_parent().remove_child(n)
-	_art.size_flags_vertical = Control.SIZE_EXPAND_FILL if layout == "tall" else Control.SIZE_FILL
+	_art.size_flags_vertical = Control.SIZE_EXPAND_FILL if layout == "tall" else Control.SIZE_SHRINK_BEGIN if layout == "wide" else Control.SIZE_FILL
+	_col.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	match layout:
 		"wide":
-			for n in [_meta, _seek, _buttons]:
+			for n in [_meta, _seek, _col_fill, _buttons]:
 				_col.add_child(n)
 			_top.add_child(_art)
 			_top.add_child(_col)
@@ -371,6 +380,6 @@ func _place() -> void:
 			for n in [_art, _meta, _buttons]:
 				_top.add_child(n)
 			_rows.add_child(_top)
-	_top.size_flags_vertical = Control.SIZE_EXPAND_FILL if layout == "wide" else Control.SIZE_FILL
+	_top.size_flags_vertical = Control.SIZE_FILL
 	# A row on a card taller than it (the stack's media card) sits in its middle.
 	_rows.alignment = BoxContainer.ALIGNMENT_BEGIN if layout == "tall" else BoxContainer.ALIGNMENT_CENTER

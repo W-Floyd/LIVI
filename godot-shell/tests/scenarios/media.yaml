@@ -31,7 +31,7 @@ steps:
           return "home's media card: %s" % player.layout
       if absf(r.size.y - art.size.y) > 1.0 or r.size.x < ThemeManager.px.touch * 3.0:
           return "home's cover is %s in %s" % [r.size, art.size]
-  - screenshot: media-home
+  - screenshot: { name: media-home, max_pixels: 16 }
   # Home's own buttons go to whichever source is on air.
   - gdscript: |
       await runner._tap(shell.get_node("Page/Body/Side/Panel/Player").find_child("Next", true, false).get_global_rect().get_center())

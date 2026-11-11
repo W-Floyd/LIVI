@@ -3,11 +3,15 @@ name: media-player
 # scale and hand: while something plays it leads home, never smaller than the battery card, which
 # keeps its own height; the layout is the one its room picks (MiniPlayer._choose); the cover
 # drawn square; nothing of the text under the controls or out of the card. Nothing playing: a
-# compact card, every card at its own height.
+# compact card, every card at its own height. Beside the cover, the text's top at the cover's top
+# and the controls from the text's edge; under a centred cover, the controls centred. With the
+# Phone | <app> pill: Precondition one line, in the stack or beside the pill, rather than none,
+# and the battery card kept.
 clock: 2026-11-09T08:30:00
 nav: true
 fixtures:
   core: fixtures/media.json
+  apps: fixtures/apps
   clients:
     - { role: app, app_id: livi-video-main, pattern: grid, size: 1920x1080, buffer: nv12, video: true }
 theme: { theme_name: calm, appearance: day, reduced_motion: true }
@@ -30,18 +34,18 @@ steps:
           [0.0, "top", 1.0, "lhd", "wide"],
           [0.0, "left", 1.0, "lhd", "wide"],
           [0.0, "bottom", 1.3, "rhd", "wide"],
-          [0.0, "right", 1.6, "rhd", "tall"],
+          [0.0, "right", 1.6, "rhd", "wide"],
           [0.37, "top", 1.0, "lhd", "tall"],
           [0.37, "left", 1.0, "lhd", "one"],
           [0.37, "top", 1.3, "rhd", "one"],
-          [0.5, "top", 1.0, "lhd", "wide"],
+          [0.5, "top", 1.0, "lhd", "one"],
           [0.5, "right", 1.0, "rhd", "one"],
           [0.5, "bottom", 1.3, "lhd", "one"],
-          [0.62, "top", 1.0, "lhd", "wide"],
+          [0.62, "top", 1.0, "lhd", "two"],
           [0.62, "left", 1.0, "lhd", "two"],
           [0.62, "right", 1.0, "rhd", "two"],
-          [0.62, "top", 1.3, "rhd", "two"],
-          [0.37, "left", 1.6, "lhd", "two"],
+          [0.62, "top", 1.3, "rhd", "one"],
+          [0.37, "left", 1.6, "lhd", "one"],
       ]
       var panel = shell.get_node("Page/Body/Side/Panel")
       var player = panel.get_node("Player")
@@ -61,7 +65,7 @@ steps:
               bad.append("%s: %s, its room picks %s" % [label, player.layout, player._choose()[0]])
           # Every card but the media card at its own height.
           for c in panel.get_children():
-              if c != player and c.visible and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
+              if c != player and c.visible and not c.top_level and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
                   bad.append("%s: %s stretched to %d" % [label, c.name, c.size.y])
           if not player.is_visible_in_tree():
               if player.has_content():
@@ -85,6 +89,17 @@ steps:
                   bad.append("%s: %s out of the card %s" % [label, x, pr])
           if player.layout != "empty" and (t.intersects(buttons) or s.intersects(buttons) or art.intersects(buttons)):
               bad.append("%s: the text or cover under the controls %s" % [label, buttons])
+          # Alignment: beside the cover, the text from its top and the controls from the text's
+          # edge; under it, the controls centred on the card.
+          if player.layout == "wide" and (absf(t.position.y - art.position.y) > 1.0 or absf(buttons.position.x - t.position.x) > 1.0):
+              bad.append("%s: cover top %d, title top %d; controls from %d, text from %d" % [label, art.position.y, t.position.y, buttons.position.x, t.position.x])
+          if player.layout in ["tall", "two"]:
+              var shown_buttons := Rect2()
+              for b in player.find_child("Buttons", true, false).get_children():
+                  if b.visible:
+                      shown_buttons = b.get_global_rect() if shown_buttons.size == Vector2.ZERO else shown_buttons.merge(b.get_global_rect())
+              if absf(shown_buttons.get_center().x - pr.get_center().x) > 1.0:
+                  bad.append("%s: the controls centred at %d in the card at %d" % [label, shown_buttons.get_center().x, pr.get_center().x])
       ThemeManager.set_look({home_phone = true, home_split = 0.0, status_position = "top", text_scale = 1.0, hand = "lhd"})
       await runner.frames(4)
       if not bad.is_empty():
@@ -114,6 +129,56 @@ steps:
   - theme: { home_phone: false, status_position: top }
   - wait: { frames: 4 }
   - screenshot: media-player-hidden-night-rhd
+  # The Phone | <app> pill under the cards: rows at each snap. The battery card stays; Precondition
+  # goes to one line, then beside the pill, before it is left out.
+  - gdscript: |
+      ThemeManager.set_look({nav_app = "org.livi.test.grid", home_phone = true, appearance = "day", hand = "lhd", status_position = "top"})
+      await runner.frames(6)
+      var source: Control = shell.get_node("Page/Source")
+      if not source.visible:
+          return "no pill with the phone and a navigation app"
+      # share, text scale, hand, Precondition: "row" | "compact" | "band" | "none" (no room at all)
+      var rows := [
+          [0.37, 1.0, "lhd", "row"],
+          [0.5, 1.0, "lhd", "band"],
+          [0.62, 1.0, "lhd", "compact"],
+          [0.5, 1.0, "rhd", "band"],
+          [0.62, 1.3, "lhd", "none"],
+      ]
+      var panel = shell.get_node("Page/Body/Side/Panel")
+      var player = panel.get_node("Player")
+      var stat: Control = panel.get_node("Stat")
+      var pre = panel.get_node("Precondition")
+      var bad := PackedStringArray()
+      for r in rows:
+          ThemeManager.set_look({home_split = r[0], text_scale = r[1], hand = r[2]})
+          await runner.frames(6)
+          var label := "pill, share %s, text %s, %s" % [r[0], r[1], r[2]]
+          var where: String = "none" if not pre.visible else "band" if pre.top_level else "compact" if pre.compact else "row"
+          print("media-player %s: media %s %s, battery %s, precondition %s, left out %s" % [label, player.layout, player.size, stat.visible, where, shell.left_out])
+          if r[3] != null and where != r[3]:
+              bad.append("%s: precondition %s, want %s" % [label, where, r[3]])
+          if not player.is_visible_in_tree() or not stat.visible:
+              bad.append("%s: media %s, battery %s" % [label, player.visible, stat.visible])
+          if where == "band":
+              var pr: Rect2 = pre.get_global_rect()
+              var side: Rect2 = shell.get_node("Page/Body/Side").get_global_rect()
+              if pr.intersects(source.get_global_rect()) or not side.encloses(pr) or absf(pr.end.y - source.get_global_rect().end.y) > 1.0:
+                  bad.append("%s: precondition at %s beside the pill %s in %s" % [label, pr, source.get_global_rect(), side])
+      ThemeManager.set_look({nav_app = "", home_split = 0.0, text_scale = 1.0, hand = "lhd"})
+      await runner.frames(4)
+      if not bad.is_empty():
+          return "\n".join(bad)
+  - gdscript: |
+      ThemeManager.set_look({nav_app = "org.livi.test.grid", home_split = 0.5})
+      await runner.frames(6)
+  - screenshot: media-player-pill-half
+  - theme: { home_split: 0.62 }
+  - wait: { frames: 6 }
+  - screenshot: media-player-pill-wide
+  - gdscript: |
+      ThemeManager.set_look({nav_app = ""})
+      await runner.frames(4)
   # Nothing playing: a compact card; the rows again, every card at its own height.
   - set: { core: { nowPlaying: { title: null, artist: null, album: null, artwork: null } } }
   - wait: { frames: 4 }

@@ -41,6 +41,14 @@ var hero := false:
 		hero = v
 		if _bar: _restyle()
 
+## Smaller type on one line, for home when the full tile has no room.
+var compact := false:
+	set(v):
+		if v == compact:
+			return
+		compact = v
+		if _bar: _restyle()
+
 var _icon: TextureRect
 var _value: Label
 var _unit: Label
@@ -82,6 +90,10 @@ func _style() -> void:
 	var k := HERO_SCALE if hero else 1.0
 	var big := roundi(ThemeManager.px.display * k)
 	var mid := roundi(ThemeManager.px.title * k)
+	if compact:
+		big = roundi(ThemeManager.px.title * 1.3)
+		mid = roundi(ThemeManager.px.body)
+	_sub_label.visible = not compact
 	_value.add_theme_font_size_override("font_size", big)
 	_unit.add_theme_font_size_override("font_size", mid)
 	_sub_value.add_theme_font_size_override("font_size", mid)
@@ -92,7 +104,7 @@ func _style() -> void:
 	(_unit.get_parent() as MarginContainer).add_theme_constant_override("margin_bottom", roundi(max(0.0, lift)))
 	# Pushes the bar to the hero's foot; nothing (no extra gap) in the column.
 	_fill.visible = hero
-	_bar.custom_minimum_size.y = roundi(ThemeManager.px.gap * (2.0 if hero else 1.2))
+	_bar.custom_minimum_size.y = roundi(ThemeManager.px.gap * (2.0 if hero else 0.8 if compact else 1.2))
 	_bar.visible = fraction >= 0.0
 	_bar.queue_redraw()
 

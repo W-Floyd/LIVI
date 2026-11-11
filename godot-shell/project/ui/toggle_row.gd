@@ -23,6 +23,23 @@ var trailing: Control:
 		if _label:
 			_style()
 
+## One line, a touch target high: the label (`short_label` where set) without the detail, for
+## home when the full row has no room.
+var compact := false:
+	set(v):
+		if v != compact:
+			compact = v
+			if _label:
+				_style()
+var short_label := ""
+## Compact, the icon alone (and the trailing control): the state is the fill.
+var icon_only := false:
+	set(v):
+		if v != icon_only:
+			icon_only = v
+			if _label:
+				_style()
+
 var _icon: TextureRect
 var _label: Label
 var _detail: Label
@@ -69,8 +86,23 @@ func _style() -> void:
 			remove_theme_stylebox_override(s)
 	_icon.get_meta("icon")[0] = icon_name
 	UI.restyle(self)
+	_detail.visible = not compact
+	_label.visible = not (compact and icon_only)
+	_label.text = short_label if compact and short_label != "" else label
 	var row: HBoxContainer = _label.get_parent().get_parent()
-	custom_minimum_size.y = max(ThemeManager.px.touch * 1.3, row.get_combined_minimum_size().y + ThemeManager.px.gap * 1.6)
+	if compact:
+		custom_minimum_size.y = ThemeManager.px.touch
+		# A pill, like the chips beside it.
+		for st in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
+			var b = get_theme_stylebox(st)
+			if b is StyleBoxFlat:
+				b = b.duplicate()
+				b.set_corner_radius_all(roundi(ThemeManager.px.touch * 0.5))
+				add_theme_stylebox_override(st, b)
+	else:
+		for st in ["pressed", "hover_pressed"]:
+			remove_theme_stylebox_override(st)
+		custom_minimum_size.y = max(ThemeManager.px.touch * 1.3, row.get_combined_minimum_size().y + ThemeManager.px.gap * 1.6)
 	var m := roundi(ThemeManager.px.gap * 1.2)
 	row.offset_left = m
 	row.offset_right = -m
@@ -86,3 +118,16 @@ func _style() -> void:
 	_icon.modulate = ThemeManager.c.on_accent if on else ThemeManager.c.text
 	if trailing and "on_accent" in trailing:
 		trailing.on_accent = on
+
+
+## The compact row's width that shows its icon, label (`with_label`) and trailing control whole.
+func compact_width(with_label := true) -> float:
+	var w := 0.0
+	if with_label:
+		var f: Font = _label.get_theme_font("font")
+		w = f.get_string_size(short_label if short_label != "" else label, HORIZONTAL_ALIGNMENT_LEFT, -1, _label.get_theme_font_size("font_size")).x + ThemeManager.px.gap * 0.8
+	var m := roundf(ThemeManager.px.gap * 1.2)
+	w += _icon.get_combined_minimum_size().x + m * 2.0
+	if trailing and trailing.visible:
+		w += trailing.get_combined_minimum_size().x + ThemeManager.px.gap
+	return ceilf(w)

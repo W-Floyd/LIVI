@@ -17,6 +17,9 @@ TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
 StandardInput=tty-fail
+# Godot's errors and crash backtraces, readable after the fact (on the console they get overwritten).
+StandardOutput=journal
+StandardError=journal
 ExecStart=/usr/bin/livi-shell
 Restart=on-failure
 RestartSec=2

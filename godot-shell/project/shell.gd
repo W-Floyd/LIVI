@@ -989,6 +989,22 @@ func _place_source() -> void:
 	var x := side.end.x - m - s.x if ThemeManager.side_left() else side.position.x + m
 	_source.size = s
 	_source.global_position = Vector2(x, side.end.y - m - s.y).round()
+	# Precondition, one line, at the band's other end when the cards had no room for it.
+	if _precondition.top_level and _precondition.visible:
+		var w := _precondition.compact_width(not _precondition.icon_only)
+		var px := side.position.x + m if ThemeManager.side_left() else side.end.x - m - w
+		_precondition.size = Vector2(w, s.y)
+		_precondition.global_position = Vector2(px, side.end.y - m - s.y).round()
+
+
+## What of the one-line Precondition the band under the cards holds beside the pill: "words",
+## "icon" (and Auto), or "" (nothing).
+func _band_room() -> String:
+	if _source == null or not _source.visible:
+		return ""
+	var m := float(roundi(ThemeManager.px.gap * 1.5))
+	var free: float = _side.size.x - m * 2.0 - _source.get_combined_minimum_size().x - ThemeManager.px.gap
+	return "words" if free >= _precondition.compact_width(true) else "icon" if free >= _precondition.compact_width(false) else ""
 
 
 ## The navigation app's window is configured to where it shows: home's slot (once the split
@@ -1039,7 +1055,29 @@ func _fit() -> void:
 	var room: float = _rect_beside_status().size.y \
 		- _side.get_theme_constant("margin_top") - _side.get_theme_constant("margin_bottom")
 	left_out.clear()
+	# Before any card goes: Precondition one line, then beside the Phone | <app> pill (an icon
+	# where its words don't fit), then the battery card compact, then the media card one row
+	# without prev.
+	var fits := func() -> bool: return panel.needed(dashboard) <= room + 1.0
+	_precondition.compact = false
+	_precondition.top_level = false
+	_precondition.icon_only = false
+	_stat.compact = false
 	_player.allow_two_rows = true
+	# Nothing playing, the media card is the first to go.
+	if not fits.call() and not _player.has_content():
+		_player.visible = false
+		left_out.append("Player")
+	if not fits.call() and _precondition.visible:
+		_precondition.compact = true
+	if not fits.call() and _precondition.visible and _band_room() != "":
+		_precondition.icon_only = _band_room() == "icon"
+		_precondition.top_level = true
+	if not fits.call():
+		_stat.compact = true
+	if not fits.call() and _player.two_rows:
+		_player.allow_two_rows = false
+	_place_source()
 	var order := PRIORITY.duplicate()
 	order.reverse()
 	for n in order:
@@ -1048,13 +1086,7 @@ func _fit() -> void:
 		if need <= room + 1.0:
 			break
 		var item: Control = panel.get_node(n)
-		# A tight player in one row rather than none.
-		if item == _player and item.visible and _player.two_rows:
-			_player.allow_two_rows = false
-			if panel.needed(dashboard) <= room:
-				break
-			need = panel.needed(dashboard)
-		if item == _player:
+		if item == _player or item.top_level:
 			continue
 		if item.visible:
 			item.visible = false
@@ -1341,10 +1373,12 @@ func _refresh(sections := {}) -> void:
 	# Off in LIVI's settings is off for the manual request too (the core refuses it).
 	_precondition.disabled = not allowed and not on
 	_precondition.label = "Warming battery" if on else "Precondition battery"
+	_precondition.short_label = "Warming" if on else "Precondition"
 	if on:
 		detail = "on"
 	elif state == "running" and stop is Dictionary:
 		_precondition.label = "Warming for charger"
+		_precondition.short_label = "Warming"
 		detail = "%d kW · %s" % [int(stop.get("powerW", 0) / 1000), Units.range_text(float(stop.get("distanceM", 0)) / 1000.0)]
 	elif state == null:
 		detail += " · no auto"

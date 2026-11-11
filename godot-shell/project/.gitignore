@@ -1,2 +1,3 @@
 bin/
 .godot/
+export_presets.cfg

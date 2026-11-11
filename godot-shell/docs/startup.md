@@ -72,12 +72,97 @@ several times slower than the VM's host core, the eMMC reads the 128 MB editor b
 project cold, and panfrost compiles shaders on a first run. Script compile is the share that
 scales most with CPU, so the deferral should matter more there.
 
+## Release template and pack (VM)
+
+Alpine's `godot-templates` 4.7.2 (`/usr/bin/godot-template-release`, the same build as the
+`godot` editor) run on a pack from `scripts/export-release.sh`, against the editor on the project
+directory as packaged today. Same VM and method as above (216a5943's tree), median of 8 starts.
+"cold" drops the guest's page cache before each start; the qcow2 is still in macOS's cache, so
+those reads run at memory speed (~2 GB/s): cold here shows what is read, not what eMMC costs.
+
+| variant | page cache | engine | main | shell | first_frame | home | RSS at home |
+|---|---|---|---|---|---|---|---|
+| editor, project dir (as packaged) | warm | 210 | 455 | 483 | 516 | 516 | 422 MB |
+| editor, pack, text scripts | warm | 210 | 439 | 467 | 504 | 504 | 422 MB |
+| editor, pack, compressed tokens | warm | 200 | 350 | 379 | 413 | 413 | 420 MB |
+| template, pack, text scripts | warm | 190 | 313 | 339 | 369 | 369 | 390 MB |
+| template, pack, tokens | warm | 185 | 293 | 317 | 343 | 343 | 390 MB |
+| template, pack, compressed tokens | warm | 185 | 299 | 322 | 349 | 349 | 389 MB |
+| editor, project dir (as packaged) | cold | 270 | 515 | 549 | 581 | 581 | 418 MB |
+| editor, pack, text scripts | cold | 260 | 492 | 524 | 555 | 555 | 418 MB |
+| editor, pack, compressed tokens | cold | 270 | 434 | 468 | 504 | 504 | 416 MB |
+| template, pack, text scripts | cold | 240 | 361 | 389 | 418 | 418 | 386 MB |
+| template, pack, tokens | cold | 230 | 346 | 375 | 407 | 407 | 385 MB |
+| template, pack, compressed tokens | cold | 230 | 344 | 370 | 400 | 400 | 384 MB |
+
+- The template takes ~30 % off home (516 → 369 ms warm), nearly all of it in `main`: the
+  editor build's GDScript compiler also extracts docs and runs the warning checks, and it
+  registers the editor's classes. Tokens then save another 20 ms; in the editor build they save
+  90 ms, for the same reason. A pack of text scripts alone changes little (one file instead of
+  ~100 is worth ~10 ms here).
+- Read from storage on a cold start (`/proc/<pid>/io` `read_bytes`): 145 MB with the editor
+  (107 MB of its 128 MB binary), 99 MB with the template (all of its 60 MB). The extension
+  (15.5 MB) is read whole either way; the project or pack is under 1 MB. Mesa's libraries are not
+  counted: weston holds them.
+- Sizes (aarch64): editor 128.2 MB, template 59.7 MB, extension 15.5 MB; pack 0.97 MB (text),
+  1.83 MB (tokens), 0.86 MB (compressed tokens, Godot's default). armv7 (Alpine testing, same
+  4.7.2-r0): `godot` 115 MB installed, `godot-templates` 112 MB for debug and release together,
+  so ~56 MB for the release one; the armv7 extension is 14.9 MB.
+
+### What changes with a template
+
+- Alpine's templates take no `--path` or `--main-pack`: the binary has to be a copy (not a link:
+  the path resolves through symlinks) named like its pack, `livi-shell` beside `livi-shell.pck`,
+  with `liblivi_godot_shell.so` beside them (a pack's `res://bin/...` misses, and Godot then
+  looks next to the executable). `livi_shell.gdextension` needs no release entries: its
+  `linux.arm32`/`linux.arm64` keys match the template's features.
+- stdout is buffered: `application/run/flush_stdout_on_print` is off outside debug builds, so the
+  `[startup]` lines (and every `print`) reach the journal late and in blocks. Needs
+  `run/flush_stdout_on_print=true` in `project.godot` (set for these measurements).
+- The built-in fonts: `ThemeManager._font` reads `res://fonts/*.ttf` with
+  `FontFile.load_dynamic_font`, but a pack holds only the imported font data, so every built-in
+  theme's fonts fail to load. Measured with `load(path)` as the fallback when the file is missing;
+  vendor packs' fonts (files under `~/.local/share`) are unaffected. `theme_manager.gd` also hands
+  hosted apps `globalize_path("res://fonts/...")`, a file that does not exist in a pack: apps lose
+  the shell's fonts unless the fonts are installed as files too.
+- The scenario runner and the tuning server read `../tests` beside the project: they stay on the
+  editor build (the VM), as now.
+- `unit-sync.sh` copies the project for the editor to run: with a template it would export
+  (~3 s in the VM) and push the pack (~1 MB) instead; the class cache rides in the pack.
+- Nothing at runtime needs the editor build: no `is_editor_hint`, and the runner's runtime
+  `GDScript.new()` works in a template too.
+
+### On the unit, estimated
+
+- CPU: the template's ~30 % (~33 % with tokens) is compile and registration work, which an A53 in
+  AArch32 does several times slower than the VM, so expect at least that share of the unit's
+  warm start.
+- I/O: ~46 MB less to read cold (from the binaries' sizes, ~40 MB on armv7). The eMMC is a
+  Samsung 128 GB part on HS200 (200 MB/s bus, 8 bit); at an assumed 100-150 MB/s through page
+  faults and readahead that is 0.3-0.5 s less at a cold boot, on top of the CPU share.
+- Only the unit says: the eMMC's real throughput under the loader's access pattern, how much of
+  the binary the boot already cached, the CPU scale of `main`, and panfrost's share of `engine`.
+
+### Reproduce
+
+```sh
+# in the VM, from a copy of godot-shell with the extension built (scripts/build-ext.sh --release)
+apk fetch godot-templates && tar xzf godot-templates-*.apk usr/bin/godot-template-release
+TEMPLATE=$PWD/usr/bin/godot-template-release scripts/export-release.sh --scripts compressed /path/to/rel
+```
+
+Start `/path/to/rel/livi-shell` (or `godot --path project` for the baseline) under a headless
+weston with `livi-shell.sh`'s arguments, `--audio-driver Dummy`, `DRI_PRIME=0`, and
+`LIVI_CORE_SOCKET` at a stand-in core: a socket that sends each client
+`FromCore::Welcome { state: State::filled(tests/fixtures/parked.json) }` (livi-core-proto's
+`frame::encode`). Read the marks from stdout, `VmRSS` and `read_bytes` from `/proc/<pid>` at
+`home`; for cold starts, `sync; echo 3 >/proc/sys/vm/drop_caches` first.
+
 ## Remaining options, ranked
 
 | option | expected gain | cost |
 |---|---|---|
-| Release export template instead of the editor build: ~half the binary to read and relocate, no editor class registration | likely the largest left on the unit cold (engine mark); 0.3-1 s guessed | Alpine's templates take no `--path`/`--main-pack`, only `<exe>.pck` beside the executable: ship a copy of the template as `/usr/lib/livi-shell/livi-shell` with `livi-shell.pck`, or build our own template. Changes `unit-sync.sh`'s workflow |
-| Export a `.pck` with binary-token scripts | tokenizing skipped (parse, analyze and compile remain), one file instead of ~55 scripts and their resources on eMMC; 10-30 % of script load | export preset, `--export-pack` in the APKBUILD; unit-sync would push a pack instead of files |
+| Release template + pack with compressed tokens: `scripts/export-release.sh` | measured: home 516 → 349 ms in the VM (-32 %); on the unit that share of the warm start plus ~0.3-0.5 s of eMMC reads cold | flush_stdout and the fonts (above) first; then the APKBUILD installs a copy of `godot-template-release` (armv7 `godot-templates`) as `/usr/lib/livi-shell/livi-shell` with the pack and the extension, and `unit-sync.sh` pushes a pack |
 | Defer `AppKeyboard` and `SceneSkin` in `shell.gd` as the pages are | ~35 ms in the VM, ~6 % of the remaining start | low: a few typed declarations in `shell.gd` |
 | Spread the 2 s work: the EV warm-up and the spare keyboard both start at 2.0 s on the main thread | shortens the stall a first tap can hit (see `[warm]`) | low; or compile EvLive's scripts with `ResourceLoader.load_threaded_request` |
 | Boot splash handoff: `application/boot_splash` as home's background colour, no logo, so cage's black and Godot's splash read as the shell coming up | perceived only | low |

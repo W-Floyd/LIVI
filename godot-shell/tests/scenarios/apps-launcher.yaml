@@ -50,6 +50,21 @@ steps:
       if Wayland.window_count() != 2:
           return "%d windows" % Wayland.window_count()
   - gdscript: *front_grid
+  # The app on the app page exits with another still running: back to the grid, not to the other.
+  - gdscript: |
+      Wayland.close(Wayland.find_window("org.livi.test.grid"))
+      var until = Time.get_ticks_msec() + 5000
+      while Wayland.find_window("org.livi.test.grid") >= 0 and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+      await runner.frames(2)
+      if shell._page_name != "apps":
+          return "page %s after the app's exit" % shell._page_name
+  - tap: { node: Apps/Scroll/List/Grid/org_livi_test_grid }
+  - gdscript: |
+      var until = Time.get_ticks_msec() + 5000
+      while Wayland.find_window("org.livi.test.grid") < 0 and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+      await runner.frames(2)
   # Close from the switcher: xdg_toplevel.close, which the client obeys.
   - page: apps
   - tap: { node: Apps/Running/org_livi_test_grid/Close }

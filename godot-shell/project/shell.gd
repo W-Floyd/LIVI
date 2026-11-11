@@ -1006,11 +1006,14 @@ func _fit() -> void:
 
 
 func _on_window_unmapped(id: int) -> void:
+	var app_id: String = _app_ids.get(id, "")
 	_windows.erase(id)
 	_app_ids.erase(id)
-	# The app page shows hosted apps only: with none left, back to the grid they came from
-	# (not to the phone's video, which is the newest window left).
-	if _page_name == "app" and not _windows.any(func(w): return not _is_projection(w)):
+	# The app page's app gone (its last window: a dialog closing leaves it): back to the grid it
+	# came from, not to another running app or the phone's video.
+	var shown: bool = _projection.window.window_id == id
+	var gone := shown and (app_id == "" or not _windows.any(func(w): return _app_ids.get(w, "") == app_id))
+	if _page_name == "app" and (gone or not _windows.any(func(w): return not _is_projection(w))):
 		_update_split()
 		open_page("apps")
 		return

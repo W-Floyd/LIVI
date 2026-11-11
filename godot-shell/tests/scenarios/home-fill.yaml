@@ -53,7 +53,7 @@ steps:
       var slot: Control = shell.get_node("Page/Body/Slot")
       var proj: Control = shell.get_node("Projection")
       # The phone's handle lies in the cards' gutter, taking no width.
-      var full: float = shell.size.x - ThemeManager.px.side
+      var full: float = shell._phone_width()
       var between := 0
       var last := -1.0
       for i in 40:

@@ -132,6 +132,7 @@ func _init() -> void:
 	handle.visible = false
 	handle.dragged.connect(_on_handle_drag)
 	handle.released.connect(_on_handle_release)
+	handle.reset.connect(_on_handle_reset)
 	body.sort_children.connect(_place_handle)
 	page.add_child(handle)
 	add_child(page)
@@ -642,12 +643,11 @@ func _snaps() -> Array[float]:
 	return out
 
 
-## The phone's width while shown: the snap nearest the look's share, the widest by default.
+## The phone's width while shown: the snap nearest the look's share, by default a half.
 func _phone_width() -> float:
 	var snaps := _snaps()
-	var want: float = ThemeManager.home_split * _rect_beside_status().size.x
-	if ThemeManager.home_split <= 0.0:
-		return snaps.back()
+	var share: float = ThemeManager.home_split if ThemeManager.home_split > 0.0 else 0.5
+	var want: float = share * _rect_beside_status().size.x
 	var best: float = snaps[0]
 	for s in snaps:
 		if absf(s - want) < absf(best - want):
@@ -737,6 +737,14 @@ func _on_handle_release() -> void:
 	if best > 0.0:
 		look.home_split = best / full
 	ThemeManager.set_look(look)
+	ThemeManager.save_look()
+
+
+## A double tap: the phone back at the default width, from any width or hidden.
+func _on_handle_reset() -> void:
+	if not has_phone():
+		return
+	ThemeManager.set_look({home_phone = true, home_split = 0.0})
 	ThemeManager.save_look()
 
 

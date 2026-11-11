@@ -48,7 +48,7 @@ steps:
       var img: Image = runner._vp.get_texture().get_image()
       # The stream's grid edges at their panel pixels (the stream's row 180 is the panel's 0).
       var dark := func(x, y): return img.get_pixel(x, y).get_luminance() < 0.4
-      for c in [[1000, 203, true], [1000, 204, false], [1023, 300, true], [1024, 300, false]]:
+      for c in [[870, 203, true], [870, 204, false], [895, 300, true], [896, 300, false]]:
           if dark.call(c[0], c[1]) != c[2]:
               return "(%d, %d) is %s" % [c[0], c[1], img.get_pixel(c[0], c[1])]
       Core.fake_clear()

@@ -9,6 +9,10 @@ extends Control
 signal dragged(dx: float)
 ## The drag ended.
 signal released
+## Tapped twice in quick succession, near where the first landed.
+signal reset
+
+const DOUBLE_TAP_S := 0.4
 
 ## The pill drawn (a scene theme's slab follows it).
 var pill: Pill
@@ -16,6 +20,9 @@ var pill: Pill
 var _press := Vector2.INF
 var _dragging := false
 var _nudge: Tween
+## The last tap's place and age, for a double tap: frame time, as tests run frames unthrottled.
+var _tapped := Vector2.INF
+var _since_tap := 0.0
 ## With touch emulating the mouse, touches also arrive as mouse events: take only those.
 var _mouse_only: bool = ProjectSettings.get_setting("input_devices/pointing/emulate_mouse_from_touch", true)
 
@@ -61,7 +68,12 @@ func _gui_input(event: InputEvent) -> void:
 			if _dragging:
 				_dragging = false
 				released.emit()
+			elif _tapped != Vector2.INF and _since_tap <= DOUBLE_TAP_S and at.distance_to(_tapped) <= ThemeManager.px.touch_gap:
+				_tapped = Vector2.INF
+				reset.emit()
 			else:
+				_tapped = at
+				_since_tap = 0.0
 				_hint()
 		return
 	if _press == Vector2.INF:
@@ -70,7 +82,12 @@ func _gui_input(event: InputEvent) -> void:
 	if not _dragging and (absf(d.x) < ThemeManager.px.touch_gap or absf(d.x) < absf(d.y)):
 		return
 	_dragging = true
+	_tapped = Vector2.INF
 	dragged.emit(d.x)
+
+
+func _process(delta: float) -> void:
+	_since_tap += delta
 
 
 ## A tap: the pill sways sideways and back, it is dragged, not pressed. Still under reduced motion.

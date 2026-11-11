@@ -77,7 +77,9 @@ func _fit_crop(force := false) -> void:
 	_cropped_size = _raw.get_size()
 	var visible_area := projection_crop(_cropped_size, _projection_screen())
 	_region = _shown_region()
-	_crop.region = Rect2(visible_area.position + _region.position * visible_area.size, _region.size * visible_area.size)
+	# Whole pixels: AtlasTexture's size truncates, so 911.9999 would be a pixel short.
+	var from := (visible_area.position + _region.position * visible_area.size).round()
+	_crop.region = Rect2(from, (visible_area.position + _region.end * visible_area.size).round() - from)
 
 
 ## The core's projection screen size, which its crop and touch mapping use; else the panel's.

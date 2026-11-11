@@ -99,6 +99,11 @@ func _style() -> void:
 		# Touch leaves the last button "hovered": hover looks like rest, or two items look picked.
 		b.add_theme_stylebox_override("hover", b.get_theme_stylebox("normal"))
 		b.add_theme_stylebox_override("hover_pressed", b.get_theme_stylebox("pressed"))
+	# Square: the style's padding around the icon makes them wider than touch.
+	for item in ITEMS:
+		var b: Button = _buttons[item[0]]
+		var w := ceilf(b.get_combined_minimum_size().x)
+		b.custom_minimum_size = Vector2(w, w)
 	(get_child(0) as VBoxContainer).add_theme_constant_override("separation", roundi(maxf(g * 0.5, ThemeManager.px.touch_gap)))
 	var left := ThemeManager.hand != "rhd"
 	# The status bar's look, its rule on the edge that meets the page.

@@ -334,6 +334,13 @@ impl Server {
         }
     }
 
+    /// The PID of the window's client, from the socket's credentials.
+    pub fn window_pid(&self, window: u64) -> Option<i32> {
+        let w = self.state.windows.iter().find(|w| w.id == window)?;
+        let client = w.toplevel.wl_surface().client()?;
+        client.get_credentials(&self.display.handle()).ok().map(|c| c.pid)
+    }
+
     fn time(&self) -> u32 {
         self.started.elapsed().as_millis() as u32
     }

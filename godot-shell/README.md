@@ -35,9 +35,10 @@ Scenario fixtures: `core` (a partial state) and `clients`: `{ role: app, app_id,
 grid|bars, size: WxH, animate: N, buffer: shm|dmabuf|nv12|i420, video: true, events: true }` runs the test client
 (`events` logs the input it gets, for `expect_client`; `video` sends the picture as waylandsink does, a
 viewporter-scaled subsurface under a placeholder toplevel), `{ role: command, run: [...] }` any
-Wayland program.
+Wayland program. `apps: <dir under tests/>` is the launcher's only data dir, with its `apps.yaml`
+(see "App launcher").
 
-Steps: `page: home | ev | ev_live | app | projection | <pack screen>` (see "Electric vehicle page"), `compare_reference` (below), `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`
+Steps: `page: home | ev | ev_live | app | apps | projection | <pack screen>` (see "Electric vehicle page"), `compare_reference` (below), `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`
 for a finger), `key`, `expect_client: { app_id, lines: [...] }`,
 `theme: { theme_name, appearance, hand, near, text_scale, material, reduced_motion, quality, ev_page }`,
 `set: { core: {...} }`, `expect_action`, `expect_input`, `expect_node: { path, <property>:
@@ -232,6 +233,33 @@ as the stock UI does: opening the projection page (or `app` with a projection wi
 (Android Auto's own exit, or the end of the phone's ask) leaves it for the page before. A core
 `OpenPage` of `/projection` (or `/`) opens it too; other paths are logged, as the shell has no
 such pages.
+
+## App launcher
+
+`page: apps` (the rail's grid) lists what the unit can run and starts it as a client of the
+shell's compositor; its window opens on the `app` page, in front. The running windows sit in a
+strip by the title: a tap brings one forward, its × asks it to close (`xdg_toplevel.close`, then
+SIGTERM and SIGKILL to the app's process group, 3 s apart). A running app's tile shows its window
+rather than starting another. Projection video (`livi-video*`) is not listed.
+
+- **Desktop entries** from the XDG data dirs (`LIVI_SHELL_APPS_DIRS` replaces them): `NoDisplay`,
+  `Hidden`, `OnlyShowIn`/`NotShowIn` (the shell is `LIVI`), `TryExec`, `X-LIVI-Hidden`; terminal
+  apps are left out. Icons from `hicolor` (SVG, else the PNG nearest above 128 px), then `pixmaps`;
+  none is a monogram tile.
+- **Waydroid's apps** (`waydroid app list`, read in the background while its session runs).
+  Waydroid also writes desktop entries, by the same IDs (`waydroid.<package>`), which win.
+- **`~/.config/livi-shell/apps.yaml`** (`LIVI_SHELL_APPS` replaces it):
+  `order: [id, ...]` first, the rest by name; `waydroid: false`; and per ID
+  `apps: { <id>: { name, icon, exec, app_id, hidden, timeout_s } }`, where an ID nothing provides
+  and an `exec` (desktop `Exec` syntax) adds a command.
+
+Apps start in Rust (`AppCatalog`), each in its own process group, with `WAYLAND_DISPLAY` set to
+the shell's socket, `DISPLAY` unset and the toolkits told to use Wayland; output goes to
+`~/.local/state/livi-shell/apps/<id>.log` (`LIVI_SHELL_APP_LOGS`). A window is the launch's when
+its app_id is the entry's ID, `StartupWMClass` or apps.yaml `app_id`, or its client is in the
+launch's process group; failing that, the only launch waiting takes it. A launch that exits
+non-zero or shows no window in 20 s (Waydroid: 90 s) is marked on its tile. XWayland is not served,
+so X11-only apps don't show.
 
 ## Settings
 

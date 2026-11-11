@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Hidden
+Exec=livi-shell-test-client --app-id hidden
+NoDisplay=true

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Grid pattern
+Name[de]=Gittermuster
+Comment=The test client's grid, matched by its app_id (the desktop file ID)
+Exec=livi-shell-test-client --app-id org.livi.test.grid --pattern grid --size 640x360 --title %c %U
+Icon=org.livi.test.grid

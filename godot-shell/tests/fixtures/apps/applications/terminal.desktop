@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal app
+Exec=livi-shell-test-client --app-id terminal
+Terminal=true

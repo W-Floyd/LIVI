@@ -1,13 +1,13 @@
 class_name NavRail
 extends PanelContainer
 ## A short menu on the left edge, over whatever page is open, that jumps between pages: home, the
-## electric vehicle page, the phone's window, and the phone's picture alone on the panel, where
-## the rail hides (the page has its own way back). Not part of any theme's layout; a unit turns
-## it on with LIVI_SHELL_NAV until the shell has its real navigation.
+## electric vehicle page, the app launcher, the phone's window, and the phone's picture alone on
+## the panel, where the rail hides (the page has its own way back). Not part of any theme's
+## layout; a unit turns it on with LIVI_SHELL_NAV until the shell has its real navigation.
 
 signal selected(page: String)
 
-const ITEMS := [["home", "Home", "home"], ["ev", "EV", "bolt"], ["app", "Phone", "phone"], ["projection", "Full", "expand"], ["settings", "Settings", "gear"]]
+const ITEMS := [["home", "Home", "home"], ["ev", "EV", "bolt"], ["apps", "Apps", "grid"], ["app", "Phone", "phone"], ["projection", "Full", "expand"], ["settings", "Settings", "gear"]]
 
 var _buttons := {}
 

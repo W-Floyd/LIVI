@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Not on LIVI
+Exec=livi-shell-test-client --app-id not-livi
+NotShowIn=LIVI;

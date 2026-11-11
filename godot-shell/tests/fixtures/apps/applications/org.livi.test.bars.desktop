@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Colour bars
+Comment=Matched by StartupWMClass: its app_id is not its desktop file ID
+Exec=livi-shell-test-client --app-id bars-window --pattern bars --size 640x360
+Icon=org.livi.test.bars
+StartupWMClass=bars-window

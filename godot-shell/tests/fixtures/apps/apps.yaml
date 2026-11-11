@@ -1,0 +1,10 @@
+# The shell's apps file for the launcher scenarios: Grid first, the rest by name.
+waydroid: false
+order: [org.livi.test.grid]
+apps:
+  zeta: { name: Zeta renamed }
+  hideme: { hidden: true }
+  org.livi.test.extra:
+    name: Extra command
+    exec: livi-shell-test-client --app-id org.livi.test.extra
+    icon: livi-extra

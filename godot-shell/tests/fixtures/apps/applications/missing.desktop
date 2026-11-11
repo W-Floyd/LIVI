@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Not installed
+TryExec=/nonexistent/livi-test
+Exec=/nonexistent/livi-test

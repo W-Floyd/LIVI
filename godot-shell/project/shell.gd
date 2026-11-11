@@ -47,6 +47,8 @@ var _settings_from := "home"
 var _back: BackTab
 ## The core's `/front/main` last seen: the phone's video focus.
 var _front := ""
+## Lists and starts apps, and knows which hosted window is whose (the "apps" page).
+var launcher: Launcher
 
 
 func _init() -> void:
@@ -86,6 +88,9 @@ func _init() -> void:
 	body.add_child(side)
 	page.add_child(body)
 	add_child(page)
+	launcher = Launcher.new()
+	launcher.name = "Launcher"
+	add_child(launcher)
 	_back = BackTab.new()
 	_back.visible = false
 	_back.pressed.connect(func(): open_page(_return_to))
@@ -103,6 +108,7 @@ func _ready() -> void:
 	_player.control.connect(func(c): Core.act({kind = "media", control = c}))
 	Wayland.window_mapped.connect(func(id, app_id, title): print("window %d mapped: app_id \"%s\" title \"%s\"" % [id, app_id, title]); _windows.append(id); _app_ids[id] = app_id; _show_app())
 	Wayland.window_unmapped.connect(func(id): _windows.erase(id); _app_ids.erase(id); _show_app())
+	launcher.show_window.connect(bring_forward)
 	_style()
 	_refresh()
 
@@ -151,8 +157,8 @@ func _style() -> void:
 ## "home"; a screen of the theme's pack, which replaces the home page until "home" again
 ## (`ev_main`, the pack's image page); `ev_live`, the Godot-rendered "Electric vehicle" page,
 ## which every theme has; `ev`, whichever of the two the theme and the look choose
-## (`ThemeManager.ev_page_kind`); `app`; or `projection`, the phone's picture alone on the panel.
-## An error message when there is no such page.
+## (`ThemeManager.ev_page_kind`); `app`; `apps`, the launcher; or `projection`, the phone's
+## picture alone on the panel. An error message when there is no such page.
 func open_page(page: String) -> String:
 	if page == "ev":
 		page = "ev_live" if ThemeManager.ev_page_kind() == "live" else "ev_main"
@@ -161,7 +167,7 @@ func open_page(page: String) -> String:
 			return "ev_live needs an electric car"
 	elif page == "settings":
 		pass
-	elif page not in ["home", "app", "projection"] and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
+	elif page not in ["home", "app", "apps", "projection"] and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
 		return "theme %s has no page %s" % [ThemeManager.theme_name, page]
 	if _page:
 		remove_child(_page)
@@ -179,7 +185,7 @@ func open_page(page: String) -> String:
 	var own_bar := live and _own_bar()
 	_live_bar = own_bar
 	# The live page keeps the status bar unless its pack draws its own title bar.
-	$Page.visible = home or (live and not own_bar)
+	$Page.visible = home or page == "apps" or (live and not own_bar)
 	_body.visible = home
 	_projection.visible = home or _app_page
 	if _app_page:
@@ -200,6 +206,12 @@ func open_page(page: String) -> String:
 		$Page.visible = true
 		_page = settings
 		add_child(_page)
+	elif page == "apps":
+		var apps := AppsPage.new()
+		apps.launcher = launcher
+		apps.top_inset = _status.get_combined_minimum_size().y
+		_page = apps
+		add_child(_page)
 	elif not home and not _app_page:
 		_page = PackScreen.new()
 		_page.screen_name = page
@@ -212,6 +224,15 @@ func open_page(page: String) -> String:
 	queue_redraw()
 	page_changed.emit(page)
 	return ""
+
+
+## Shows a hosted window on the app page, in front of the others.
+func bring_forward(id: int) -> void:
+	if not _windows.has(id):
+		return
+	_windows.erase(id)
+	_windows.append(id)
+	open_page("app")
 
 
 ## Whether the phone's picture is what the page shows.
@@ -300,7 +321,9 @@ func _fit() -> void:
 
 
 func _show_app() -> void:
-	var shown: Array = _windows.filter(_is_projection) if _projection_page else Array(_windows)
+	# Home's slot is the phone's while there is a phone: a launched app is the app page's.
+	var phone := _projection_page or (_page_name == "home" and _windows.any(_is_projection))
+	var shown: Array = _windows.filter(_is_projection) if phone else Array(_windows)
 	var id: int = shown[-1] if not shown.is_empty() else -1
 	_projection.show_window(id, id >= 0 and _is_projection(id))
 

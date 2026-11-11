@@ -1,5 +1,7 @@
 //! The Godot shell's extension: the link to livi-core, and the test harness's native half.
 
+pub mod apps;
+mod apps_node;
 #[cfg(target_os = "linux")]
 pub mod compositor;
 pub mod fake_core;

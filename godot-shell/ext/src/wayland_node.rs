@@ -376,6 +376,12 @@ impl WaylandCompositor {
         }
     }
 
+    /// The PID of the window's client, or -1.
+    #[func]
+    fn window_pid(&self, id: i64) -> i64 {
+        self.server.as_ref().and_then(|s| s.window_pid(id as u64)).map_or(-1, |p| p as i64)
+    }
+
     /// The newest mapped window with this app_id, or -1.
     #[func]
     fn find_window(&self, app_id: GString) -> i64 {

@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=GNOME only
+Exec=livi-shell-test-client --app-id gnome-only
+OnlyShowIn=GNOME;

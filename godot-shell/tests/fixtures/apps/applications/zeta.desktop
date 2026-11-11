@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Zeta
+Comment=No such icon: a monogram tile; renamed in apps.yaml
+Exec=livi-shell-test-client --app-id zeta
+Icon=no-such-icon

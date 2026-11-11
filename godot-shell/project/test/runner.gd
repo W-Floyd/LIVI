@@ -49,6 +49,8 @@ func run(args: PackedStringArray) -> void:
 	_client_bin = OS.get_environment("SHELL_TEST_CLIENT")
 	if _client_bin == "":
 		_client_bin = root.path_join("ext/target/release/livi-shell-test-client")
+	# Desktop entries in fixtures run the client by name.
+	OS.set_environment("PATH", _client_bin.get_base_dir() + ":" + OS.get_environment("PATH"))
 	var err: String = Wayland.listen(SOCKET)
 	if err != "":
 		_fail("", "", "compositor: %s" % err)
@@ -110,11 +112,22 @@ func _run_one(path: String) -> String:
 		print("skipped: no car.mesh")
 		_rows.append({scenario = _scenario, shot = "", status = "skipped", msg = "no car.mesh"})
 		return ""
+	# The launcher lists only the fixture's apps (and its apps.yaml), and never Waydroid's.
+	if fixtures.has("apps"):
+		var apps := _tests.path_join(fixtures.apps)
+		OS.set_environment("LIVI_SHELL_APPS_DIRS", apps)
+		OS.set_environment("LIVI_SHELL_APPS", apps.path_join("apps.yaml"))
+		OS.set_environment("LIVI_SHELL_APP_LOGS", _out.path_join(_scenario))
+	else:
+		for k in ["LIVI_SHELL_APPS_DIRS", "LIVI_SHELL_APPS", "LIVI_SHELL_APP_LOGS"]:
+			OS.unset_environment(k)
 	var state = {}
 	if fixtures.has("core"):
 		state = JSON.parse_string(FileAccess.get_file_as_string(_tests.path_join(fixtures.core)))
 		if state == null:
 			return "fixture %s does not parse" % fixtures.core
+	# Counts from an earlier scenario's windows would pass for this one's.
+	Wayland.reset_stats()
 	var err: String = Core.start_fake(state)
 	if err != "":
 		return "fake core: %s" % err
@@ -196,6 +209,8 @@ func _teardown() -> void:
 	for pid in _clients:
 		OS.kill(pid)
 	_clients.clear()
+	if _shell:
+		_shell.launcher.stop_all()
 	var until := Time.get_ticks_msec() + WINDOW_TIMEOUT_MS
 	while Wayland.window_count() > 0 and Time.get_ticks_msec() < until:
 		await _frames(1)

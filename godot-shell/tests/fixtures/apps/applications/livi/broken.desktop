@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Broken
+Comment=Exits at once with a failure: the launcher reports it. Its ID is livi-broken (a subfolder).
+Exec=false

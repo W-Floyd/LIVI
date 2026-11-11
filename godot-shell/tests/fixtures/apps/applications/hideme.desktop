@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=Hidden by apps.yaml
+Exec=livi-shell-test-client --app-id hideme

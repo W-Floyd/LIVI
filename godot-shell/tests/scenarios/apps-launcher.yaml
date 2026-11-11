@@ -1,0 +1,77 @@
+name: apps-launcher
+# The launcher lists the fixture's desktop entries and apps.yaml (tests/fixtures/apps); a tap
+# starts an app on the shell's compositor and opens the app page on its window. The running
+# strip brings a window forward and closes it; a running app's tile shows its window instead of
+# starting another; a launch that fails is reported on its tile.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  apps: fixtures/apps
+steps:
+  - theme: { appearance: day }
+  - page: apps
+  - gdscript: |
+      var ids = shell.launcher.apps.map(func(a): return a.id)
+      var want = ["org.livi.test.grid", "livi-broken", "org.livi.test.bars", "org.livi.test.extra", "zeta"]
+      if ids != want:
+          return "apps %s, want %s" % [ids, want]
+  - expect_node: { path: Apps/Scroll/Grid/zeta/Name, text: Zeta renamed }
+  - screenshot: apps-day
+  # Matched by app_id, the desktop file ID.
+  - tap: { node: Apps/Scroll/Grid/org_livi_test_grid }
+  - wait: { window: org.livi.test.grid }
+  - wait: { frames: 2 }
+  - gdscript: &front_grid |
+      var w = Wayland.find_window("org.livi.test.grid")
+      if shell._page_name != "app" or shell._projection.window.window_id != w:
+          return "page %s shows %d, want app showing %d" % [shell._page_name, shell._projection.window.window_id, w]
+  # Matched by StartupWMClass.
+  - page: apps
+  - tap: { node: Apps/Scroll/Grid/org_livi_test_bars }
+  - wait: { window: bars-window }
+  - wait: { frames: 2 }
+  - gdscript: |
+      var w = Wayland.find_window("bars-window")
+      if shell._page_name != "app" or shell._projection.window.window_id != w:
+          return "page %s shows %d, want app showing %d" % [shell._page_name, shell._projection.window.window_id, w]
+      if shell.launcher.state("org.livi.test.bars") != "running":
+          return "bars is %s" % shell.launcher.state("org.livi.test.bars")
+  - page: apps
+  - screenshot: apps-running
+  # The switcher brings Grid forward.
+  - tap: { node: Apps/Running/org_livi_test_grid }
+  - wait: { frames: 2 }
+  - gdscript: *front_grid
+  # A running app's tile shows its window: no second instance.
+  - page: apps
+  - tap: { node: Apps/Scroll/Grid/org_livi_test_grid }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if Wayland.window_count() != 2:
+          return "%d windows" % Wayland.window_count()
+  - gdscript: *front_grid
+  # Close from the switcher: xdg_toplevel.close, which the client obeys.
+  - page: apps
+  - tap: { node: Apps/Running/org_livi_test_grid/Close }
+  - gdscript: |
+      var until = Time.get_ticks_msec() + 5000
+      while Wayland.find_window("org.livi.test.grid") >= 0 and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+      if Wayland.find_window("org.livi.test.grid") >= 0:
+          return "grid did not close"
+      await runner.frames(2)
+      var names = shell.launcher.running().map(func(r): return r.name)
+      if names != ["Colour bars"]:
+          return "running %s" % names
+  # Exits at once with status 1.
+  - tap: { node: Apps/Scroll/Grid/livi-broken }
+  - gdscript: |
+      var until = Time.get_ticks_msec() + 5000
+      while shell.launcher.state("livi-broken") != "failed" and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+      if shell.launcher.state("livi-broken") != "failed":
+          return "broken is %s" % shell.launcher.state("livi-broken")
+      await runner.frames(2)
+  - expect_node: { path: Apps/Scroll/Grid/livi-broken/Name, text: "Couldn't start" }
+  - theme: { appearance: night }
+  - screenshot: apps-night

@@ -38,6 +38,7 @@
 //! | volume                              | ✓    | ·            | ·               | ✓             |
 //! | fuelPct                             | ✓    | ✓            | ✓ (warning, %)  | ✓             |
 //! | rangeKm                             | ✓    | ✓            | ✓               | ✓             |
+//! | rangeClimateOffKm                   | ✓    | ·            | ·               | ·             |
 //! | rangeFuelKm, rangeElectricKm        | ✓    | ·            | ✓ (hybrid)      | ✓ (hybrid)    |
 //! | fuelRateLph                         | ✓    | ·            | ·               | ·             |
 //! | consumption*                        | ✓    | ·            | ·               | ✓             |
@@ -114,6 +115,8 @@ pub struct TelemetrySnapshot {
     /// 0 to 100, for an electric car the state of charge.
     pub fuel_pct: Option<f64>,
     pub range_km: Option<f64>,
+    /// The car's range were the climate switched off, `rangeKm` being the range as it runs.
+    pub range_climate_off_km: Option<f64>,
     /// Hybrids only, the range on the tank.
     pub range_fuel_km: Option<f64>,
     /// Hybrids only, the range on the battery.
@@ -322,6 +325,7 @@ mod tests {
         let snapshot = TelemetrySnapshot {
             consumption_l_per100_km: Some(6.5),
             iat_c: Some(30.0),
+            range_climate_off_km: Some(251.0),
             turn_signal: Some(TurnSignal::Left),
             can: Some(CanFrame {
                 id: 1,
@@ -346,6 +350,7 @@ mod tests {
         let named = serde_json::to_value(&snapshot).unwrap();
         assert_eq!(named["consumptionLPer100Km"], 6.5);
         assert_eq!(named["iatC"], 30.0);
+        assert_eq!(named["rangeClimateOffKm"], 251.0);
         assert_eq!(named["turnSignal"], "left");
         assert_eq!(named["tirePressure"]["rearLeftKpa"], 230.0);
         assert_eq!(

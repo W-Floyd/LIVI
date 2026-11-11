@@ -42,9 +42,8 @@ around each figure is on that page.
 The real assets, from the EV6's own stock `/system`. These are the source a vendor pack is
 built from.
 
-- **Source:** `kia-ev6/data/new_system_package_ECOKMC.USA.1000.V015.012.260507.095425.tar`,
-  `enc_system/enc_system.ext4`, decrypted with the EV6 key in `kia-ev6/secrets`. The
-  decrypted image is `kia-ev6/scratch/ev6_fw/V015/system.ext4`.
+- **Source:** `new_system_package_ECOKMC.USA.1000.V015.012.260507.095425.tar`,
+  `enc_system/enc_system.ext4`, decrypted with the EV6 firmware key to `system.ext4`.
 - **Extracted with go-unbrick:**
 
   ```sh
@@ -52,7 +51,7 @@ built from.
     -o firmware-V015 system.ext4
   ```
 
-  go-unbrick can also take the encrypted package directly with `--secrets kia-ev6/secrets`.
+  go-unbrick can also take the encrypted package directly with `--secrets /path/to/secrets`.
 
 **Folders:**
 - `firmware-V015/`: 25,508 images from the apps below, as `<app>.apk/res/<drawable…>/<name>`;

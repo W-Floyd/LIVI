@@ -22,11 +22,11 @@ gitignored `godot-shell/ref/`).
 ## Reproduce
 
 ```sh
-W=/path/to/work; K=/path/to/kia-ev6
+W=/path/to/work
 export WORK=$W
 ./build-kernel.sh
-BOOT_IMG=$K/scratch/boot_decrypt/boot.img ./build-ramdisk.sh
-EMU=/path/to/gen5w-emulator SYSTEM_EXT4=$K/scratch/ev6_fw/V015/system.ext4 ./build-emmc.sh
+BOOT_IMG=/path/to/boot.img ./build-ramdisk.sh            # decrypted stock boot.img
+EMU=/path/to/gen5w-emulator SYSTEM_EXT4=/path/to/system.ext4 ./build-emmc.sh   # decrypted V015
 mkdir -p $W/tpl && cp -c $W/image/emmc.img $W/tpl/ && cp $W/zImage $W/ramdisk.cpio.gz $W/tpl/
 # in a copy of the emulator, with emulator-macos.patch applied (patch -p1):
 export EMUCTL_STATE=/tmp/g5w/state EMUCTL_IMAGES=/tmp/g5w/images   # short: unix socket path limit
@@ -37,7 +37,7 @@ emuctl build
 
 ## Why the kernel is 4.4, not the vendor 3.18.48
 
-The vendor tree in `kia-ev6/scratch/ev6_opensource` is a stripped release: no
+The vendor's open-source kernel tree is a stripped release: no
 `arch/arm/Kconfig`, no `mach-virt`, no Telechips code. It cannot be configured.
 Mainline 7.x has no `logger` or `alarm-dev`. The emulator requires modern
 virtio-mmio (`force-legacy=false`) and `virtio-input`, which 3.18 lacks, so the

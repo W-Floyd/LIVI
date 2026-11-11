@@ -20,9 +20,8 @@ Nothing Kia-derived is committed. The scripts read the firmware from local paths
 ## Run
 
 ```sh
-K=/path/to/kia-ev6/scratch
 ./build.sh                                              # ~15 min first time, incremental after
-./extract-boot.sh $K/boot_decrypt/boot.img $W/boot      # W: any dir outside the repo
+./extract-boot.sh /path/to/boot.img $W/boot   # decrypted stock boot.img; W: any dir outside the repo
 # eMMC: GPT with by-name partitions around the decrypted V015 system.ext4 (tools/gen5w-stock/build-emmc.sh)
 ./make-emmc.sh $W/image/emmc.img $W/emmc8g.img
 EMMC=$W/emmc8g.img BOOT_DIR=$W/boot TIMEOUT=100 ./run.sh

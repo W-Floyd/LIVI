@@ -3,7 +3,7 @@
 The unit is a Mobis DAudio Plus Gen5 Wide: Telechips TCC8031, Cortex-A53 in AArch32, so
 `armv7-unknown-linux-musleabihf` on postmarketOS (Alpine edge, musl, hard float; the interpreter
 is `/lib/ld-musl-armhf.so.1`). Its aports are in `pmaports-kia-ev6` (branch `2024-kia-ev6`,
-`device/testing/`), built by `nura-G5W-Android`'s container with pmbootstrap; the image runs
+`device/testing/`), built with pmbootstrap in a builder container; the image runs
 systemd (OpenRC units are shipped too).
 
 What the shell needs there:
@@ -63,16 +63,15 @@ package (the child needs binfmt or a real armv7 system, e.g. the gen5w QEMU gues
 `alpine/livi-core/APKBUILD` and `alpine/livi-shell/APKBUILD`, in the style of `livi-headunit`
 (`pmb:cross-native2`: the native chroot cross-compiles with rustup's toolchain, the armv7
 buildroot is the sysroot; Alpine's armv7 rust lags). The source is a `git archive` of this
-repository's HEAD, pinned and checksummed by `make-source.sh`, like nura's `aport.sh`:
+repository's HEAD, pinned and checksummed by `make-source.sh`:
 
 ```sh
 git commit ...                                # the tarball is of HEAD
 packaging/scripts/make-source.sh              # -> packaging/out/aports/{livi-core,livi-shell}/
-cp -r packaging/out/aports/* ~/.../pmaports-kia-ev6/device/testing/    # a host worktree
-./nura sync pmaports && ./nura pmb build --arch armv7 livi-core livi-shell
+cp -r packaging/out/aports/* /path/to/pmaports/device/testing/    # the builder's pmaports tree
+pmbootstrap build --arch armv7 livi-core livi-shell                # in the builder container
 ```
 
-(`./nura pmb` commits nothing; the pmaports worktree has to have them committed for `sync`.)
 `livi-core` installs beside `livi-headunit`, under `/usr/lib/livi-core`. `livi-shell` installs
 the project (with `.godot/`) and the extension at `/usr/lib/livi-shell/project`, where
 `livi_shell.gdextension` finds `res://bin/linux-arm32/liblivi_godot_shell.so`;
@@ -96,7 +95,7 @@ switches.
 Status: the APKBUILDs' `package()` and subpackages are checked by `apk-armv7.sh` (abuild,
 prebuilt binaries); the from-source pmbootstrap build, which fetches a Rust toolchain and ~600
 crates and imports the project with the native chroot's `godot`, has not been run (it needs the
-nura container's pmaports worktree).
+builder container's pmaports tree).
 
 ## Engine
 
@@ -125,7 +124,7 @@ is below, untested here (a full armv7 engine compile was not attempted: Alpine's
 the need, and it is hours on this machine).
 
 ```sh
-# in the nura container, or any Linux with an armv7 musl sysroot and clang or gcc cross
+# in the builder container, or any Linux with an armv7 musl sysroot and clang or gcc cross
 scons platform=linuxbsd arch=arm32 target=template_release production=yes \
     disable_path_overrides=no lto=none use_static_cpp=no \
     vulkan=no x11=no wayland=yes opengl3=yes \
@@ -150,4 +149,4 @@ scons platform=linuxbsd arch=arm32 target=template_release production=yes \
   socket is not under the units' `XDG_RUNTIME_DIR=/run/livi-shell`, and mobis-g5w-amp is a
   user unit that needs a user session (GNOME's, under stock).
 - The user (`user`), `seat`/`video`/`input`/`render` groups, and whether GNOME's gdm has to be
-  stopped (the unit `Conflicts=` it) are the nura image's.
+  stopped (the unit `Conflicts=` it) are the unit image's.

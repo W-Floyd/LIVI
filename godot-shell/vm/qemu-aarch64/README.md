@@ -2,8 +2,8 @@
 
 A Linux dev VM on the Mac for the Godot shell: postmarketOS edge
 (`qemu-aarch64`, `linux-postmarketos-stable`), GNOME on Wayland, Mesa llvmpipe,
-Rust, clang, Godot 4 and weston. The pmaports tree is nura's fork, so the OS
-calls itself "Nura edge".
+Rust, clang, Godot 4 and weston. The pmaports tree is a fork, so the OS may
+call itself by the fork's name.
 
 ## Use
 
@@ -70,8 +70,9 @@ Screenshot, any mode: `echo "screendump $PWD/s.ppm" | nc -U monitor.sock`.
 ./build.sh      # about 1 min with a warm cache; refuses if pmos.qcow2 exists
 ```
 
-The image is built with pmbootstrap in nura's builder container
-(`NURA_DIR`: a nura-G5W-Android checkout, from the environment or `godot-shell/.env`; see `.env.example`).
+The image is built with pmbootstrap in a builder container
+(`PMB_EXEC`: a command that runs its arguments in that container, from the environment or
+`godot-shell/.env`; see `.env.example`).
 It uses its own config (`pmbootstrap.cfg`, copied into the container as
 `~/.config/pmbootstrap-qemu-aarch64.cfg`) and its own rootfs
 (`chroot_rootfs_qemu-aarch64`). The head unit's config, rootfs and packages

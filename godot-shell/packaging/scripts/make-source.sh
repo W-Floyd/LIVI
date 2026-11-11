@@ -1,10 +1,10 @@
 #!/bin/sh
-# Stage the APKBUILDs for pmbootstrap, as nura's aport.sh does for the others: the source is a
+# Stage the APKBUILDs for pmbootstrap: the source is a
 # `git archive` of this repository's HEAD (so unpushed commits build), pinned in the APKBUILD,
 # with its checksums. The repository's APKBUILDs stay unpinned; the staged copies are for the
 # build only.
 #   packaging/scripts/make-source.sh [pkg...]   -> packaging/out/aports/<pkg>/   (default: both)
-# Then copy packaging/out/aports/* to pmaports-kia-ev6/device/testing/ and
+# Then copy packaging/out/aports/* to the pmaports tree's device/testing/ and
 # `pmbootstrap checksum`/`build --arch armv7 livi-core livi-shell`.
 set -eu
 gs=$(cd "$(dirname "$0")/../.." && pwd)

@@ -9,7 +9,7 @@ built locally and never committed or redistributed. Only this tool is in the rep
 ```sh
 tools/import-vendor/import-vendor --model ev6 \
   --ota new_system_package_ECOKMC.USA.1000.V015.012.260507.095425.tar \
-  --secrets kia-ev6/secrets
+  --secrets /path/to/secrets
 ```
 
 - `--ota`, `--secrets`: the stock OTA package and a folder of firmware keys. Only the model's

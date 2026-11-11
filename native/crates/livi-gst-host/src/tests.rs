@@ -2174,6 +2174,37 @@ mod mend_tests {
     }
 
     #[test]
+    fn a_plane_that_never_holds_waits_for_the_display_to_change() {
+        let give_up = crate::mend::GIVE_UP_AFTER as usize;
+        for refuse in [false, true] {
+            let mut f = Fixture::playing(1);
+            let mut at = Instant::now();
+            for _ in 0..3 * give_up {
+                if let Some(p) = f.world.0.borrow().planes.last() {
+                    p.0.borrow_mut().failed = true;
+                }
+                f.world.0.borrow_mut().refuse_plane = refuse;
+                f.host.mend_planes(at);
+                at += Duration::from_secs(29);
+            }
+            assert_eq!(
+                f.planes(),
+                1 + give_up * usize::from(!refuse),
+                "refuse {refuse}"
+            );
+
+            f.world.0.borrow_mut().refuse_plane = false;
+            f.world.0.borrow_mut().display = 2;
+            f.host.mend_planes(at);
+            assert_eq!(
+                f.planes(),
+                2 + give_up * usize::from(!refuse),
+                "refuse {refuse}"
+            );
+        }
+    }
+
+    #[test]
     fn a_stopped_or_replaced_plane_is_not_mended() {
         for (op, body) in [
             (OP_STOP, vec![]),

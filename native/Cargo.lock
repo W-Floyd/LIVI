@@ -4329,6 +4329,7 @@ dependencies = [
  "gstreamer-app",
  "gstreamer-base",
  "gstreamer-video",
+ "libc 1.0.0-alpha.5",
  "livi-host-proto",
  "livi-video",
 ]

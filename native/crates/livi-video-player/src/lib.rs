@@ -13,6 +13,8 @@ use std::sync::{Arc, Once};
 #[cfg(target_os = "android")]
 mod android_view;
 mod camera;
+#[cfg(all(test, target_os = "linux"))]
+mod display_restart_tests;
 mod url_player;
 #[cfg_attr(
     all(target_os = "macos", feature = "window-view"),
@@ -27,6 +29,8 @@ mod url_player;
     path = "view/none.rs"
 )]
 mod view;
+#[cfg(all(target_os = "linux", not(target_os = "android")))]
+mod wayland_relay;
 #[cfg(target_os = "android")]
 pub use android_view::{Views, set_surface, set_views};
 pub use camera::{CameraPlayer, direction, watch_cameras};
@@ -243,6 +247,9 @@ pub struct Player {
     glshader: Option<gst::Element>,
     view: WindowView,
     failed: Arc<AtomicBool>,
+    // After the pipeline: it goes once the sink has let go of the display.
+    #[cfg(all(target_os = "linux", not(target_os = "android")))]
+    _relay: Option<wayland_relay::Relay>,
 }
 
 impl Player {
@@ -288,6 +295,10 @@ impl Player {
             view: WindowView::new(),
             appsrc,
             failed: log_bus_messages(&pipeline),
+            #[cfg(all(target_os = "linux", not(target_os = "android")))]
+            _relay: pipeline
+                .by_name("sink")
+                .and_then(|sink| wayland_relay::Relay::front(&sink)),
             pipeline,
         };
 

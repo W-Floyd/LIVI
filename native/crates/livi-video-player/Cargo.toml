@@ -14,6 +14,9 @@ gstreamer-app = { workspace = true, features = ["v1_24"] }
 gstreamer-base = { version = "0.25", features = ["v1_24"] }
 livi-host-proto.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 gstreamer-video = { version = "0.25", features = ["v1_24"], optional = true }
 

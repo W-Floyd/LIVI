@@ -47,6 +47,10 @@ func run(args: PackedStringArray) -> void:
 			target = _resolve(a)
 			break
 	_client_bin = OS.get_environment("SHELL_TEST_CLIENT")
+	# build-ext.sh leaves it beside the extension, this copy's own (target/ may be shared).
+	for c in ["project/bin/linux-arm64", "project/bin/linux-x86_64", "ext/target/release"]:
+		if _client_bin == "" and FileAccess.file_exists(root.path_join(c).path_join("livi-shell-test-client")):
+			_client_bin = root.path_join(c).path_join("livi-shell-test-client")
 	if _client_bin == "":
 		_client_bin = root.path_join("ext/target/release/livi-shell-test-client")
 	# Desktop entries in fixtures run the client by name.

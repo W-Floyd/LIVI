@@ -454,6 +454,14 @@ impl WaylandCompositor {
         }
     }
 
+    /// Closes the window's popups (menus, popovers), or every window's for -1.
+    #[func]
+    fn dismiss_popups(&mut self, id: i64) {
+        if let Some(s) = self.server.as_mut() {
+            s.state.dismiss_popups((id >= 0).then_some(id as u64));
+        }
+    }
+
     /// Scales the window's client now, all its windows.
     #[func]
     fn set_window_scale(&mut self, id: i64, scale: f64) {

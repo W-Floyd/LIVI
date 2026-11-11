@@ -1,0 +1,42 @@
+name: app-popup
+# An app's menu: a tap opens the test client's grabbing popup (bars, 160×96) below and right of
+# it, drawn over the window. Leaving the app page closes it; so does a tap outside it, which the
+# window never gets.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: org.livi.test.popup, size: 640x360, events: true, popup: true }
+steps:
+  - wait: { window: org.livi.test.popup }
+  - page: app
+  - tap: { node: Projection/Window, with: touch }
+  - expect_client: { app_id: org.livi.test.popup, lines: ["touch down 0 320.0 180.0", "popup configure 321 181 160 96"] }
+  - gdscript: &menu_shown |
+      var w = Wayland.find_window("org.livi.test.popup")
+      for i in 60:
+          var img = RenderingServer.texture_2d_get(Wayland.texture(w).get_rid())
+          if img.get_pixel(401, 229).to_rgba32() == Color8(255, 0, 255).to_rgba32():
+              return ""
+          await runner.frames(1)
+      return "no menu over the window"
+  - screenshot: { name: app-popup, compare: false }
+  - page: home
+  - expect_client: { app_id: org.livi.test.popup, lines: ["popup configure 321 181 160 96", "popup done"] }
+  - page: app
+  - tap: { node: Projection/Window, with: touch }
+  - expect_client: { app_id: org.livi.test.popup, lines: ["popup done", "touch down 0 320.0 180.0", "popup configure 321 181 160 96"] }
+  - gdscript: *menu_shown
+  # The window's centre is just outside the menu.
+  - tap: { node: Projection/Window, with: touch }
+  - expect_client: { app_id: org.livi.test.popup, lines: ["popup done", "touch down 0 320.0 180.0", "popup configure 321 181 160 96", "popup done"] }
+  - gdscript: |
+      var w = Wayland.find_window("org.livi.test.popup")
+      for i in 60:
+          var img = RenderingServer.texture_2d_get(Wayland.texture(w).get_rid())
+          if img.get_pixel(401, 229).to_rgba32() != Color8(255, 0, 255).to_rgba32():
+              break
+          await runner.frames(1)
+      var downs := Array(FileAccess.get_file_as_string(runner._client_events("org.livi.test.popup")).split("\n", false)).filter(func(l): return l.begins_with("touch down"))
+      if downs.size() != 2:
+          return "the window got %s" % [downs]

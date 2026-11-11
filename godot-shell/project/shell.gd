@@ -374,6 +374,9 @@ func open_page(page: String) -> String:
 		remove_child(_page)
 		_page.free()
 		_page = null
+	# An app's menus close as a tap outside them would.
+	if page != _page_name and Wayland.has_method("dismiss_popups"):
+		Wayland.dismiss_popups(-1)
 	if page == "projection" and _page_name != "projection":
 		_return_to = _page_name
 	if page == "settings" and _page_name != "settings":

@@ -32,7 +32,7 @@ use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, XkbConfig}
 use smithay::input::pointer::{ButtonEvent, MotionEvent as PointerMotion, PointerHandle};
 use smithay::input::touch::{DownEvent as TouchDown, MotionEvent as TouchMotion, TouchHandle, UpEvent as TouchUp};
 use smithay::input::{Seat, SeatHandler, SeatState};
-use smithay::utils::{Logical, Point, SERIAL_COUNTER, Transform};
+use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Transform};
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason, ObjectId};
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
@@ -49,8 +49,8 @@ use smithay::wayland::compositor::{
     with_states, with_surface_tree_downward,
 };
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-    XdgToplevelSurfaceData,
+    PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgPopupSurfaceData, XdgShellHandler,
+    XdgShellState, XdgToplevelSurfaceData,
 };
 use smithay::wayland::dmabuf::{
     DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier, get_dmabuf,
@@ -122,6 +122,10 @@ pub struct Window {
     shown: Option<WlBuffer>,
     /// The toplevel surface's own latest shm picture, under its subsurfaces.
     root_frame: Option<Frame>,
+    /// Or its own RGB dmabuf, the bottom layer once anything shows over it.
+    root_dma: Option<(u64, Dmabuf)>,
+    /// `frame` is laid out from layers, not the toplevel's own picture.
+    composited: bool,
     /// The canvas last handed out in a `Scene`, and the window size it was laid out for.
     canvas: Option<(u64, Arc<Frame>)>,
     canvas_size: (u32, u32),
@@ -188,6 +192,10 @@ pub struct State {
     release_next: Vec<WlBuffer>,
     release_now: Vec<WlBuffer>,
     pub text_input: TextInputs,
+    /// Popups that asked for a grab: a press outside every popup dismisses them all, and is not
+    /// passed on; nor is its pointer release.
+    grabbed: Vec<WlSurface>,
+    swallow_release: bool,
 }
 
 pub struct Server {
@@ -303,6 +311,8 @@ impl Server {
             release_next: Vec::new(),
             release_now: Vec::new(),
             text_input: TextInputs::default(),
+            grabbed: Vec::new(),
+            swallow_release: false,
         };
         dh.create_global::<State, ZwpTextInputManagerV3, _>(1, ());
         Ok(Server {
@@ -387,9 +397,11 @@ impl Server {
         }
         self.state.release_now = std::mem::take(&mut self.state.release_next);
         let ms = self.started.elapsed().as_millis() as u32;
-        for w in &self.state.windows {
+        let roots = self.state.windows.iter().map(|w| w.toplevel.wl_surface().clone());
+        let popups = self.state.xdg_shell.popup_surfaces().iter().map(|p| p.wl_surface().clone());
+        for root in roots.chain(popups).collect::<Vec<_>>() {
             with_surface_tree_downward(
-                w.toplevel.wl_surface(),
+                &root,
                 (),
                 |_, _, _| TraversalAction::DoChildren(()),
                 |_, states, _| {
@@ -426,12 +438,24 @@ impl Server {
         self.started.elapsed().as_millis() as u32
     }
 
-    /// The window's surface, its origin placed at (0, 0), and (x, y) in the window's frame as a
-    /// position on that surface.
+    /// The surface under (x, y) in the window's frame, the topmost popup or else the toplevel,
+    /// with its origin in toplevel units, and (x, y) in toplevel units.
     fn focus(&self, window: u64, x: f64, y: f64) -> Option<((WlSurface, Point<f64, Logical>), Point<f64, Logical>)> {
         let w = self.state.windows.iter().find(|w| w.id == window && w.mapped)?;
         let k = w.buffer_scale;
-        Some(((w.toplevel.wl_surface().clone(), (0.0, 0.0).into()), (x / k, y / k).into()))
+        let at: Point<f64, Logical> = (x / k, y / k).into();
+        let surface = self.state.popup_at(w.toplevel.wl_surface(), at);
+        let origin = surface.as_ref().map_or((0, 0).into(), popup_location).to_f64();
+        Some(((surface.unwrap_or_else(|| w.toplevel.wl_surface().clone()), origin), at))
+    }
+
+    /// A press while a popup holds a grab: outside every popup it dismisses them, and is eaten.
+    fn grab_eats(&mut self, on: Option<&WlSurface>) -> bool {
+        if self.state.grabbed.is_empty() || on.is_some_and(|s| popup_data(s).is_some()) {
+            return false;
+        }
+        self.state.dismiss_popups(None);
+        true
     }
 
     /// Moves the pointer to (x, y) in the window's frame, or out of every window with `None`.
@@ -449,6 +473,15 @@ impl Server {
 
     /// `button` is an evdev code: BTN_LEFT is 0x110.
     pub fn pointer_button(&mut self, button: u32, pressed: bool) {
+        if pressed {
+            let on = self.state.pointer.current_focus();
+            if self.grab_eats(on.as_ref()) {
+                self.state.swallow_release = true;
+                return;
+            }
+        } else if std::mem::take(&mut self.state.swallow_release) {
+            return;
+        }
         let state = if pressed { ButtonState::Pressed } else { ButtonState::Released };
         self.state.text_input.rearm |= pressed;
         let event = ButtonEvent { button, state, serial: SERIAL_COUNTER.next_serial(), time: self.time() };
@@ -459,6 +492,10 @@ impl Server {
 
     pub fn touch_down(&mut self, window: u64, slot: u32, x: f64, y: f64) {
         let Some((focus, location)) = self.focus(window, x, y) else { return };
+        // Eaten, the slot has no focus: its motion and up go nowhere.
+        if self.grab_eats(Some(&focus.0)) {
+            return;
+        }
         let event = TouchDown {
             slot: TouchSlot::from(Some(slot)),
             location,
@@ -617,6 +654,8 @@ impl CompositorHandler for State {
         while let Some(parent) = get_parent(&root) {
             root = parent;
         }
+        // A popup's surfaces are layers of its toplevel's window.
+        let root = toplevel_of(&root);
         if &root != surface {
             self.commit_layer(&root, surface);
             return;
@@ -665,6 +704,8 @@ impl CompositorHandler for State {
                         if let Some(old) = self.windows[i].shown.replace(buffer) {
                             self.release_next.push(old);
                         }
+                        self.windows[i].root_frame = None;
+                        self.windows[i].root_dma = Some((key, dmabuf.clone()));
                         Some(Content::Dmabuf { key, dmabuf })
                     }
                 } else {
@@ -678,6 +719,7 @@ impl CompositorHandler for State {
                         self.release_next.push(old.buffer);
                     }
                     let Some(frame) = frame else { return };
+                    self.windows[i].root_dma = None;
                     self.windows[i].root_frame = Some(frame.clone());
                     shm = true;
                     Some(Content::Pixels(frame))
@@ -709,9 +751,13 @@ impl CompositorHandler for State {
                 self.recomposite(i, shm);
             }
             Some(BufferAssignment::Removed) if self.windows[i].mapped => {
+                let id = self.windows[i].id;
+                self.dismiss_popups(Some(id));
                 let window = &mut self.windows[i];
                 window.mapped = false;
                 window.frame = None;
+                window.root_dma = None;
+                window.root_frame = None;
                 let id = window.id;
                 if let Some(old) = window.shown.take() {
                     self.release_next.push(old);
@@ -799,6 +845,18 @@ impl State {
         }
     }
 
+    /// A state request is answered with a configure (the protocol wants one), as the window is;
+    /// before the initial configure, the first commit sends that.
+    fn answer_state_request(&mut self, toplevel: &ToplevelSurface) {
+        let Some(w) = self.windows.iter().find(|w| &w.toplevel == toplevel) else { return };
+        if !toplevel.is_initial_configure_sent() {
+            return;
+        }
+        let size = self.window_size(w);
+        toplevel.with_pending_state(|st| st.size = Some(size.into()));
+        toplevel.send_configure();
+    }
+
     /// Where hosted apps show, in panel pixels; open windows are configured to it at once.
     pub fn set_app_area(&mut self, w: i32, h: i32) {
         let area = (w.clamp(1, PANEL_PX.0), h.clamp(1, PANEL_PX.1));
@@ -884,20 +942,26 @@ impl State {
     fn recomposite(&mut self, i: usize, shm_changed: bool) {
         let root = self.windows[i].toplevel.wl_surface().clone();
         let mut placed: Vec<(ObjectId, Point<i32, Logical>)> = Vec::new();
-        with_surface_tree_downward(
-            &root,
-            Point::<i32, Logical>::from((0, 0)),
-            |_, states, loc| {
-                let sub = states.cached_state.get::<SubsurfaceCachedState>().current().location;
-                TraversalAction::DoChildren(*loc + sub)
-            },
-            // The state passed down is the parent's: a surface's own offset is added here.
-            |surf, states, loc| {
-                let own = states.cached_state.get::<SubsurfaceCachedState>().current().location;
-                placed.push((surf.id(), *loc + own))
-            },
-            |_, _, _| true,
-        );
+        // The toplevel's tree, then each popup's above it, parents first.
+        let popups = self.popups_of(&root);
+        let trees = std::iter::once((root.clone(), (0, 0).into()))
+            .chain(popups.iter().map(|p| (p.wl_surface().clone(), popup_location(p.wl_surface()))));
+        for (top, at) in trees {
+            with_surface_tree_downward(
+                &top,
+                at,
+                |_, states, loc| {
+                    let sub = states.cached_state.get::<SubsurfaceCachedState>().current().location;
+                    TraversalAction::DoChildren(*loc + sub)
+                },
+                // The state passed down is the parent's: a surface's own offset is added here.
+                |surf, states, loc| {
+                    let own = states.cached_state.get::<SubsurfaceCachedState>().current().location;
+                    placed.push((surf.id(), *loc + own))
+                },
+                |_, _, _| true,
+            );
+        }
         // Subsurfaces sit at surface units; the window's frame is in its buffer's pixels.
         let k = self.windows[i].buffer_scale;
         let px = |v: f64| (v * k).round() as i32;
@@ -909,6 +973,21 @@ impl State {
         let dma: Vec<(Point<i32, Logical>, &DmaLayer)> =
             placed.iter().filter_map(|(id, loc)| Some((*loc, self.dma_layers.get(id)?))).collect();
         if !has_layers && dma.is_empty() {
+            // Nothing over the toplevel any more: the window is its own picture again.
+            let win = &mut self.windows[i];
+            if !std::mem::take(&mut win.composited) {
+                return;
+            }
+            let own = match (&win.root_dma, &win.root_frame) {
+                (Some((key, dmabuf)), _) => Some(Content::Dmabuf { key: *key, dmabuf: dmabuf.clone() }),
+                (None, Some(f)) if f.width > 1 || f.height > 1 => Some(Content::Pixels(f.clone())),
+                _ => None,
+            };
+            if let Some(own) = own.filter(|_| win.mapped) {
+                win.frame = Some(own);
+                win.canvas = None;
+                win.canvas_size = (0, 0);
+            }
             return;
         }
         let base = self.windows[i].root_frame.clone();
@@ -928,6 +1007,7 @@ impl State {
                 win.canvas = None;
                 win.canvas_size = (w as u32, h as u32);
                 win.frame = Some(Content::Scene(Scene { width: w as u32, height: h as u32, canvas: None, layers: vec![layer] }));
+                win.composited = true;
                 if !win.mapped {
                     win.mapped = true;
                     self.events.push(WindowEvent::Mapped(win.id));
@@ -943,6 +1023,14 @@ impl State {
             }
         }
         let mut layers = Vec::new();
+        // Over the shm canvas, so an shm popup over a dmabuf toplevel is hidden; clients use one
+        // kind for all their surfaces.
+        if let Some((key, dmabuf)) = &self.windows[i].root_dma {
+            let buf = dmabuf.size();
+            w = w.max(buf.w as u32);
+            h = h.max(buf.h as u32);
+            layers.push(SceneLayer { key: *key, dmabuf: dmabuf.clone(), x: 0, y: 0, w: buf.w, h: buf.h, src: [0.0, 0.0, 1.0, 1.0] });
+        }
         for (loc, d) in &dma {
             let (lw, lh, src) = layer_geometry(d);
             let (lw, lh) = (px(lw as f64).max(1), px(lh as f64).max(1));
@@ -992,11 +1080,51 @@ impl State {
         };
         let window = &mut self.windows[i];
         window.frame = Some(content);
+        window.composited = true;
         if !window.mapped {
             window.mapped = true;
             let id = window.id;
             self.events.push(WindowEvent::Mapped(id));
         }
+    }
+
+    /// The live popups over the toplevel `root`, parents before children.
+    fn popups_of(&self, root: &WlSurface) -> Vec<PopupSurface> {
+        self.xdg_shell.popup_surfaces().iter().filter(|p| p.alive() && &toplevel_of(p.wl_surface()) == root).cloned().collect()
+    }
+
+    /// The topmost shown popup of `root` whose window geometry holds `at` (toplevel units).
+    fn popup_at(&self, root: &WlSurface, at: Point<f64, Logical>) -> Option<WlSurface> {
+        self.popups_of(root).into_iter().rev().map(|p| p.wl_surface().clone()).find(|s| {
+            let shown = self.layers.contains_key(&s.id()) || self.dma_layers.contains_key(&s.id());
+            let size = popup_data(s).map_or(Default::default(), |(_, g)| g.size);
+            shown && Rectangle::new(geometry_origin(s), size).to_f64().contains(at)
+        })
+    }
+
+    /// Sends popup_done to the window's popups, or every window's, topmost first.
+    pub fn dismiss_popups(&mut self, window: Option<u64>) {
+        let roots: Vec<WlSurface> =
+            self.windows.iter().filter(|w| window.is_none_or(|id| w.id == id)).map(|w| w.toplevel.wl_surface().clone()).collect();
+        for root in roots {
+            for p in self.popups_of(&root).into_iter().rev() {
+                p.send_popup_done();
+                self.grabbed.retain(|s| s != p.wl_surface());
+            }
+        }
+    }
+
+    /// Where a popup goes: as its positioner asks, kept inside its window (the app area at the
+    /// client's scale) by the adjustments the positioner allows.
+    fn place_popup(&self, parent: Option<&WlSurface>, positioner: PositionerState) -> Rectangle<i32, Logical> {
+        let window = parent.and_then(|p| {
+            let root = toplevel_of(p);
+            Some((p.clone(), self.windows.iter().find(|w| w.toplevel.wl_surface() == &root)?))
+        });
+        let Some((parent, w)) = window else { return positioner.get_geometry() };
+        // The window, in the parent's window-geometry coordinates.
+        let origin = geometry_origin(&parent);
+        positioner.get_unconstrained_geometry(Rectangle::new((-origin.x, -origin.y).into(), self.window_size(w).into()))
     }
 }
 
@@ -1025,6 +1153,42 @@ fn blit(canvas: &mut [u8], w: u32, h: u32, f: &Frame, x0: i32, y0: i32) {
             }
         }
     }
+}
+
+/// An xdg_popup's parent surface and its geometry (relative to the parent's window geometry).
+fn popup_data(surface: &WlSurface) -> Option<(WlSurface, Rectangle<i32, Logical>)> {
+    with_states(surface, |states| {
+        let d = states.data_map.get::<XdgPopupSurfaceData>()?.lock().ok()?;
+        Some((d.parent.clone()?, d.current.geometry))
+    })
+}
+
+fn window_geometry_loc(surface: &WlSurface) -> Point<i32, Logical> {
+    with_states(surface, |states| {
+        states.cached_state.get::<SurfaceCachedState>().current().geometry.map_or((0, 0).into(), |g| g.loc)
+    })
+}
+
+/// Where the surface's window geometry starts, in its toplevel surface's units.
+fn geometry_origin(surface: &WlSurface) -> Point<i32, Logical> {
+    match popup_data(surface) {
+        Some((parent, geometry)) => geometry_origin(&parent) + geometry.loc,
+        None => window_geometry_loc(surface),
+    }
+}
+
+/// Where a popup's surface sits, in its toplevel surface's units.
+fn popup_location(surface: &WlSurface) -> Point<i32, Logical> {
+    geometry_origin(surface) - window_geometry_loc(surface)
+}
+
+/// The toplevel a popup (or popup of a popup) belongs to; any other surface is its own.
+fn toplevel_of(surface: &WlSurface) -> WlSurface {
+    let mut s = surface.clone();
+    while let Some((parent, _)) = popup_data(&s) {
+        s = parent;
+    }
+    s
 }
 
 /// Buffer pixels per surface unit across: what the viewport's destination (or source) or the
@@ -1097,6 +1261,8 @@ impl XdgShellHandler for State {
             mapped: false,
             shown: None,
             root_frame: None,
+            root_dma: None,
+            composited: false,
             canvas: None,
             canvas_size: (0, 0),
             native: false,
@@ -1113,32 +1279,74 @@ impl XdgShellHandler for State {
             self.text_input.set_focus(None);
             self.text_input_events();
         }
+        let id = self.windows[i].id;
+        self.dismiss_popups(Some(id));
         let w = self.windows.remove(i);
         if w.mapped {
             self.events.push(WindowEvent::Unmapped(w.id));
         }
     }
 
-    /// Configured where the client asks, though not drawn: GTK 4 blocks until a popup's first
-    /// configure (a touch in an entry opens its text handles as popups).
+    /// Configured at once: GTK 4 blocks until a popup's first configure (a touch in an entry
+    /// opens its text handles as popups).
     fn new_popup(&mut self, popup: PopupSurface, positioner: PositionerState) {
+        let geometry = self.place_popup(popup.get_parent_surface().as_ref(), positioner);
         popup.with_pending_state(|s| {
-            s.geometry = positioner.get_geometry();
+            s.geometry = geometry;
             s.positioner = positioner;
         });
+        // GTK 3 takes a popup's scale from the outputs it is on.
+        self.output.enter(popup.wl_surface());
         let _ = popup.send_configure();
     }
 
-    fn grab(&mut self, _: PopupSurface, _: WlSeat, _: Serial) {}
+    // Fullscreen at the app area whatever is asked. smithay's defaults configure at once, which
+    // before the first commit is the initial configure, sizeless: Firefox maximizes then, and
+    // drew at its own default size.
+    fn maximize_request(&mut self, toplevel: ToplevelSurface) {
+        self.answer_state_request(&toplevel);
+    }
 
-    /// As placed: GTK 4 blocks until a reposition is answered.
+    fn unmaximize_request(&mut self, toplevel: ToplevelSurface) {
+        self.answer_state_request(&toplevel);
+    }
+
+    fn fullscreen_request(&mut self, toplevel: ToplevelSurface, _: Option<WlOutput>) {
+        self.answer_state_request(&toplevel);
+    }
+
+    fn unfullscreen_request(&mut self, toplevel: ToplevelSurface) {
+        self.answer_state_request(&toplevel);
+    }
+
+    fn grab(&mut self, popup: PopupSurface, _: WlSeat, _: Serial) {
+        if !self.grabbed.contains(popup.wl_surface()) {
+            self.grabbed.push(popup.wl_surface().clone());
+        }
+    }
+
+    /// GTK 4 blocks until a reposition is answered.
     fn reposition_request(&mut self, popup: PopupSurface, positioner: PositionerState, token: u32) {
+        let geometry = self.place_popup(popup.get_parent_surface().as_ref(), positioner);
         popup.with_pending_state(|s| {
-            s.geometry = positioner.get_geometry();
+            s.geometry = geometry;
             s.positioner = positioner;
         });
         // With its configure.
         popup.send_repositioned(token);
+    }
+
+    fn popup_destroyed(&mut self, popup: PopupSurface) {
+        let surface = popup.wl_surface();
+        self.grabbed.retain(|s| s != surface);
+        self.layers.remove(&surface.id());
+        if let Some(old) = self.dma_layers.remove(&surface.id()) {
+            self.release_next.push(old.buffer);
+        }
+        let root = toplevel_of(surface);
+        if let Some(i) = self.windows.iter().position(|w| w.toplevel.wl_surface() == &root) {
+            self.recomposite(i, true);
+        }
     }
 }
 
@@ -1261,6 +1469,8 @@ mod tests {
             events: None,
             honour: Honour::None,
             text_input: None,
+            maximize: false,
+            popup: false,
         }
     }
 
@@ -1373,28 +1583,33 @@ mod tests {
     }
 
     /// A window is configured at the app area over its scale, projection video at the panel's;
-    /// a new area reconfigures open windows. The client draws at what it is configured to.
+    /// a new area reconfigures open windows. The client draws at what it is configured to, also
+    /// when it asks to be maximized before its first commit.
     #[test]
     fn windows_are_configured_to_the_app_area() {
         let beside = (1823, 657);
-        for (app_id, s, area, want, then) in [
-            ("org.test.app", 1.0, PANEL_PX, (1920, 720), (1823, 657)),
-            ("org.test.app", 1.75, beside, (1042, 375), (1097, 411)),
-            ("livi-video-main", 1.0, beside, (1920, 720), (1920, 720)),
+        for (app_id, s, area, want, then, maximize) in [
+            ("org.test.app", 1.0, PANEL_PX, (1920, 720), (1823, 657), false),
+            ("org.test.app", 1.75, beside, (1042, 375), (1097, 411), false),
+            ("livi-video-main", 1.0, beside, (1920, 720), (1920, 720), false),
+            ("org.test.app", 1.0, beside, (1823, 657), (1920, 720), true),
+            ("org.test.app", 1.75, beside, (1042, 375), (1097, 411), true),
         ] {
             let mut server = scaled(s);
             server.state.set_app_area(area.0, area.1);
             let mut o = opts(Pattern::Grid, None, false);
             o.app_id = app_id.into();
+            o.maximize = maximize;
             (o.width, o.height) = (0, 0);
             let _client = client(&mut server, o);
-            assert!(pump(&mut server, |st| st.events.contains(&WindowEvent::Mapped(1))), "{app_id} {s}");
+            let case = format!("{app_id} {s} {area:?} maximize={maximize}");
+            assert!(pump(&mut server, |st| st.events.contains(&WindowEvent::Mapped(1))), "{case}");
             let f = pixels(server.state.windows[0].frame.as_ref().unwrap());
-            assert_eq!((f.width as i32, f.height as i32), want, "{app_id} {s} {area:?}");
+            assert_eq!((f.width as i32, f.height as i32), want, "{case}");
             let next = if area == PANEL_PX { beside } else { PANEL_PX };
             server.state.set_app_area(next.0, next.1);
             let size = server.state.windows[0].toplevel.with_pending_state(|st| st.size);
-            assert_eq!(size, Some(then.into()), "{app_id} {s} then {next:?}");
+            assert_eq!(size, Some(then.into()), "{case} then {next:?}");
         }
     }
 
@@ -1572,6 +1787,63 @@ mod tests {
             for w in &want {
                 assert!(rest.any(|g| g == w), "{text_input:?}: no {w:?} in order in {got:?}");
             }
+        }
+    }
+
+    /// A tap opens the client's grabbing menu below and right of it, slid to stay in the window,
+    /// drawn over the window at its scale. A tap on the menu reaches it; one outside dismisses it
+    /// and goes no further, as does the shell dismissing it.
+    #[test]
+    fn popups_show_over_their_window_and_take_input() {
+        let area = (1200, 600);
+        for (honour, s) in [(Honour::None, 1.0), (Honour::Fractional, 1.5), (Honour::Integer, 2.0)] {
+            let case = format!("{honour:?} {s}");
+            let k = honoured(honour, s);
+            let lw = logical_size(area, s).0;
+            let mut server = scaled(s);
+            server.state.set_app_area(area.0, area.1);
+            let mut o = opts(Pattern::Grid, None, false);
+            (o.width, o.height, o.honour, o.popup) = (0, 0, honour, true);
+            let client = client(&mut server, o);
+            assert!(pump(&mut server, |st| st.events.contains(&WindowEvent::Mapped(1))), "{case}");
+            // 50 units from the right edge: the 160-unit menu slides left to fit.
+            let tap = (lw as f64 - 50.0, 100.0);
+            let menu = (lw - 160, 101);
+            // The window's picture at a point in surface units.
+            let at = move |st: &State, x: i32, y: i32| {
+                let f = pixels(st.windows[0].frame.as_ref().unwrap());
+                let (px, py) = ((x as f64 * k).round() as u32, (y as f64 * k).round() as u32);
+                f.rgba[((py * f.width + px) * 4) as usize..][..4].to_vec()
+            };
+            let mid = (menu.0 + 80, menu.1 + 48);
+            let magenta = Pattern::Bars.pixel(80, 0, 160).to_vec();
+            let grid = |x: i32, y: i32| Pattern::Grid.pixel(x as u32, y as u32, 0).to_vec();
+            let open = |server: &mut Server| {
+                server.touch_down(1, 0, tap.0 * k, tap.1 * k);
+                server.touch_up(0);
+                pump(server, |st| at(st, mid.0, mid.1) == magenta)
+            };
+            assert!(open(&mut server), "{case}: no menu");
+            assert_eq!(at(&server.state, menu.0 - 2, mid.1), grid(menu.0 - 2, mid.1), "{case}: left of the menu");
+            server.touch_down(1, 0, mid.0 as f64 * k, mid.1 as f64 * k);
+            server.touch_up(0);
+            server.touch_down(1, 0, 10.0 * k, 10.0 * k);
+            server.touch_up(0);
+            assert!(pump(&mut server, |st| at(st, mid.0, mid.1) == grid(mid.0, mid.1)), "{case}: menu stayed after a tap outside");
+            assert!(open(&mut server), "{case}: no menu again");
+            server.state.dismiss_popups(Some(1));
+            assert!(pump(&mut server, |st| at(st, mid.0, mid.1) == grid(mid.0, mid.1)), "{case}: menu stayed after dismiss");
+            server.close(1);
+            assert!(pump(&mut server, |s| s.windows.is_empty()));
+            let got = client.join().unwrap().events;
+            let down = format!("touch down 0 {:.1} {:.1}", tap.0, tap.1);
+            let configure = format!("popup configure {} {} 160 96", menu.0, menu.1);
+            let want = [&down, &configure, "popup touch down 0 80.0 48.0", "popup done", &down, &configure, "popup done"];
+            let mut rest = got.iter();
+            for w in want {
+                assert!(rest.any(|g| g == w), "{case}: no {w:?} in order in {got:?}");
+            }
+            assert!(!got.iter().any(|g| g.starts_with("touch down 0 10.0")), "{case}: the dismissing tap went through: {got:?}");
         }
     }
 

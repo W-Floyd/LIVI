@@ -26,6 +26,8 @@ use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1};
 use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1;
+use wayland_protocols::xdg::shell::client::xdg_popup::{self, XdgPopup};
+use wayland_protocols::xdg::shell::client::xdg_positioner::{self, XdgPositioner};
 use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
 use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
@@ -162,7 +164,15 @@ pub struct Opts {
     /// it (the field), one in the bottom half disables it. What arrives is an event: `text
     /// commit hi`, `text delete 1 0`, `text preedit ab`.
     pub text_input: Option<u32>,
+    /// Asks to be maximized before the first commit, as Firefox does.
+    pub maximize: bool,
+    /// A tap on the window opens a grabbing popup menu there, 160x96 units of bars, below and
+    /// right of the tap and slid to fit. Events: `popup configure X Y W H`, `popup done`, and
+    /// input on it as `popup touch down 0 X Y`.
+    pub popup: bool,
 }
+
+const POPUP_SIZE: (i32, i32) = (160, 96);
 
 /// zwp_text_input_v3's content purposes by name.
 pub fn purpose(name: &str) -> Option<u32> {
@@ -212,7 +222,25 @@ struct App {
     pointer_at: (f64, f64),
     /// Draws at each configure's size.
     follow: bool,
+    /// With `Opts::popup`: the toplevel's xdg_surface, and the open popup.
+    menu_parent: Option<XdgSurface>,
+    menu: Option<Menu>,
+    /// The menu's latest configure.
+    menu_size: (i32, i32),
+    pointer_on_menu: bool,
 }
+
+struct Menu {
+    surface: WlSurface,
+    xdg: XdgSurface,
+    popup: XdgPopup,
+    viewport: Option<WpViewport>,
+    /// The picture, once configured.
+    buffer: Option<(WlShmPool, WlBuffer, File)>,
+}
+
+/// User data telling the popup's xdg_surface from the toplevel's.
+struct MenuTag;
 
 /// The client's one text field, on zwp_text_input_v3.
 struct TextField {
@@ -254,6 +282,88 @@ impl App {
 }
 
 impl App {
+    /// With `Opts::popup`, a press at (x, y) on the window opens the menu there.
+    fn open_menu(&mut self, serial: u32, x: f64, y: f64, qh: &QueueHandle<Self>) {
+        let (Some(parent), None, Some(compositor), Some(wm), Some(seat)) =
+            (&self.menu_parent, &self.menu, &self.compositor, &self.wm_base, &self.seat)
+        else {
+            return;
+        };
+        let surface = compositor.create_surface(qh, ());
+        let xdg = wm.get_xdg_surface(&surface, qh, MenuTag);
+        let pos = wm.create_positioner(qh, ());
+        pos.set_size(POPUP_SIZE.0, POPUP_SIZE.1);
+        pos.set_anchor_rect(x as i32, y as i32, 1, 1);
+        pos.set_anchor(xdg_positioner::Anchor::BottomRight);
+        pos.set_gravity(xdg_positioner::Gravity::BottomRight);
+        pos.set_constraint_adjustment(xdg_positioner::ConstraintAdjustment::SlideX | xdg_positioner::ConstraintAdjustment::SlideY);
+        let popup = xdg.get_popup(Some(parent), &pos, qh, ());
+        pos.destroy();
+        popup.grab(seat, serial);
+        let viewport = (self.honour == Honour::Fractional).then(|| self.viewporter.as_ref().map(|v| v.get_viewport(&surface, qh, ()))).flatten();
+        surface.commit();
+        self.menu = Some(Menu { surface, xdg, popup, viewport, buffer: None });
+    }
+
+    /// Draws the configured menu: bars, at the scale the window honours.
+    fn draw_menu(&mut self, w: i32, h: i32, qh: &QueueHandle<Self>) -> io::Result<()> {
+        let k = match self.honour {
+            Honour::None => 1.0,
+            Honour::Fractional => self.scale_120.max(1) as f64 / 120.0,
+            Honour::Integer => self.buffer_scale.max(1) as f64,
+        };
+        let (Some(menu), Some(shm)) = (&mut self.menu, &self.shm) else { return Ok(()) };
+        let (bw, bh) = ((w as f64 * k).round() as i32, (h as f64 * k).round() as i32);
+        let bytes = (bw * bh * 4) as usize;
+        let file = memfd(bytes, false)?;
+        // SAFETY: a fresh memfd of `bytes` bytes, unmapped below.
+        let map = unsafe { libc::mmap(std::ptr::null_mut(), bytes, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, file.as_raw_fd(), 0) };
+        if map == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        let px = unsafe { std::slice::from_raw_parts_mut(map as *mut u8, bytes) };
+        for (i, out) in px.chunks_exact_mut(4).enumerate() {
+            let x = ((i as i32 % bw) as f64 / k) as u32;
+            let [r, g, b, _] = Pattern::Bars.pixel(x, 0, w as u32);
+            out.copy_from_slice(&[b, g, r, 0xff]);
+        }
+        unsafe { libc::munmap(map, bytes) };
+        let pool = shm.create_pool(file.as_fd(), bytes as i32, qh, ());
+        let buffer = pool.create_buffer(0, bw, bh, bw * 4, wl_shm::Format::Xrgb8888, qh, usize::MAX);
+        match (&menu.viewport, self.honour) {
+            (Some(vp), _) => vp.set_destination(w, h),
+            (None, Honour::Integer) => menu.surface.set_buffer_scale(k as i32),
+            _ => {}
+        }
+        menu.surface.attach(Some(&buffer), 0, 0);
+        menu.surface.damage_buffer(0, 0, bw, bh);
+        menu.surface.commit();
+        if let Some((p, b, _)) = menu.buffer.replace((pool, buffer, file)) {
+            b.destroy();
+            p.destroy();
+        }
+        Ok(())
+    }
+
+    fn close_menu(&mut self) {
+        let Some(m) = self.menu.take() else { return };
+        m.popup.destroy();
+        m.xdg.destroy();
+        if let Some(vp) = m.viewport {
+            vp.destroy();
+        }
+        m.surface.destroy();
+        if let Some((p, b, _)) = m.buffer {
+            b.destroy();
+            p.destroy();
+        }
+        self.pointer_on_menu = false;
+    }
+
+    fn on_menu(&self, surface: &WlSurface) -> bool {
+        self.menu.as_ref().is_some_and(|m| &m.surface == surface)
+    }
+
     fn note(&mut self, line: String) {
         if let Some(f) = &mut self.log {
             use std::io::Write;
@@ -293,6 +403,12 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     let toplevel = xdg.get_toplevel(&qh, ());
     toplevel.set_app_id(opts.app_id.clone());
     toplevel.set_title(opts.title.clone());
+    if opts.maximize {
+        toplevel.set_maximized();
+    }
+    if opts.popup {
+        app.menu_parent = Some(xdg.clone());
+    }
     // Before the first commit, so the first buffer can be the right size.
     let mut scaled = None;
     if opts.honour == Honour::Fractional {
@@ -432,6 +548,7 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
         fs.destroy();
         vp.destroy();
     }
+    app.close_menu();
     toplevel.destroy();
     xdg.destroy();
     surface.destroy();
@@ -659,6 +776,36 @@ impl Dispatch<XdgSurface, ()> for App {
     }
 }
 
+impl Dispatch<XdgSurface, MenuTag> for App {
+    fn event(app: &mut Self, xdg: &XdgSurface, event: xdg_surface::Event, _: &MenuTag, _: &Connection, qh: &QueueHandle<Self>) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            xdg.ack_configure(serial);
+            let size = app.menu_size;
+            if let Err(e) = app.draw_menu(size.0, size.1, qh) {
+                eprintln!("test client: menu: {e}");
+            }
+        }
+    }
+}
+
+impl Dispatch<XdgPopup, ()> for App {
+    fn event(app: &mut Self, _: &XdgPopup, event: xdg_popup::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            xdg_popup::Event::Configure { x, y, width, height } => {
+                app.menu_size = (width, height);
+                app.note(format!("popup configure {x} {y} {width} {height}"));
+            }
+            xdg_popup::Event::PopupDone => {
+                app.note("popup done".into());
+                app.close_menu();
+            }
+            _ => {}
+        }
+    }
+}
+
+delegate_noop!(App: XdgPositioner);
+
 impl Dispatch<XdgToplevel, ()> for App {
     fn event(app: &mut Self, _: &XdgToplevel, event: xdg_toplevel::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         match event {
@@ -750,11 +897,21 @@ fn pressed(down: bool) -> &'static str {
 }
 
 impl Dispatch<WlPointer, ()> for App {
-    fn event(app: &mut Self, _: &WlPointer, event: wl_pointer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+    fn event(app: &mut Self, _: &WlPointer, event: wl_pointer::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
         match event {
-            wl_pointer::Event::Enter { surface_x, surface_y, .. } => {
+            wl_pointer::Event::Enter { surface, surface_x, surface_y, .. } => {
                 app.pointer_at = (surface_x, surface_y);
-                app.note(format!("pointer enter {surface_x:.1} {surface_y:.1}"))
+                app.pointer_on_menu = app.on_menu(&surface);
+                let on = if app.pointer_on_menu { "popup " } else { "" };
+                app.note(format!("{on}pointer enter {surface_x:.1} {surface_y:.1}"))
+            }
+            wl_pointer::Event::Button { serial, button, state, .. } if app.menu_parent.is_some() => {
+                let down = state == WEnum::Value(wl_pointer::ButtonState::Pressed);
+                let on = if app.pointer_on_menu { "popup " } else { "" };
+                app.note(format!("{on}pointer button {button} {}", pressed(down)));
+                if down && !app.pointer_on_menu {
+                    app.open_menu(serial, app.pointer_at.0, app.pointer_at.1, qh);
+                }
             }
             wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
                 app.pointer_at = (surface_x, surface_y);
@@ -774,11 +931,16 @@ impl Dispatch<WlPointer, ()> for App {
 }
 
 impl Dispatch<WlTouch, ()> for App {
-    fn event(app: &mut Self, _: &WlTouch, event: wl_touch::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+    fn event(app: &mut Self, _: &WlTouch, event: wl_touch::Event, _: &(), _: &Connection, qh: &QueueHandle<Self>) {
         match event {
-            wl_touch::Event::Down { id, x, y, .. } => {
-                app.note(format!("touch down {id} {x:.1} {y:.1}"));
-                app.tap(y);
+            wl_touch::Event::Down { serial, surface, id, x, y, .. } => {
+                if app.on_menu(&surface) {
+                    app.note(format!("popup touch down {id} {x:.1} {y:.1}"));
+                } else {
+                    app.note(format!("touch down {id} {x:.1} {y:.1}"));
+                    app.tap(y);
+                    app.open_menu(serial, x, y, qh);
+                }
             }
             wl_touch::Event::Motion { id, x, y, .. } => app.note(format!("touch motion {id} {x:.1} {y:.1}")),
             wl_touch::Event::Up { id, .. } => app.note(format!("touch up {id}")),

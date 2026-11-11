@@ -1,7 +1,7 @@
 //! livi-shell-test-client [--app-id ID] [--title T] [--size WxH] [--pattern grid|bars]
 //!     [--animate FRAMES] [--buffer shm|dmabuf|nv12|i420] [--video] [--events FILE]
 //!     [--honour none|fractional|integer]
-//!     [--text-input normal|number|email|url|password|...]
+//!     [--text-input normal|number|email|url|password|...] [--maximize] [--popup]
 //! Connects to WAYLAND_DISPLAY and shows a known picture; see test_client.rs.
 
 #[cfg(target_os = "linux")]
@@ -20,15 +20,23 @@ fn main() {
         events: None,
         honour: Honour::None,
         text_input: None,
+        maximize: false,
+        popup: false,
     };
     let mut args = std::env::args().skip(1);
     let usage = || -> ! {
-        eprintln!("usage: livi-shell-test-client [--app-id ID] [--title T] [--size WxH] [--pattern grid|bars] [--animate N] [--buffer shm|dmabuf|nv12|i420] [--video] [--events FILE] [--honour none|fractional|integer] [--text-input PURPOSE]");
+        eprintln!("usage: livi-shell-test-client [--app-id ID] [--title T] [--size WxH] [--pattern grid|bars] [--animate N] [--buffer shm|dmabuf|nv12|i420] [--video] [--events FILE] [--honour none|fractional|integer] [--text-input PURPOSE] [--maximize] [--popup]");
         std::process::exit(2)
     };
     while let Some(a) = args.next() {
-        if a == "--video" {
-            opts.video = true;
+        let flag = match a.as_str() {
+            "--video" => Some(&mut opts.video),
+            "--maximize" => Some(&mut opts.maximize),
+            "--popup" => Some(&mut opts.popup),
+            _ => None,
+        };
+        if let Some(f) = flag {
+            *f = true;
             continue;
         }
         let v = args.next().unwrap_or_else(|| usage());

@@ -38,7 +38,8 @@ honour: none|fractional|integer, scale: percent, text_input: <content purpose> }
 viewporter-scaled subsurface under a placeholder toplevel; `scale` is what the compositor asks of it,
 `honour` which protocol it draws by, `size` then in surface units; `size: 0x0` draws at each configure's size;
 `text_input` binds zwp_text_input_v3 with that purpose, a tap in the window's top half enabling it and one in the bottom half
-disabling it, and logs what is typed as `text commit …`), `{ role: command, run: [...] }` any
+disabling it, and logs what is typed as `text commit …`; `popup: true` opens a grabbing xdg popup, 160×96
+units of bars, below and right of each tap on the window, logging `popup configure X Y W H` and `popup done`), `{ role: command, run: [...] }` any
 Wayland program. `apps: <dir under tests/>` is the launcher's only data dir, with its `apps.yaml`
 (see "App launcher"). A scenario's `nav: true` docks the rail LIVI_SHELL_NAV turns on (`NavRail`),
 which every page but the phone's lays out beside.
@@ -291,6 +292,13 @@ exits non-zero, or shows no window in 60 s (Waydroid: 90 s; GTK4 apps' first sta
 compiles shaders and reads everything cold), is marked on its tile; after 10 s it says it is still
 starting. The log says `launched <id> in <ms>` when the window maps. XWayland is not served, so
 X11-only apps don't show.
+
+Windows are fullscreen at the app area over the app's scale, whatever they ask: a maximize or
+fullscreen request is answered with that size (Firefox maximizes before its first commit). Menus
+and popovers (xdg popups) are drawn into their window where the positioner puts them, slid or
+flipped as it allows to stay inside it, and take input; a tap outside a grabbing popup closes it
+and goes no further, as does leaving the app page (scenario `app-popup`). Keyboard focus stays
+with the window.
 
 The shell serves `org.freedesktop.portal.Settings` itself on the session bus (`portal.rs`;
 `LIVI_SHELL_PORTAL=off` stops it): `org.freedesktop.appearance` `color-scheme` from the

@@ -1,0 +1,81 @@
+name: settings
+# The settings page: LIVI's sections and rows from livi-ui-model, changed through the core as
+# the stock UI changes them, a restart-only change behind Apply, and the shell's own look.
+viewport: { width: 1920, height: 720 }
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - set: { core: { config: { darkMode: true, appearanceMode: auto, carName: LIVI, mainUiNightMode: false } } }
+  - page: settings
+  - tap: { node: Settings/Sections/List/Appearance }
+  - expect_node: { path: Settings/Heading/Title, text: Appearance }
+  - wait: { frames: 3 }
+  - screenshot: settings-appearance-day
+  - tap: { node: Settings/Rows/List/Dark Mode }
+  - expect_action: { SetConfig: { patch: { darkMode: false } } }
+  - tap: { node: Settings/Rows/List/Phone Appearance/Box/Choice/Night }
+  - expect_action: { SetConfig: { patch: { appearanceMode: night } } }
+  # A list too long to set in place opens a page of its own; picking closes it.
+  - tap: { node: Settings/Sections/List/General }
+  - tap: { node: Settings/Rows/List/Start Page }
+  - expect_node: { path: Settings/Heading/Title, text: Start Page }
+  - tap: { node: Settings/Rows/List/Media }
+  - expect_action: { SetConfig: { patch: { startPage: /media } } }
+  - expect_node: { path: Settings/Heading/Title, text: General }
+  # A drag scrolls the list, and the row it ends on is not opened.
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("Settings/Rows")
+      var at: Vector2 = rows.get_global_rect().get_center() + Vector2(0, 150)
+      var vp: Viewport = shell.get_viewport()
+      var ev := InputEventMouseButton.new()
+      ev.button_index = MOUSE_BUTTON_LEFT
+      ev.position = at
+      ev.pressed = true
+      ev.button_mask = MOUSE_BUTTON_MASK_LEFT
+      vp.push_input(ev)
+      for i in 10:
+          var m := InputEventMouseMotion.new()
+          m.position = at - Vector2(0, 30 * (i + 1))
+          m.button_mask = MOUSE_BUTTON_MASK_LEFT
+          vp.push_input(m)
+          await runner.frames(1)
+      var up := ev.duplicate()
+      up.position = at - Vector2(0, 300)
+      up.pressed = false
+      up.button_mask = 0
+      vp.push_input(up)
+      await runner.frames(2)
+      if rows.offset <= 0.0:
+          return "the list did not scroll"
+      if shell.get_node("Settings/Heading/Title").text != "General":
+          return "the drag opened a row"
+  # A restart-only setting changed while a phone is connected waits for Apply.
+  - set: { core: { sessions: { total: 1 } } }
+  - wait: { frames: 20 }
+  - set: { core: { config: { carName: Kia } } }
+  - wait: { frames: 20 }
+  - expect_node: { path: Settings/Header/Apply, visible: true }
+  - tap: { node: Settings/Header/Apply }
+  - expect_action: { ApplySettings: null }
+  - expect_node: { path: Settings/Header/Apply, visible: false }
+  # The shell's look: set at once, and Day or Night holds against the core's night mode.
+  - tap: { node: Settings/Sections/List/Look }
+  - tap: { node: Settings/Rows/List/Day or night/Box/Choice/Night }
+  - set: { core: { config: { mainUiNightMode: false } } }
+  - wait: { frames: 20 }
+  - tap: { node: Settings/Rows/List/Steering wheel/Box/Choice/Right }
+  - gdscript: |
+      if ThemeManager.appearance != "night" or ThemeManager.appearance_mode != "night":
+          return "appearance %s, mode %s" % [ThemeManager.appearance, ThemeManager.appearance_mode]
+      if ThemeManager.hand != "rhd":
+          return "hand %s" % ThemeManager.hand
+  - wait: { frames: 3 }
+  - screenshot: settings-look-night
+  - tap: { node: Settings/Rows/List/Day or night/Box/Choice/Auto }
+  - gdscript: |
+      if ThemeManager.appearance != "day":
+          return "auto does not follow the core's day"
+  - tap: { node: Settings/Header/Back }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body, visible: true }

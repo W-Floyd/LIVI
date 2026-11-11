@@ -7,7 +7,7 @@ extends PanelContainer
 
 signal selected(page: String)
 
-const ITEMS := [["home", "Home", "home"], ["ev", "EV", "bolt"], ["app", "Phone", "phone"], ["projection", "Full", "expand"]]
+const ITEMS := [["home", "Home", "home"], ["ev", "EV", "bolt"], ["app", "Phone", "phone"], ["projection", "Full", "expand"], ["settings", "Settings", "gear"]]
 
 var _buttons := {}
 

@@ -17,6 +17,8 @@ func _ready() -> void:
 	if err != "":
 		push_error("compositor: %s" % err)
 	_keep_core()
+	# The driver's look from last time; tests start from the default one and save nothing.
+	ThemeManager.load_look(ThemeManager.default_look_file())
 	var shell: Control = preload("res://shell.tscn").instantiate()
 	add_child(shell)
 	# Once the home page is up: the live EV page's shaders, compiled while nobody waits.

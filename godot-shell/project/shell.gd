@@ -42,6 +42,8 @@ var _projection_page := false
 ## The page showing, as `open_page` resolved it, and where the projection page goes back to.
 var _page_name := "home"
 var _return_to := "home"
+## Where the settings page goes back to.
+var _settings_from := "home"
 var _back: BackTab
 ## The core's `/front/main` last seen: the phone's video focus.
 var _front := ""
@@ -157,6 +159,8 @@ func open_page(page: String) -> String:
 	if page == "ev_live":
 		if _powertrain() != "electric":
 			return "ev_live needs an electric car"
+	elif page == "settings":
+		pass
 	elif page not in ["home", "app", "projection"] and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
 		return "theme %s has no page %s" % [ThemeManager.theme_name, page]
 	if _page:
@@ -165,6 +169,8 @@ func open_page(page: String) -> String:
 		_page = null
 	if page == "projection" and _page_name != "projection":
 		_return_to = _page_name
+	if page == "settings" and _page_name != "settings":
+		_settings_from = _page_name
 	_page_name = page
 	_projection_page = page == "projection"
 	_app_page = page == "app" or _projection_page
@@ -186,6 +192,13 @@ func open_page(page: String) -> String:
 		ev.tile_pressed.connect(func(id): ev_action.emit(id))
 		ev.back_pressed.connect(func(): open_page.call_deferred("home"))
 		_page = ev
+		add_child(_page)
+	elif page == "settings":
+		var settings := SettingsPage.new()
+		settings.top_inset = _status.get_combined_minimum_size().y
+		settings.back_pressed.connect(func(): open_page.call_deferred(_settings_from))
+		$Page.visible = true
+		_page = settings
 		add_child(_page)
 	elif not home and not _app_page:
 		_page = PackScreen.new()

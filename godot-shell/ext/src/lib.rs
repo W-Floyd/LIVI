@@ -10,6 +10,7 @@ mod gl_scene;
 pub mod golden;
 pub mod keys;
 pub mod scenario;
+pub mod settings;
 #[cfg(target_os = "linux")]
 pub mod test_client;
 #[cfg(target_os = "linux")]
@@ -29,6 +30,7 @@ use livi_core_proto::message::Action;
 use serde_json::Value;
 
 use crate::fake_core::FakeCore;
+use crate::settings::{Controller as SettingsController, Out};
 
 struct Shell;
 
@@ -65,6 +67,7 @@ pub struct CoreLink {
     inbox: Arc<Inbox>,
     /// Events the fake has caused so far.
     fake_events: u64,
+    settings: SettingsController,
     base: Base<Node>,
 }
 
@@ -213,9 +216,98 @@ impl CoreLink {
             None => "not connected".into(),
         }
     }
+
+    /// LIVI's settings page open now, evaluated against the core's state: `sections`, `titles`
+    /// (the pages down to it), `kind` (list, select, number, text, color, slider, unsupported)
+    /// and what that kind shows, and `apply` while a restart-only change waits.
+    #[func]
+    fn settings_view(&mut self) -> Variant {
+        let state = self.state();
+        to_variant(&self.settings.view(&state))
+    }
+
+    /// The touches on the settings page: each sends what stock LIVI's settings UI sends. Rows
+    /// are indices into the last view's rows; `-1` for `row` means the page open now.
+    #[func]
+    fn settings_section(&mut self, i: i64) {
+        self.settings_do(|c, _| c.open_section(i));
+    }
+
+    #[func]
+    fn settings_open(&mut self, row: i64) {
+        self.settings_do(|c, _| c.open(row.max(0) as usize));
+    }
+
+    #[func]
+    fn settings_back(&mut self) {
+        self.settings_do(|c, _| c.back());
+    }
+
+    #[func]
+    fn settings_toggle(&mut self, row: i64) {
+        self.settings_do(|c, s| c.toggle(row.max(0) as usize, s));
+    }
+
+    #[func]
+    fn settings_press(&mut self, row: i64) {
+        self.settings_do(|c, _| c.press(row.max(0) as usize));
+    }
+
+    #[func]
+    fn settings_pick(&mut self, row: i64, option: i64) {
+        self.settings_do(|c, s| c.pick(row, option.max(0) as usize, s));
+    }
+
+    #[func]
+    fn settings_level(&mut self, row: i64, level: f64) {
+        self.settings_do(|c, _| c.level(row, level as f32));
+    }
+
+    #[func]
+    fn settings_number(&mut self, row: i64, value: f64) {
+        self.settings_do(|c, s| c.number(row, value, s));
+    }
+
+    #[func]
+    fn settings_dialog(&mut self, i: i64) {
+        self.settings_do(|c, _| c.dialog_press(i.max(0) as usize));
+    }
+
+    #[func]
+    fn settings_apply(&mut self) {
+        self.settings_do(|c, s| c.apply(s));
+    }
+
+    /// The page closed: stops what its custom pages watched.
+    #[func]
+    fn settings_leave(&mut self) {
+        let out = self.settings.follow_watches(true);
+        self.send_all(out);
+    }
 }
 
 impl CoreLink {
+    fn state(&self) -> Value {
+        self.client.as_ref().map(|c| c.mirror().json.clone()).unwrap_or(Value::Null)
+    }
+
+    fn settings_do(&mut self, f: impl FnOnce(&mut SettingsController, &Value) -> Vec<Out>) {
+        let state = self.state();
+        let mut out = f(&mut self.settings, &state);
+        out.extend(self.settings.follow_watches(false));
+        self.send_all(out);
+    }
+
+    fn send_all(&self, out: Vec<Out>) {
+        let Some(c) = &self.client else { return };
+        for o in out {
+            match o {
+                Out::Act(a) => c.act(a),
+                Out::Msg(m) => c.send(&m),
+            }
+        }
+    }
+
     fn start(&mut self, stream: std::os::unix::net::UnixStream) -> GString {
         // Fresh per connection: the previous client's reader still ends with a Gone event.
         self.inbox = Arc::new(Inbox::default());

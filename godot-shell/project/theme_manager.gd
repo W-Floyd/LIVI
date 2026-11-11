@@ -12,6 +12,7 @@ const CAP_RATIO := 0.7
 
 var theme_name := "instrument"
 var appearance := "day"        # day | night
+var appearance_mode := "auto"  # auto | day | night: auto follows the core's mainUiNightMode
 var hand := "lhd"              # lhd | rhd
 var near := "projection"       # what sits nearer the driver: projection | panel
 var text_scale := 1.0
@@ -20,6 +21,10 @@ var reduced_motion := false    # no animated transitions or camera moves
 var car := "auto"             # auto | procedural: the EV page's car, a model when one is installed
 var quality := "normal"        # normal | low: what the 3D pages may spend (PLAN.md, "Quality profiles")
 var ev_page := "auto"          # auto | image | live: which "Electric vehicle" page `ev` opens
+
+## The driver's choices that `save_look` keeps; `look_file` is where ("" keeps nothing: tests).
+const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page"]
+var look_file := ""
 
 ## Godot's button states as the state maps of a pack's selectors name them.
 const BUTTON_STATES := {
@@ -52,11 +57,66 @@ func _ready() -> void:
 	apply()
 
 
-## Changes any of theme_name, appearance, hand, near, text_scale, and re-resolves once.
+## Changes any of the look's settings, and re-resolves once. `appearance_mode` also sets the
+## appearance: its own, or the core's night mode for auto.
 func set_look(look: Dictionary) -> void:
 	for k in look:
 		set(k, float(look[k]) if k == "text_scale" else look[k])
+	if look.has("appearance_mode"):
+		var n = Core.get_value("/config/mainUiNightMode") if appearance_mode == "auto" else null
+		if appearance_mode != "auto":
+			appearance = appearance_mode
+		elif n != null:
+			appearance = "night" if n else "day"
 	apply()
+
+
+## `$XDG_CONFIG_HOME/livi-shell/look.json`, else under `~/.config`.
+static func default_look_file() -> String:
+	var d := OS.get_environment("XDG_CONFIG_HOME")
+	if d == "":
+		d = OS.get_environment("HOME").path_join(".config")
+	return d.path_join("livi-shell/look.json")
+
+
+## Takes the saved look from `file`, which later changes are saved to. A theme that has gone
+## (a pack removed) is skipped.
+func load_look(file: String) -> void:
+	look_file = file
+	var saved = JSON.parse_string(FileAccess.get_file_as_string(file)) if FileAccess.file_exists(file) else null
+	if not saved is Dictionary:
+		return
+	var look := {}
+	for k in SAVED:
+		if saved.has(k) and not (k == "theme_name" and not has_theme(str(saved[k]))):
+			look[k] = saved[k]
+	set_look(look)
+
+
+func save_look() -> void:
+	if look_file == "":
+		return
+	DirAccess.make_dir_recursive_absolute(look_file.get_base_dir())
+	var look := {}
+	for k in SAVED:
+		look[k] = get(k)
+	var f := FileAccess.open(look_file, FileAccess.WRITE)
+	if f == null:
+		push_error("look: cannot write %s" % look_file)
+		return
+	f.store_string(JSON.stringify(look, "  "))
+
+
+## Built-in themes, then the packs installed, by name.
+func theme_names() -> PackedStringArray:
+	var out := PackedStringArray()
+	for f in DirAccess.get_files_at("res://themes"):
+		if f.ends_with(".yaml"):
+			out.append(f.get_basename())
+	for d in DirAccess.get_directories_at(packs_dir) if DirAccess.dir_exists_absolute(packs_dir) else PackedStringArray():
+		if not out.has(d) and FileAccess.file_exists(packs_dir.path_join(d).path_join("theme.yaml")):
+			out.append(d)
+	return out
 
 
 ## `$LIVI_SHELL_THEMES`, else the user's data folder.
@@ -85,6 +145,7 @@ func _spec_path(name: String) -> String:
 
 
 func defaults() -> void:
+	appearance_mode = "auto"
 	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto"})
 
 

@@ -233,6 +233,21 @@ as the stock UI does: opening the projection page (or `app` with a projection wi
 `OpenPage` of `/projection` (or `/`) opens it too; other paths are logged, as the shell has no
 such pages.
 
+## Settings
+
+`page: settings` (the rail's gear) is LIVI's settings and the shell's look, so the panel needs no
+LIVI UI. LIVI's part is livi-ui-model's tree, the one stock LIVI's UI draws: `CoreLink.settings_*`
+keeps the page stack, evaluates the screen against the core's state, and sends what stock sends
+for each touch (`SetConfig`, `SetDongleRadio`, a row's action; `ApplySettings` from the Apply
+button, shown while a restart-only key differs with a phone connected). Short choices are set in
+place, longer ones open a list; numbers with few steps get a stepper. Text and colour need a
+keyboard and are shown only, as are the calibration pages. Stock's Restart and Power Off pages act
+as they open, so their rows ask for a second tap.
+
+"Look" sets `ThemeManager`'s look and keeps it in `$XDG_CONFIG_HOME/livi-shell/look.json`
+(`~/.config/...`), read at start (not in tests). Its day or night is Auto (the core's
+`mainUiNightMode`, which follows LIVI's own appearance setting), Day or Night.
+
 ## A car model
 
 The EV page draws a procedural car. `car: auto` (the default outside tests; scenarios use

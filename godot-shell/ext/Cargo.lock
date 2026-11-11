@@ -376,11 +376,28 @@ dependencies = [
  "libc 0.2.191",
  "livi-core-client",
  "livi-core-proto",
+ "livi-ui-model",
  "serde_json",
  "serde_norway",
  "smithay",
  "wayland-client",
  "wayland-protocols",
+]
+
+[[package]]
+name = "livi-i18n"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "livi-ui-model"
+version = "0.1.0"
+dependencies = [
+ "livi-core-proto",
+ "livi-i18n",
+ "serde_json",
 ]
 
 [[package]]

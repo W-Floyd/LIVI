@@ -37,6 +37,11 @@ var _scene: SceneSkin
 
 ## A pack's page standing in for the home page, while one is open.
 var _page: Control
+## The live EV page, kept while another page shows (`_live_page`).
+var _ev_live: EvLive
+## Started by each look change while the live page is away (`warm_up`).
+var _rewarm: Timer
+const REWARM_S := 1.5
 var _live_bar := false
 ## The "app" page: the newest hosted window fills the panel, nothing else drawn. "projection"
 ## too, with the newest projection video and nothing over it: Android Auto's own exit leaves it.
@@ -142,6 +147,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	theme = ThemeManager.godot_theme
+	ThemeManager.changed.connect(_follow_night)
 	ThemeManager.changed.connect(_style)
 	ThemeManager.changed.connect(func(): _update_split(); _tell_front())
 	# A (re)connected core starts from its own idea of the main screen: say what this page shows.
@@ -362,7 +368,8 @@ func open_page(page: String) -> String:
 		return "theme %s has no page %s" % [ThemeManager.theme_name, page]
 	if _page:
 		remove_child(_page)
-		_page.free()
+		if _page != _ev_live:
+			_page.free()
 		_page = null
 	# An app's menus close as a tap outside them would.
 	if page != _page_name and Wayland.has_method("dismiss_popups"):
@@ -396,10 +403,8 @@ func open_page(page: String) -> String:
 	if _scene:
 		_scene.visible = home
 	if live:
-		var ev := EvLive.new()
+		var ev := _live_page()
 		_fit_page(ev)
-		ev.tile_pressed.connect(func(id): ev_action.emit(id))
-		ev.back_pressed.connect(func(): open_page.call_deferred("home"))
 		_page = ev
 		add_child(_page)
 	elif page == "settings":
@@ -461,7 +466,9 @@ func _shows_projection() -> bool:
 
 
 ## Day or night as the core has it for the main screen's UI: the car's lights (its night mode,
-## through the telemetry) unless LIVI's appearance setting is Day or Night.
+## through the telemetry) unless LIVI's appearance setting is Day or Night. Checked on every
+## look change too: under Auto, an appearance set directly would otherwise hold until the core's
+## night mode next changes.
 func _follow_night() -> void:
 	var n = Core.get_value("/config/mainUiNightMode")
 	# The look's own Day or Night wins.
@@ -511,16 +518,49 @@ func _on_core_page(path: String) -> void:
 		print("core asks for %s: the shell has no such page" % path)
 
 
-## Draws the live page's 3D scene once into a tiny viewport, so its shaders are compiled before
-## the first visit: on the unit's GPU that is seconds, and it would otherwise stall the first tap.
+## The live EV page, built once and kept: building it is half a second on the unit, and a new
+## one's materials would compile their shaders again on its first frame.
+func _live_page() -> EvLive:
+	if _ev_live == null:
+		_ev_live = EvLive.new()
+		_ev_live.tile_pressed.connect(func(id): ev_action.emit(id))
+		_ev_live.back_pressed.connect(func(): open_page.call_deferred("home"))
+	elif _ev_live.get_parent():
+		# Still in warm_up's viewport.
+		_ev_live.get_parent().remove_child(_ev_live)
+	return _ev_live
+
+
+## Builds the live page and draws it once, offscreen at its size, so it, its shaders and its
+## glyphs are ready before the first visit: on the unit's GPU that is seconds, which would
+## otherwise stall the first tap. Again once the look settles after a change (day and night
+## follow the car's lights) while the page is away, so the next visit does not restyle it.
 func warm_up() -> void:
+	if _rewarm == null:
+		_rewarm = Timer.new()
+		_rewarm.one_shot = true
+		_rewarm.wait_time = REWARM_S
+		_rewarm.timeout.connect(warm_up)
+		add_child(_rewarm)
+		ThemeManager.changed.connect(func(): if not _ev_live.is_inside_tree(): _rewarm.start())
+	if _ev_live != null and _ev_live.is_inside_tree():
+		return
+	var t0 := Time.get_ticks_msec()
 	var vp := SubViewport.new()
-	vp.size = Vector2i(96, 54)
+	vp.size = Vector2i(size)
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	vp.add_child(EvScene.new())
+	# Its own world: the page's environment stays out of a scene theme's home.
+	vp.own_world_3d = true
 	add_child(vp)
+	vp.add_child(_live_page())
+	var line := "[warm] built %d ms, frames at" % (Time.get_ticks_msec() - t0)
 	for i in 3:
 		await RenderingServer.frame_post_draw
+		line += " %d" % (Time.get_ticks_msec() - t0)
+	if OS.get_environment("LIVI_SHELL_TIMING") != "":
+		launcher._log(line)
+	if _ev_live.get_parent() == vp:
+		vp.remove_child(_ev_live)
 	vp.queue_free()
 
 
@@ -561,6 +601,8 @@ func _notification(what: int) -> void:
 		_layout_status()
 		_set_split(_split)
 		_place_keyboard()
+	elif what == NOTIFICATION_PREDELETE and _ev_live and not _ev_live.is_inside_tree():
+		_ev_live.free()
 
 
 ## Opens home's slot while there is a phone's picture, else gives the cards the whole width:

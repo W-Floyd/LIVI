@@ -80,6 +80,9 @@ steps:
   - gdscript: |
       if ThemeManager.appearance != "day":
           return "auto does not follow the core's day"
+      ThemeManager.set_look({appearance = "night"})
+      if ThemeManager.appearance != "day":
+          return "auto keeps an appearance set directly (%s), not the core's day" % ThemeManager.appearance
   - tap: { node: Settings/Header/Back }
   - wait: { frames: 2 }
   - expect_node: { path: Page/Body, visible: true }

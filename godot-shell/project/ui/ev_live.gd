@@ -72,6 +72,8 @@ var _settings: EvTile
 var _car_status: CarStatus
 var _charge_card: ChargeCard
 var _bound := false
+## A look changed while the page was not showing.
+var _restyle_due := false
 var _row_top := 0.0
 var _numeral_base := {}   # label -> its font size before any fitting
 var _leader := []   # [the road end, the nearest point of its label]
@@ -132,6 +134,22 @@ func _ready() -> void:
 	Core.changed.connect(_on_core_changed)
 	resized.connect(_layout)
 	_restyle()
+
+
+## The shell keeps the page between visits: it comes back as a new one would, its labels shown,
+## the data as it is now (not eased from the last visit) and the look as it is now.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_POST_ENTER_TREE and _title != null:
+		var restyled := _restyle_due
+		if restyled:
+			_restyle()
+		if ui_hidden:
+			set_ui_hidden(false)
+		elif not restyled:
+			_layout()
+			_bind()
+	elif what == NOTIFICATION_EXIT_TREE:
+		_bound = false
 
 
 ## Hides or shows the page's labels and tap targets, leaving the scene and the bar.
@@ -262,6 +280,10 @@ func _fit_scale() -> float:
 # ---- theme ----
 
 func _restyle() -> void:
+	if not is_inside_tree():
+		_restyle_due = true
+		return
+	_restyle_due = false
 	_spec = pack_layout()
 	_views.clear()
 	for v in _spec.get("views", []):
@@ -403,7 +425,7 @@ func _bind_now() -> void:
 
 
 func _bind() -> void:
-	if _scene == null or _title == null:
+	if _scene == null or _title == null or not is_inside_tree():
 		return
 	var soc = Core.get_value("/telemetry/fuelPct")
 	var km = Core.get_value("/telemetry/rangeKm")
@@ -486,7 +508,9 @@ static func blower_running() -> bool:
 # ---- layout ----
 
 func _layout() -> void:
-	if _title == null:
+	# Away, or coming back with the children not yet in the tree (sized there, the title bar
+	# would not place its buttons): the visit lays out once they are.
+	if _title == null or not _bar.is_inside_tree():
 		return
 	var px := ThemeManager.px
 	var gap: float = px.gap

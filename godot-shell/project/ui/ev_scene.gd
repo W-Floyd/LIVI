@@ -84,6 +84,8 @@ var _under: OmniLight3D
 var _env: WorldEnvironment
 var _tween: Tween
 var _msaa_before := -1
+## A look changed while the scene was out of the tree.
+var _restyle_due := false
 var _lift_px := 0.0
 ## The panel rectangle (viewport pixels) the whole-panel picture is fitted into, its top left
 ## kept: narrower beside a docked rail. Empty for the whole viewport.
@@ -249,9 +251,21 @@ static func tune(key: String, v: float) -> bool:
 	return true
 
 
+## The page that holds the scene is kept between visits: each visit takes the viewport's
+## multisampling and gives it back, and catches up on a look that changed while away.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_POST_ENTER_TREE:
+		_msaa_before = get_viewport().msaa_3d
+		if _restyle_due:
+			restyle()
+		elif _env != null:
+			_apply_msaa()
+
+
 func _exit_tree() -> void:
-	if _msaa_before >= 0 and get_viewport():
+	if _msaa_before >= 0:
 		get_viewport().msaa_3d = _msaa_before as Viewport.MSAA
+		_msaa_before = -1
 
 
 ## The car's nose along the road.
@@ -294,8 +308,26 @@ static func _drop_texture(inset: int) -> ImageTexture:
 	var chord := d - r * r / d
 	var slope := r / sqrt(d * d - r * r)
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 1, 1, 0))
+	# Nine samples a pixel only along the edge: a pixel whose samples are all inside, or all
+	# outside, is settled from its center (samples lie within SPREAD of it). Seconds on the unit
+	# otherwise.
+	const SPREAD := 0.4715
+	const EPS := 0.001
 	for y in h:
+		var along_min := tip.y - (y + 5.0 / 6.0)
+		var along_max := tip.y - (y + 1.0 / 6.0)
 		for x in w:
+			var dc := Vector2(x + 0.5, y + 0.5).distance_to(circle)
+			var in_cone := along_min >= EPS and along_max <= chord - EPS \
+				and absf(x + 0.5 - 64.0) + 1.0 / 3.0 <= along_min * slope - EPS
+			if dc + SPREAD <= r or in_cone:
+				img.set_pixel(x, y, Color(1, 1, 1, 1))
+				continue
+			var off_cone := along_max < -EPS or along_min > chord + EPS \
+				or maxf(absf(x + 0.5 - 64.0) - 1.0 / 3.0, 0.0) > maxf(along_max, 0.0) * slope + EPS
+			if dc - SPREAD > r and off_cone:
+				continue
 			var hit := 0
 			for sy in 3:
 				for sx in 3:
@@ -303,7 +335,8 @@ static func _drop_texture(inset: int) -> ImageTexture:
 					var along := tip.y - p.y
 					if p.distance_to(circle) <= r or (along >= 0.0 and along <= chord and absf(p.x - 64.0) <= along * slope):
 						hit += 1
-			img.set_pixel(x, y, Color(1, 1, 1, hit / 9.0))
+			if hit > 0:
+				img.set_pixel(x, y, Color(1, 1, 1, hit / 9.0))
 	var tex := ImageTexture.create_from_image(img)
 	_drops[inset] = tex
 	return tex
@@ -359,6 +392,18 @@ func _build_pin() -> void:
 func restyle() -> void:
 	if _env == null:
 		return
+	if not is_inside_tree():
+		_restyle_due = true
+		return
+	_restyle_due = false
+	if _car.choice != ThemeManager.car:
+		_rig.remove_child(_car)
+		_car.queue_free()
+		_car = EvCar.new()
+		_car.name = "Car"
+		_car.position = Vector3(CAR_X, 0, CAR_Z)
+		_car.scale = Vector3.ONE * CAR_SCALE
+		_rig.add_child(_car)
 	var c: Dictionary = ThemeManager.c
 	var day := ThemeManager.appearance == "day"
 	var low := ThemeManager.quality == "low"
@@ -413,13 +458,13 @@ func restyle() -> void:
 	_under.visible = not low
 	_under.light_color = accent
 	_under.light_energy = 0.0 if day else 1.2
-	var vp := get_viewport()
-	if vp:
-		if _msaa_before < 0:
-			_msaa_before = vp.msaa_3d
-		vp.msaa_3d = Viewport.MSAA_DISABLED if low else Viewport.MSAA_2X
+	_apply_msaa()
 	_mirror()
 	_push()
+
+
+func _apply_msaa() -> void:
+	get_viewport().msaa_3d = Viewport.MSAA_DISABLED if ThemeManager.quality == "low" else Viewport.MSAA_2X
 
 
 ## Reflects the world across the camera's vertical plane for a right-hand drive.

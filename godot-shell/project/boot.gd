@@ -26,18 +26,23 @@ func _ready() -> void:
 	if OS.get_environment("LIVI_SHELL_NAV") != "":
 		NavRail.attach(shell, func(page): _open(shell, page))
 	_restore_page(shell)
+	if OS.get_environment("LIVI_SHELL_TIMING") != "":
+		await RenderingServer.frame_post_draw
+		shell.launcher._log("[boot] first frame at %d ms" % Time.get_ticks_msec())
 
 
-## LIVI_SHELL_TIMING prints how long a page takes to open and to draw its first frames.
+## LIVI_SHELL_TIMING logs how long a page takes to open and to draw its first frames, and the
+## first frame and the EV page's warm-up (shell.log: under the kiosk, stdout is the console).
 func _open(shell: Control, page: String) -> void:
 	var t0 := Time.get_ticks_msec()
 	shell.open_page(page)
 	if OS.get_environment("LIVI_SHELL_TIMING") == "":
 		return
-	print("[nav] %s: open_page %d ms" % [page, Time.get_ticks_msec() - t0])
+	var line := "[nav] %s: open_page %d ms, frames at" % [page, Time.get_ticks_msec() - t0]
 	for i in 6:
 		await RenderingServer.frame_post_draw
-		print("[nav] %s: frame %d at %d ms" % [page, i, Time.get_ticks_msec() - t0])
+		line += " %d" % (Time.get_ticks_msec() - t0)
+	shell.launcher._log(line)
 
 
 ## Connects to the core, and again whenever it goes: it starts after the shell, or restarts

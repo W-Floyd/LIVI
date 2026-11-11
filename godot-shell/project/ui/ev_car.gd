@@ -19,6 +19,8 @@ const BATTERY_Y := 0.31
 ## How much each corner of the cross-section (see _ring) catches the edge light.
 const CREASE := [0.0, 0.25, 0.5, 1.0, 0.45, 0.2, 0.8, 0.0]
 
+## The `ThemeManager.car` it was built for.
+var choice := ""
 var _shell: MeshInstance3D
 var _spins: Array[Node3D] = []
 ## Radians a second: a slow roll, a hint of motion rather than a speed.
@@ -52,7 +54,8 @@ func _init() -> void:
 	_lamp.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_shell = MeshInstance3D.new()
 	_shell.name = "Shell"
-	var model := load_model(ThemeManager.car)
+	choice = ThemeManager.car
+	var model := load_model(choice)
 	_shell.mesh = model if model else _body()
 	_glass.set_shader_parameter("baked", model == null)
 	if model:

@@ -31,8 +31,10 @@ steps:
               rects.append([p, n.get_global_rect()])
       for i in rects.size():
           for j in range(i + 1, rects.size()):
-              # The range and charger labels among themselves are the scene's layout, not this.
-              var mine := [rects[i][0], rects[j][0]].any(func(n): return n.ends_with("CarStatus") or n.ends_with("ChargeCard") or n.ends_with("Battery"))
+              # The charger's label against the ranges is the scene's layout, not this.
+              var names := [rects[i][0], rects[j][0]]
+              var mine := names.any(func(n): return n.ends_with("CarStatus") or n.ends_with("ChargeCard") or n.ends_with("Battery")) \
+                  or (names.has("EvLive/RangeOn") and names.has("EvLive/RangeOff"))
               if mine and rects[i][1].intersects(rects[j][1]):
                   return "%s overlaps %s" % [rects[i][0], rects[j][0]]
   - screenshot: ev-live-charging

@@ -32,6 +32,19 @@ steps:
   - screenshot: { name: ev-live-calm-day-rhd, compare: false }
   - theme: { theme_name: instrument, appearance: night, hand: lhd, text_scale: 1.4 }
   - screenshot: ev-live-instrument-night-text-1.4
+  # The two ranges never run into each other, at any text scale, bar edge or drive side.
+  - gdscript: |
+      for ts in [1.0, 1.2, 1.4]:
+          for pos in ["top", "bottom", "left", "right", "off"]:
+              for hand in ["lhd", "rhd"]:
+                  ThemeManager.set_look({text_scale = ts, status_position = pos, hand = hand})
+                  shell.open_page("ev_live")
+                  await runner.frames(3)
+                  var on: Control = shell.get_node("EvLive/RangeOn")
+                  var off: Control = shell.get_node("EvLive/RangeOff")
+                  if on.visible and off.visible and on.get_global_rect().intersects(off.get_global_rect()):
+                      return "%s, %s, %s: the ranges overlap: %s %s" % [ts, pos, hand, on.get_global_rect(), off.get_global_rect()]
+      ThemeManager.set_look({text_scale = 1.4, status_position = "top", hand = "lhd"})
   - theme: { text_scale: 1.0, quality: low }
   - screenshot: ev-live-instrument-night-low
   # Surfaces over the scene, and a scene theme, which keeps its own 3D layer for the home page.

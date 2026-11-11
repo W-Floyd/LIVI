@@ -749,14 +749,17 @@ func _fit_in(box: Control, bounds: Rect2) -> void:
 		clampf(box.position.y, bounds.position.y, maxf(bounds.position.y, bounds.end.y - box.size.y)))
 
 
-## Moves a label off the ones already placed: beside, above or below the first it meets, to the
-## first spot inside `bounds` that is clear of them all, else the nearest along the row. Left
-## where it is when none is.
+## Moves a label off the ones already placed: to the nearest spot beside, above or below one of
+## them, or along the row, that is inside `bounds` and clear of them all. Left where it is when
+## none is.
 func _clear(box: Control, placed: Array[Rect2], bounds: Rect2) -> void:
 	var pad: float = ThemeManager.px.gap
 	var r := Rect2(box.position, box.size)
 	if not placed.any(func(o: Rect2) -> bool: return r.grow(pad * 0.5).intersects(o)):
 		return
+	# Taller than the room (large text), it stays where it is up and down but may still move
+	# along: otherwise no spot encloses it and it sits on the other.
+	bounds = bounds.merge(Rect2(bounds.position.x, r.position.y, bounds.size.x, r.size.y))
 	var tries: Array[Vector2] = []
 	for o in placed:
 		tries.append(Vector2(o.end.x + pad, r.position.y))
@@ -772,6 +775,9 @@ func _clear(box: Control, placed: Array[Rect2], bounds: Rect2) -> void:
 		x += step
 	scan.sort_custom(func(p: Vector2, q: Vector2) -> bool: return absf(p.x - r.position.x) < absf(q.x - r.position.x))
 	tries.append_array(scan)
+	# The nearest first, so a label stays by what it labels (the near range beside the far one,
+	# not over past the charger).
+	tries.sort_custom(func(p: Vector2, q: Vector2) -> bool: return p.distance_to(r.position) < q.distance_to(r.position))
 	for p in tries:
 		var c := Rect2(p, r.size)
 		if bounds.encloses(c) and not placed.any(func(o: Rect2) -> bool: return c.grow(pad * 0.5).intersects(o)):

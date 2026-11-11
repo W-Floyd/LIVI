@@ -55,6 +55,7 @@
 //! | tripEnergyKwh, efficiencyAvg        | ✓    | ·            | ·               | ·             |
 //! | climatePowerW, batteryHeaterW       | ✓    | ·            | ·               | ·             |
 //! | preconditionState, preconditionWhy  | ✓    | ·            | ·               | ·             |
+//! | batteryConditioning*                | ✓    | ·            | ·               | ·             |
 //! | rangeMaxElectricKm                  | ✓    | ·            | ✓ (electric)    | ✓ (electric)  |
 //! | carType                             | ✓    | ✓            | ✓               | ✓             |
 //! | evConnectorTypes                    | ✓    | ✓            | ✓               | ✓             |
@@ -202,6 +203,13 @@ pub struct TelemetrySnapshot {
     pub precondition_state: Option<String>,
     /// Why preconditioning is not running, in words, such as "the charger is 11 kW, not above 50".
     pub precondition_why: Option<String>,
+    /// The car is conditioning its battery, as it reports it.
+    pub battery_conditioning: Option<bool>,
+    /// The car's own battery conditioning mode, `on` or `off`; null when the car gives none.
+    pub battery_conditioning_mode: Option<String>,
+    /// Why the car would not condition its battery: 1 the driving range is too short, 2 the
+    /// battery is already at its best temperature, 3 a heat-management error; null for none.
+    pub battery_conditioning_error: Option<u8>,
     /// The range on a full battery.
     pub range_max_electric_km: Option<f64>,
     /// A `CarType` name such as `HybridDiesel`, written into the settings when it differs.
@@ -424,6 +432,9 @@ mod tests {
             rear_right_seat_heating: Some(2),
             precondition_state: Some("armed".into()),
             precondition_why: Some("no route".into()),
+            battery_conditioning: Some(true),
+            battery_conditioning_mode: Some("on".into()),
+            battery_conditioning_error: Some(2),
             telltales: Some(Telltales {
                 passenger_airbag_off: Some(true),
                 ..Default::default()
@@ -456,6 +467,9 @@ mod tests {
             ("rearRightSeatHeating", json!(2)),
             ("preconditionState", json!("armed")),
             ("preconditionWhy", json!("no route")),
+            ("batteryConditioning", json!(true)),
+            ("batteryConditioningMode", json!("on")),
+            ("batteryConditioningError", json!(2)),
         ] {
             assert_eq!(named[name], want, "{name}");
         }

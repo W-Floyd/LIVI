@@ -95,9 +95,11 @@ var rail_width := 0.0:
 	set(v):
 		if v != rail_width:
 			rail_width = v
-			# The rail is the way home: the EV page's back button only without it.
+			# The rail is the way home: the EV page's and Settings' back buttons only without it.
 			if _ev_live:
 				_ev_live.back_button = v <= 0.0
+			if _page is SettingsPage:
+				(_page as SettingsPage).back_button = v <= 0.0
 			_inset()
 			_tell_app_area()
 
@@ -445,6 +447,7 @@ func open_page(page: String) -> String:
 	elif page == "settings":
 		var settings := SettingsPage.new()
 		settings.back_pressed.connect(func(): open_page.call_deferred(_settings_from))
+		settings.back_button = rail_width <= 0.0
 		$Page.visible = true
 		_fit_page(settings)
 		_page = settings

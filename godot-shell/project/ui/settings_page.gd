@@ -14,6 +14,9 @@ const RAIL := "rail_order"
 ## Choices with up to this many options, all short, are set in place.
 const INLINE_OPTIONS := 4
 const INLINE_CHARS := 28
+## A row's control beside its text keeps this much room between them, in touch targets; it goes
+## under the text where it would not, and back only with a touch target more than that to spare.
+const WRAP_ROOM := 1.0
 ## Sliders send while they move, at most this often, as stock's do.
 const SLIDE_MS := 100
 ## A second tap within this acts: restarts, powers off, forgets a phone, removes a file.
@@ -32,6 +35,13 @@ static var app_dirs := default_app_dirs()
 static var config_home := default_config_home()
 
 var top_inset := 0.0
+## The header's back button and title; the shell turns them off beside a docked nav rail, the
+## way home, and the lists take the height.
+var back_button := true:
+	set(v):
+		back_button = v
+		if _back:
+			_place()
 
 ## The section open: LOOK, or an index into LIVI's sections.
 var section: Variant = 0
@@ -50,6 +60,9 @@ var _sliding := false
 var _slide_ms := 0
 var _dirty := false
 var _dirty_s := 0.0
+## Rows whose control is under their text, by section, id and label: kept across rebuilds, for
+## the hysteresis.
+var _wrapped := {}
 
 var _header: Control
 var _back: Button
@@ -75,6 +88,7 @@ func _init() -> void:
 	_back.pressed.connect(func(): back_pressed.emit())
 	_header.add_child(_back)
 	_title = UI.label("Settings", "display", "title")
+	_title.name = "Title"
 	_header.add_child(_title)
 	_apply_note = UI.label("Restarts the phone connection", "body", "caption", "dim")
 	_header.add_child(_apply_note)
@@ -173,19 +187,16 @@ func _style() -> void:
 
 func _place() -> void:
 	var g: float = ThemeManager.px.gap
-	var bar := TitleBar.bar_height()
+	var bar := TitleBar.bar_height() if back_button else 0.0
 	var left := g * 1.5
+	_back.visible = back_button
+	_title.visible = back_button
 	_header.position = Vector2.ZERO
 	_header.size = Vector2(size.x, bar)
 	var s := maxf(bar, ThemeManager.px.touch)
 	_back.size = Vector2(s, s)
 	_back.position = Vector2(left, (bar - s) / 2.0)
 	_title.position = Vector2(left + s + g, (bar - _title.get_combined_minimum_size().y) / 2.0)
-	var ah: float = ThemeManager.px.touch
-	_apply.size = Vector2(maxf(_apply.get_combined_minimum_size().x, ah * 2.2), ah)
-	_apply.position = Vector2(size.x - g * 1.5 - _apply.size.x, (bar - ah) / 2.0)
-	var note := _apply_note.get_combined_minimum_size()
-	_apply_note.position = Vector2(_apply.position.x - g - note.x, (bar - note.y) / 2.0)
 	var col := clampf(size.x * 0.26, 340.0, 520.0)
 	_sections.position = Vector2(left, bar + g)
 	_sections.size = Vector2(col, size.y - bar - g * 2)
@@ -199,8 +210,22 @@ func _place() -> void:
 	var lx: float = hh + g * 0.5 if _up.visible else 0.0
 	_heading_label.position = Vector2(lx, (hh - _heading_label.get_combined_minimum_size().y) / 2.0)
 	_heading_label.size.x = rw - lx
+	# Apply on the header's right; with no header, at the heading's end, its note only where the
+	# heading keeps its whole text beside them.
+	var ah: float = ThemeManager.px.touch
+	_apply.size = Vector2(maxf(_apply.get_combined_minimum_size().x, ah * 2.2), ah)
+	var note := _apply_note.get_combined_minimum_size()
+	var ay := (bar - ah) / 2.0 if back_button else _heading.position.y + (hh - ah) / 2.0
+	_apply.position = Vector2(size.x - g * 1.5 - _apply.size.x, ay)
+	_apply_note.position = Vector2(_apply.position.x - g - note.x, ay + (ah - note.y) / 2.0)
+	_apply_note.visible = _apply.visible
+	if not back_button and _apply.visible:
+		var room := _apply.position.x - g - rx - lx
+		_apply_note.visible = _text_width(_heading_label) + note.x + g <= room
+		_heading_label.size.x = room - (note.x + g if _apply_note.visible else 0.0)
 	_rows.position = Vector2(rx, bar + g * 2 + hh)
 	_rows.size = Vector2(rw, size.y - _rows.position.y - g)
+	_fit_rows()
 	queue_redraw()
 
 
@@ -400,7 +425,9 @@ func _row(r: Dictionary, id: Variant) -> Button:
 		v.clip_text = true
 		side = v
 	if str(r.get("detail", "")) != "":
-		text_parts.append(UI.label(str(r.detail), "body", "caption", "dim"))
+		var d := UI.label(str(r.detail), "body", "caption", "dim")
+		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		text_parts.append(d)
 	var text := UI.vbox(text_parts, 0)
 	text.alignment = BoxContainer.ALIGNMENT_CENTER
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -432,10 +459,21 @@ func _row(r: Dictionary, id: Variant) -> Button:
 	row.offset_right = -g * 1.2
 	UI.style_boxes(row)
 	b.add_child(row)
+	# A control, not a value: where the text leaves it no room, under the text (`_fit_rows`).
+	if side and not side is Label and not side is SwitchMark:
+		var need := 0.0
+		for l in text_parts:
+			need = maxf(need, _text_width(l))
+		b.set_meta("wrap_side", side)
+		b.set_meta("wrap_text", text)
+		b.set_meta("wrap_need", need)
+		b.set_meta("wrap_at", side.get_index())
+		b.set_meta("wrap_flags", side.size_flags_horizontal)
+		b.set_meta("wrap_key", "%s/%s/%s" % [section, id, r.get("label", "")])
+		_set_wrapped(b, _wrapped.get(b.get_meta("wrap_key"), false))
 	# Outside the tree a container's minimum is not known yet: follow it.
-	var fit := func(): b.custom_minimum_size.y = maxf(ThemeManager.px.touch * 1.3, row.get_combined_minimum_size().y + g * 1.4)
-	row.minimum_size_changed.connect(fit)
-	fit.call()
+	row.minimum_size_changed.connect(_lay_row.bind(b))
+	_lay_row(b)
 	# A phone's row stays lit for its tools: offline only dims what it shows of the phone.
 	if r.get("device") is Dictionary:
 		if r.get("dimmed", false):
@@ -447,6 +485,106 @@ func _row(r: Dictionary, id: Variant) -> Button:
 	if tap != "":
 		b.pressed.connect(func(): if not _rows.dragged: _livi_or_look(id, tap))
 	return b
+
+
+## Each row's control beside its text where the whole text and the control fit on one line,
+## else under the text, the row's width. Follows the list's width, so a resize, the text size,
+## the status bar's edge, the rail and the hand all come through `_place`.
+func _fit_rows() -> void:
+	var w: float = _rows.size.x - ThemeManager.px.gap * 2.4
+	if w <= 0.0:
+		return
+	for b in _rows.list.get_children():
+		if not b.has_meta("wrap_side"):
+			continue
+		var side: Control = b.get_meta("wrap_side")
+		var box: HBoxContainer = b.get_node("Box")
+		var need: float = b.get_meta("wrap_need") + _line_width(side) + ThemeManager.px.touch * WRAP_ROOM
+		var n := 1
+		for c in box.get_children():
+			if c is Control and c.visible and c != side and c != b.get_meta("wrap_text"):
+				need += c.get_combined_minimum_size().x
+				n += 1
+		need += box.get_theme_constant("separation") * n
+		var key: String = b.get_meta("wrap_key")
+		var was: bool = _wrapped.get(key, false)
+		var wrap: bool = need > (w - ThemeManager.px.touch if was else w)
+		_wrapped[key] = wrap
+		_set_wrapped(b, wrap)
+
+
+## A control's width on one line: a choice's options side by side.
+func _line_width(c: Control) -> float:
+	if not c is FlowContainer:
+		return c.get_combined_minimum_size().x
+	var w := 0.0
+	for o in c.get_children():
+		w += o.get_combined_minimum_size().x
+	return w + c.get_theme_constant("h_separation") * maxf(0.0, c.get_child_count() - 1)
+
+
+## Moves a row's control under its text (`Below`, the row's width; a choice's options share it,
+## onto more lines if they need) or back beside it.
+func _set_wrapped(b: Button, wrap: bool) -> void:
+	var side: Control = b.get_meta("wrap_side")
+	var box: HBoxContainer = b.get_node("Box")
+	var below: HBoxContainer = b.get_node_or_null("Below")
+	if wrap:
+		if below == null:
+			below = UI.hbox([], 1.0)
+			below.name = "Below"
+			below.minimum_size_changed.connect(_lay_row.bind(b))
+			b.add_child(below)
+		if side.get_parent() != below:
+			side.get_parent().remove_child(side)
+			below.add_child(side)
+		side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	else:
+		if side.get_parent() != box:
+			side.get_parent().remove_child(side)
+			box.add_child(side)
+			box.move_child(side, b.get_meta("wrap_at"))
+		side.size_flags_horizontal = b.get_meta("wrap_flags")
+		if below:
+			b.remove_child(below)
+			below.queue_free()
+	if side is FlowContainer:
+		# Beside the text a choice keeps one line; under it, its options share the row.
+		side.custom_minimum_size.x = 0.0 if wrap else _line_width(side)
+		for o in side.get_children():
+			o.size_flags_horizontal = Control.SIZE_EXPAND_FILL if wrap else Control.SIZE_FILL
+	_lay_row(b)
+
+
+## A row's height and lines: the text's (and the control's, beside it), or the text's line over
+## the control's.
+func _lay_row(b: Button) -> void:
+	var g: float = ThemeManager.px.gap
+	var box: Control = b.get_node("Box")
+	var below: Control = b.get_node_or_null("Below")
+	var top := box.get_combined_minimum_size().y
+	if below == null or below.is_queued_for_deletion():
+		box.anchor_bottom = 1.0
+		box.offset_top = 0.0
+		box.offset_bottom = 0.0
+		b.custom_minimum_size.y = maxf(ThemeManager.px.touch * 1.3, top + g * 1.4)
+		return
+	var pad := g * 0.7
+	top = maxf(top, ThemeManager.px.touch)
+	box.anchor_bottom = 0.0
+	box.offset_top = pad
+	box.offset_bottom = pad + top
+	below.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	below.offset_left = box.offset_left
+	below.offset_right = box.offset_right
+	below.offset_top = pad + top + g * 0.4
+	below.offset_bottom = -pad
+	b.custom_minimum_size.y = pad * 2.0 + top + g * 0.4 + below.get_combined_minimum_size().y
+
+
+## A label's text on one line, in its font.
+static func _text_width(l: Label) -> float:
+	return l.get_theme_font("font").get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, l.get_theme_font_size("font_size")).x
 
 
 ## What leads a row: its file or folder, the phone's kind (lit while it is the one shown), a
@@ -580,13 +718,15 @@ func _inline(opts: Array) -> bool:
 	return chars <= INLINE_CHARS
 
 
-## A segmented choice: the selected option in the accent.
-func _segments(opts: Array, id: Variant) -> HBoxContainer:
-	var box := HBoxContainer.new()
+## A segmented choice: the selected option in the accent. One line beside a row's text; under
+## it, as many as the options need (`_set_wrapped`).
+func _segments(opts: Array, id: Variant) -> HFlowContainer:
+	var box := HFlowContainer.new()
 	box.name = "Choice"
 	box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.4))
+	box.add_theme_constant_override("h_separation", roundi(ThemeManager.px.gap * 0.4))
+	box.add_theme_constant_override("v_separation", roundi(ThemeManager.px.gap * 0.4))
 	for i in opts.size():
 		var o: Dictionary = opts[i]
 		var b := Button.new()

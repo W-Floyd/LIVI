@@ -53,6 +53,97 @@ steps:
       var rows := "Settings/Rows/List/"
       if not shell.get_node(rows + "Road markings/Box/Switch").on or not shell.get_node(rows + "Map colours/Box/Choice/Day").button_pressed:
           return "the page did not follow the app's change"
+  # Every row's control inside its card and the page, in every section at text 1.0 and 1.4, each
+  # status bar edge and hand; a control the text leaves no room for goes under it. Settings' title
+  # and back button only without a docked rail (here, then beside one).
+  - theme: { theme_name: calm, material: frosted, reduced_motion: true }
+  - gdscript: &fits |
+      var s: SettingsPage = shell.get_node("Settings")
+      var rows: DragScroll = s.get_node("Rows")
+      var docked: bool = runner._vp.has_node("NavRail")
+      var sections: Array = ["app:godot-maps", "look"] + range(s._view.get("sections", []).size())
+      for text in [1.0, 1.4]:
+          for pos in ["top", "bottom", "left", "right", "off"]:
+              for hand in ["lhd", "rhd"]:
+                  ThemeManager.set_look({text_scale = text, status_position = pos, hand = hand})
+                  for sec in sections:
+                      s.open_section(sec)
+                      await runner.frames(2)
+                      var at := "rail %s, text %s, %s, %s, %s: " % [docked, text, pos, hand, sec]
+                      for n in ["Back", "Title"]:
+                          if s.get_node("Header/" + n).visible == docked:
+                              return at + "the header's %s shown: %s" % [n, not docked]
+                      var page := s.get_global_rect()
+                      var rr := rows.get_global_rect()
+                      for b in rows.list.get_children():
+                          var br: Rect2 = b.get_global_rect()
+                          if br.position.x < rr.position.x - 0.5 or br.end.x > minf(rr.end.x, page.end.x) + 0.5:
+                              return at + "%s at %s is past the list %s" % [b.name, br, rr]
+                          for c in b.find_children("*", "Control", true, false):
+                              var cr: Rect2 = c.get_global_rect()
+                              if c.is_visible_in_tree() and cr.has_area() and not br.grow(0.5).encloses(cr):
+                                  return at + "%s at %s is past its card %s" % [b.get_path_to(c), cr, br]
+                      if str(sec) == "app:godot-maps" and docked and text == 1.0 and pos == "top" and hand == "lhd":
+                          # The panel's width beside the rail: the profile's options under its text.
+                          var row: Control = rows.list.get_node("Performance profile")
+                          var choice: Control = row.get_node_or_null("Below/Choice")
+                          var label: Control = row.get_node("Box").find_children("*", "Label", true, false)[1]
+                          if choice == null or choice.get_global_rect().position.y < label.get_global_rect().end.y:
+                              return at + "the profile's choice is not under its text: %s" % [row.find_children("Choice", "", true, false)]
+      ThemeManager.set_look({text_scale = 1.0, status_position = "top", hand = "lhd"})
+      s.open_section("app:godot-maps")
+      await runner.frames(2)
+  - gdscript: |
+      NavRail.attach(shell).show_page("settings")
+      await runner.frames(3)
+  - gdscript: *fits
+  # Under its text once it does not fit beside it, and back only with a touch target to spare: no
+  # flip-flop at the edge.
+  - gdscript: |
+      var s: SettingsPage = shell.get_node("Settings")
+      var row: Control = s.get_node("Rows/List/Performance profile")
+      var under := func() -> bool: return row.has_node("Below/Choice")
+      var y := s.size.y
+      var w0 := s.size.x
+      var back := -1.0
+      for i in 800:
+          s.size = Vector2(w0 + i * 2.0, y)
+          if not under.call():
+              back = s._rows.size.x
+              break
+      var again := -1.0
+      for i in 800:
+          s.size = Vector2(s.size.x - 2.0, y)
+          if under.call():
+              again = s._rows.size.x
+              break
+      shell._fit_page(s)
+      await runner.frames(2)
+      if back < 0.0 or again < 0.0 or back - again < ThemeManager.px.touch - 2.0:
+          return "beside its text from a list %s wide, under it again from %s" % [back, again]
+      if not under.call():
+          return "not under its text again at the panel's width"
+      var rows: DragScroll = s.get_node("Rows")
+      rows.reveal(row)
+      rows.offset += rows.size.y * 0.25
+      await runner.frames(2)
+  - screenshot: settings-maps-rail
+  # With no header, Apply goes at the end of the open section's heading.
+  - set: { core: { sessions: { total: 1 } } }
+  - tap: { node: Settings/Sections/List/General }
+  - wait: { frames: 20 }
+  - set: { core: { config: { carName: Kia } } }
+  - wait: { frames: 20 }
+  - gdscript: |
+      var s: SettingsPage = shell.get_node("Settings")
+      var a: Rect2 = s.get_node("Header/Apply").get_global_rect()
+      var h: Rect2 = s.get_node("Heading").get_global_rect()
+      var t: Rect2 = s.get_node("Heading/Title").get_global_rect()
+      if not s.get_node("Header/Apply").visible or not h.grow(0.5).encloses(a) or t.end.x > a.position.x:
+          return "Apply at %s, the heading at %s, its title at %s" % [a, h, t]
+  - screenshot: settings-apply-rail
+  - tap: { node: Settings/Header/Apply }
+  - expect_action: { ApplySettings: null }
   # tokens.json: the look resolved, rewritten when it changes.
   - gdscript: |
       ThemeManager.tokens_file = SettingsPage.config_home.path_join("livi-shell/tokens.json")

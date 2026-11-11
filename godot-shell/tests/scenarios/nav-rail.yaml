@@ -41,6 +41,13 @@ steps:
   - tap: { node: ../NavRail/Items/settings }
   - wait: { frames: 2 }
   - gdscript: *clear
+  # The rail is the way home: no title or back button, and the lists start at the top.
+  - gdscript: |
+      var s: SettingsPage = shell.get_node("Settings")
+      if s.get_node("Header/Back").visible or s.get_node("Header/Title").visible:
+          return "Settings' title or back button beside the docked rail"
+      if s.get_node("Sections").position.y > ThemeManager.px.gap * 1.5:
+          return "the sections start at %s" % s.get_node("Sections").position.y
   - screenshot: nav-rail-settings
   - tap: { node: ../NavRail/Items/ev }
   - wait: { frames: 2 }

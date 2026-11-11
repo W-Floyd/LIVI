@@ -21,6 +21,16 @@
         {"key": "road_color_level", "kind": "slider", "label": "Road colours", "default": 0.6666666666666666,
           "min": 0, "max": 1, "labels": ["Shaded", "Muted", "Normal", "Bright"]}
       ]
+    },
+    {
+      "title": "Performance",
+      "rows": [
+        {"key": "performance_profile", "kind": "choice", "label": "Performance profile", "detail": "Sets the options below; changing one makes it Custom", "default": "light",
+          "options": [{"value": "light", "label": "Light"}, {"value": "balanced", "label": "Balanced"}, {"value": "full", "label": "Full"}, {"value": "custom", "label": "Custom"}]},
+        {"key": "render_on_demand", "kind": "toggle", "label": "Draw only when the map changes", "detail": "A still map then costs next to nothing", "default": true},
+        {"key": "max_fps", "kind": "choice", "label": "Frame rate", "default": 30,
+          "options": [{"value": 0, "label": "Display's"}, {"value": 30, "label": "30 fps"}, {"value": 20, "label": "20 fps"}, {"value": 15, "label": "15 fps"}]}
+      ]
     }
   ]
 }

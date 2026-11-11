@@ -1,0 +1,30 @@
+# Media (com.hkmc.av.app.mediagate/.MediaGateActivity): launcher entry 11, a source picker over the
+# launcher (app_box 0..7: FM, SiriusXM, Bluetooth audio, USB music, Sounds of Nature, AM, Android Auto,
+# Apple CarPlay). Bluetooth audio, USB music, Android Auto and CarPlay are disabled with no device. FM and
+# AM open the radio (radio.yaml); SiriusXM the radio's SXM page (no module: no channels); Sounds of Nature
+# com.hkmc.av.app.naturesound/.ui.NatureSoundActivity (built-in sounds; no audio output modelled).
+
+screens:
+  media:
+    expect: { activity: "mediagate/.*MediaGateActivity", ui: [app_box, grid_item_text] }
+  media-siriusxm:
+    expect: { activity: "radiona/.*RadioFmAmMainActivity", ui: [btn_sxm_tune_down] }
+  media-siriusxm-channels:
+    expect: { activity: "radiona/.*RadioStationListActivity" }
+  sounds-of-nature:
+    expect: { activity: "naturesound/.*NatureSoundActivity", ui: [play_pause, title_list] }
+  sounds-of-nature-list:
+    expect: { activity: "naturesound/.*" }
+
+transitions:
+  - { from: home-apps, to: media, do: [{ tap_id: app_box_11 }, { wait: 8 }] }
+  - { from: media, to: media-siriusxm, do: [{ tap_id: app_box, index: 1 }, { wait: 8 }] }
+  - { from: media-siriusxm, to: media-siriusxm-channels, do: [{ tap_id: btn_station_list }, { wait: 5 }] }
+  - { from: media, to: sounds-of-nature, do: [{ tap_id: app_box, index: 4 }, { wait: 8 }] }
+  - { from: sounds-of-nature, to: sounds-of-nature-list, do: [{ tap_id: title_list }, { wait: 5 }] }
+
+unreachable:
+  media-bluetooth-audio: "disabled without a paired Bluetooth device (no Bluetooth modelled)"
+  media-usb-music: "disabled without a USB stick (no USB host modelled)"
+  media-android-auto: "disabled without a phone on USB"
+  media-carplay: "disabled without an iPhone on USB"

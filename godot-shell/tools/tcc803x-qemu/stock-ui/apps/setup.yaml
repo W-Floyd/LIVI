@@ -1,0 +1,87 @@
+# Setup (com.android.settings/.Settings): launcher entry 12, a grid of eleven settings apps
+# (grid_item_text_1..11): 1 Vehicle (com.android.vehiclesettings), 2 EV (the EV app's EvSettingActivity,
+# ../../stock-ui.yaml), 3 Navigation (navigation.yaml: unreachable), 4 Sound (com.android.soundsettings),
+# 5 Device connections (com.android.btsettings / phone projection settings), 6 User profile
+# (com.hkmc.system.app.userprofile), 7 Voice recognition (com.android.settings .voice.VoiceMainSettings),
+# 8 Screen theme/layout (com.android.themesettings), 9 Display (com.android.displaysettings), 10 Button
+# (com.android.buttonsettings), 11 General (com.android.generalsettings). Each page has tabs down the
+# left (x 187; y 234, 342, 449, ...) and the selected tab's items on the right.
+#
+# Vehicle settings show only what the car's option bits enable: with the fake micom, Driver assistance
+# (warning method, parking safety) and Cluster (illumination, which opens Display).
+
+screens:
+  setup:
+    expect: { activity: "com.android.settings/.*Settings$", ui: [grid_item_text_11] }
+  vehicle-settings:
+    expect: { activity: "vehiclesettings/.*VehicleSetting", ui: [vs_settings_da_button, vs_settings_clu_button] }
+  vehicle-settings-cluster:
+    expect: { activity: "vehiclesettings/.*VehicleSetting", ui: [list_view_items] }
+  vehicle-driver-assistance-warning:
+    expect: { activity: "vehiclesettings/.*DriverAssistSettings", ui: [warning_sound_and_haptic_item_list] }
+  vehicle-driver-assistance-parking:
+    expect: { activity: "vehiclesettings/.*DriverAssistSettings", ui: [park_safety_item_list] }
+  # uiautomator keeps dumping Setup's window over Sound settings: the activity alone tells it.
+  sound-settings:
+    expect: { activity: "soundsettings/.*SoundSetting" }
+  sound-settings-position:
+    expect: { activity: "soundsettings/.*SoundSetting" }
+  sound-settings-tone:
+    expect: { activity: "soundsettings/.*SoundSetting" }
+  sound-settings-guidance:
+    expect: { activity: "soundsettings/.*SoundSetting" }
+  sound-settings-radio-noise:
+    expect: { activity: "soundsettings/.*SoundSetting" }
+  user-profile-settings:
+    expect: { activity: "userprofile/.*UserProfileMainActivity", ui: [list_userprofile_main] }
+  user-profile-change-user:   # SystemUI: the consent screen's profile picker, switching to the next profile
+    expect: { activity: "^com.android.systemui$" }
+  voice-settings:
+    expect: { activity: "com.android.settings/.*VoiceMainSettings", ui: [tab_main] }
+  theme-settings:
+    expect: { activity: "themesettings/.*MainActivity", ui: [tab_title] }
+  theme-settings-screen-saver:
+    expect: { activity: "themesettings/.*MainActivity", ui: [tab_title] }
+  theme-settings-split-screen:
+    expect: { activity: "themesettings/.*MainActivity", ui: [tab_title] }
+  display-settings:
+    expect: { activity: "displaysettings/.*DisplaySetting", ui: [sensor_auto_on_off] }
+  display-settings-blue-light:
+    expect: { activity: "displaysettings/.*DisplaySetting", ui: [tab_main] }
+  display-settings-camera:
+    expect: { activity: "displaysettings/.*DisplaySetting", ui: [tab_main] }
+  button-settings:
+    expect: { activity: "buttonsettings/.*ButtonSettings", ui: [tab_title] }
+  button-settings-steering-custom:
+    expect: { activity: "buttonsettings/.*ButtonSettings", ui: [tab_title] }
+  button-settings-steering-mode:
+    expect: { activity: "buttonsettings/.*ButtonSettings", ui: [tab_title] }
+
+transitions:
+  - { from: home-apps, to: setup, do: [{ tap_id: app_box_12 }, { wait: 8 }] }
+  - { from: setup, to: vehicle-settings, do: [{ tap_id: grid_item_text_1 }, { wait: 8 }] }
+  - { from: vehicle-settings, to: vehicle-settings-cluster, do: [{ tap_id: vs_settings_clu_button }, { wait: 4 }] }
+  - { from: vehicle-settings, to: vehicle-driver-assistance-warning, do: [{ tap_id: warning_volume_view }, { wait: 6 }] }
+  - { from: vehicle-settings, to: vehicle-driver-assistance-parking, do: [{ tap_id: parking_safety_view }, { wait: 6 }] }
+  - { from: setup, to: sound-settings, do: [{ tap_id: grid_item_text_4 }, { wait: 12 }] }
+  - { from: sound-settings, to: sound-settings-position, do: [{ tap: [187, 342] }, { wait: 4 }] }
+  - { from: sound-settings, to: sound-settings-tone, do: [{ tap: [187, 449] }, { wait: 4 }] }
+  - { from: sound-settings, to: sound-settings-guidance, do: [{ tap: [187, 557] }, { wait: 4 }] }
+  - { from: sound-settings, to: sound-settings-radio-noise, do: [{ tap: [187, 665] }, { wait: 4 }] }
+  - { from: setup, to: user-profile-settings, do: [{ tap_id: grid_item_text_6 }, { wait: 8 }] }
+  - { from: user-profile-settings, to: user-profile-change-user, do: [{ tap: [226, 342] }, { wait: 5 }] }
+  - { from: setup, to: voice-settings, do: [{ tap_id: grid_item_text_7 }, { wait: 8 }] }
+  - { from: setup, to: theme-settings, do: [{ tap_id: grid_item_text_8 }, { wait: 8 }] }
+  - { from: theme-settings, to: theme-settings-screen-saver, do: [{ tap: [187, 342] }, { wait: 4 }] }
+  - { from: theme-settings, to: theme-settings-split-screen, do: [{ tap: [187, 449] }, { wait: 4 }] }
+  - { from: setup, to: display-settings, do: [{ tap_id: grid_item_text_9 }, { wait: 8 }] }
+  - { from: display-settings, to: display-settings-blue-light, do: [{ tap: [187, 342] }, { wait: 4 }] }
+  - { from: display-settings, to: display-settings-camera, do: [{ tap: [187, 449] }, { wait: 4 }] }
+  - { from: setup, to: button-settings, do: [{ tap_id: grid_item_text_10 }, { wait: 8 }] }
+  - { from: button-settings, to: button-settings-steering-custom, do: [{ tap: [187, 411] }, { wait: 4 }] }
+  - { from: button-settings, to: button-settings-steering-mode, do: [{ tap: [187, 543] }, { wait: 4 }] }
+
+unreachable:
+  device-connections: "Setup > Device connections falls back to the launcher (Bluetooth, phone projection and Wi-Fi settings; no Bluetooth, USB or Wi-Fi modelled); cause not established"
+  general-settings: "Setup > General opens nothing (com.android.generalsettings); cause not established"
+  ev-settings: "the EV app's settings: ../../stock-ui.yaml"

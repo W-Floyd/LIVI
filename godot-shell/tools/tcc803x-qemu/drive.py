@@ -22,17 +22,28 @@ def ppm2png(a, b):
 
 def load_yaml(path):
     # No PyYAML here: Ruby's stdlib reads it.
-    return json.loads(subprocess.check_output(["ruby", "-ryaml", "-rjson", "-e", "puts JSON.dump(YAML.load_file(ARGV[0]))", path]))
+    g = json.loads(subprocess.check_output(["ruby", "-ryaml", "-rjson", "-e", "puts JSON.dump(YAML.load_file(ARGV[0]))", path]))
+    # include: more graph files (globs, relative to this one) merged in; the first file's start wins.
+    import glob
+    for pat in g.pop("include", []):
+        for f in sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(path)), pat))):
+            h = load_yaml(f)
+            g.setdefault("start", h.get("start"))
+            g.setdefault("transitions", []).extend(h.get("transitions", []))
+            for k in ("states", "modes", "screens", "unreachable"):
+                g.setdefault(k, {}).update(h.get(k, {}))
+    return g
 
 class Machine:
     """run.sh resumed from LOADVM, its console on a pipe, its monitor and micom UART on sockets."""
-    MON, MICOM, GPS = "/tmp/tccq.mon", "/tmp/tccq.micom", "/tmp/tccq.gps"  # unix socket paths are limited to ~100 bytes
+    # unix socket paths are limited to ~100 bytes; TCCQ: another prefix, to run beside another instance
+    MON, MICOM, GPS = (os.environ.get("TCCQ", "/tmp/tccq") + x for x in (".mon", ".micom", ".gps"))
     def __init__(self, log):
         env = dict(os.environ, MON=self.MON, MICOM="unix:%s,server=on,wait=off" % self.MICOM, GPS="unix:%s,server=on,wait=off" % self.GPS,
                    TIMEOUT=os.environ.get("TIMEOUT", "14400"))
         self.p = subprocess.Popen([os.path.join(os.path.dirname(os.path.abspath(__file__)), "run.sh")], stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
-        self.buf, self.log, self.fake, self.gps = bytearray(), open(log, "wb"), None, None
+        self.buf, self.log, self.fake, self.gps = bytearray(), open(log, "ab"), None, None
         threading.Thread(target=self._read, daemon=True).start()
         time.sleep(3)
     def _read(self):
@@ -51,6 +62,13 @@ class Machine:
             if m: return bytes(self.buf[:m.start()]).decode(errors="replace").replace("\r", "")
             time.sleep(0.3)
         raise TimeoutError(cmd)
+    def ready(self, timeout=300):
+        """Waits for the console shell (a cold boot takes ~10 s to it; input before is lost)."""
+        t = time.time()
+        while True:
+            try: return self.sh("", timeout=10)
+            except TimeoutError:
+                if time.time() - t > timeout: raise
     def mon(self, cmd, timeout=300):
         s = socket.socket(socket.AF_UNIX); s.connect(self.MON); s.settimeout(1); time.sleep(.3)
         s.send((cmd + "\n").encode()); r, t = b"", time.time()
@@ -88,10 +106,25 @@ def flow_view(m):
     ids = set(re.findall(r"\{[0-9a-f]+ V[^}]*app:id/(\w+)", m.sh("dumpsys activity top")))
     return focus.group(1) if focus else "", ids
 
+def flow_nodes(m):
+    """uiautomator's nodes of the focused window: [(resource id, text, (x, y) centre)]; none for a system window."""
+    try: x = m.sh("uiautomator dump /data/local/tmp/ui.xml >/dev/null && cat /data/local/tmp/ui.xml; echo", timeout=45)
+    except TimeoutError:  # uiautomator sometimes hangs: interrupt it, see nothing
+        m.p.stdin.write(b"\x03\n"); m.p.stdin.flush(); time.sleep(2); m.sh("", timeout=30); return []
+    out = []
+    for a in re.findall(r"<node ([^>]*)>", x):
+        at = dict(re.findall(r'([\w-]+)="([^"]*)"', a))
+        b = [int(v) for v in re.findall(r"\d+", at.get("bounds", ""))]
+        if len(b) == 4: out.append((at.get("resource-id", "").split("/")[-1], at.get("text", ""), ((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)))
+    return out
+
 def flow_arrived(m, exp, tries=6):
     for _ in range(tries):
         focus, ids = flow_view(m)
         ok = re.search(exp.get("activity", ""), focus) and (exp.get("dialog") or set(exp.get("ids", [])) <= ids)
+        if ok and exp.get("ui"):  # ids or texts uiautomator sees (views dumpsys does not name, dialogs)
+            seen = {v for n in flow_nodes(m) for v in n[:2]}
+            ok = set(exp["ui"]) <= seen
         if ok: return True, focus
         time.sleep(3)
     return False, focus
@@ -102,6 +135,16 @@ def flow_do(m, steps):
         elif "key" in st: m.sh("input keyevent %s" % {"BACK": 4, "HOME": 3}.get(st["key"], st["key"]))
         elif "shell" in st: m.sh(st["shell"])
         elif "wait" in st: time.sleep(st["wait"])
+        elif "tap_id" in st or "tap_text" in st:
+            k, v = (0, st["tap_id"]) if "tap_id" in st else (1, st["tap_text"])
+            hit = [n[2] for n in flow_nodes(m) if n[k] == v]
+            if not hit: raise LookupError("no view %r" % v)
+            m.sh("input tap %d %d" % hit[st.get("index", 0)])
+        elif "until" in st:  # cold boot: wait for a window to take the focus
+            t = time.time()
+            while not re.search(st["until"], flow_view(m)[0]):
+                if time.time() - t > st.get("timeout", 300): raise TimeoutError(st["until"])
+                time.sleep(5)
         else: raise ValueError("unknown step %r" % st)
 
 def flow_path(g, target):
@@ -120,24 +163,27 @@ def flow_path(g, target):
 def flow_main(yml, target, outdir):
     g = load_yaml(yml)
     os.makedirs(outdir, exist_ok=True)
-    tag = os.environ.get("LOADVM", "ui")
+    tag = os.environ.get("LOADVM", "ui")  # LOADVM= (empty) with a raw EMMC: cold boot per target
     m = Machine(os.path.join(outdir, "console.log"))
-    targets = [s for s in g["screens"] if s != g["start"]] if target == "all" else [target]
+    import fnmatch  # TARGET: a screen, all, or a glob (apps-settings-*)
+    targets = [s for s in g["screens"] if s != g["start"] and fnmatch.fnmatch(s, "*" if target == "all" else target)]
     report, first = {}, True
     try:
-        m.sh("", timeout=60)
+        m.ready()
         for tg in targets:
             out = os.path.join(outdir, tg)
-            if not first: m.mon("loadvm " + tag); time.sleep(2); m.sh("", timeout=60)
+            if not first and tag: m.mon("loadvm " + tag); time.sleep(2); m.sh("", timeout=60)
+            elif not first: m.close(); m.p.wait(); m = Machine(os.path.join(outdir, "console.log")); m.ready()
             first = False
             scr = g["screens"][tg]
-            m.micom(g.get("states", {}).get(scr.get("state"), {}), out); time.sleep(3)
+            m.micom(g.get("states", {}).get(scr.get("state", g.get("state")), {}), out); time.sleep(3)
             for need in scr.get("needs", []): flow_do(m, g["modes"][need]["setup"])
             path = flow_path(g, tg)
             if path is None: report[tg] = "no path"; continue
             res = "reached"
             for t in path:
-                flow_do(m, t["do"])
+                try: flow_do(m, t["do"])
+                except (LookupError, TimeoutError) as e: res = "stuck before %s (%s)" % (t["to"], e); break
                 ok, focus = flow_arrived(m, g["screens"][t["to"]].get("expect", {}))
                 if not ok: res = "stuck before %s (focus %s)" % (t["to"], focus); break
             m.shot(out + ".png")

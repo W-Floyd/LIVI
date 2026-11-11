@@ -1,0 +1,17 @@
+# Climate (com.hkmc.telematics.service.apps.climate/.activities.InteriorClimate): launcher entry 7.
+# Shows the car's climate state from the micom (outside temperature from the capture; AUTO, A/C, HEAT,
+# SYNC as the fake holds them). The climate settings tile (setup_list_lv) opens nothing here: its items
+# depend on vehicle options the fake does not set.
+
+screens:
+  climate:
+    expect: { activity: "climate/.*InteriorClimate", ui: [ui_climate_main_outside_txt, setup_list_lv] }
+  climate-menu:
+    expect: { activity: "AtchDlg:.*climate/.*InteriorClimate" }
+
+transitions:
+  - { from: home-apps, to: climate, do: [{ tap_id: app_box_7 }, { wait: 8 }] }
+  - { from: climate, to: climate-menu, do: [{ tap: [474, 44] }, { wait: 3 }] }
+
+unreachable:
+  climate-settings: "the settings tile opens nothing: its entries follow vehicle option bits the fake micom does not send"

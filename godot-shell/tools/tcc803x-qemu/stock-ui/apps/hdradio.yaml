@@ -1,0 +1,16 @@
+# HD Radio data (com.hkmc.av.app.hddata/.HDDataMainActivity): launcher entry 9; split screen. Two tiles,
+# traffic and Doppler radar (DopplerRadarActivity), both fed by HD Radio data services.
+
+screens:
+  hd-radio-data:
+    expect: { activity: "hddata/.*HDDataMainActivity", ui: [traffic, doppler] }
+  hd-radio-data-menu:
+    expect: { activity: "AtchDlg:.*hddata/.*HDDataMainActivity" }
+
+transitions:
+  - { from: home-apps, to: hd-radio-data, do: [{ tap_id: app_box_9 }, { wait: 8 }] }
+  - { from: hd-radio-data, to: hd-radio-data-menu, do: [{ tap: [338, 44] }, { wait: 3 }] }
+
+unreachable:
+  hd-radio-traffic: "needs HD Radio data (no tuner) and the navigation's map: the tile does nothing"
+  hd-radio-doppler: "needs HD Radio data (no tuner) and the navigation's map: the tile does nothing"

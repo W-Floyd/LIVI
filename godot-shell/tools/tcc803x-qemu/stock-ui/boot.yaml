@@ -1,0 +1,80 @@
+# The stock boot flow (EV6, V015), power-on to the launcher, for drive.py --flow from a cold boot each
+# target: LOADVM= (empty) and EMMC the raw image (attached snapshot=on, so every boot is the first, with
+# an empty /data). Screens and keys as in ../stock-ui.yaml; `until` waits for a window to take the focus.
+#
+# Windows, not activities: the welcome overlay and the consent screen are system windows (focus title
+# Welcome, ConsentScreen, ConsentScreenLocaleDialog), which uiautomator cannot dump; the first-run setup
+# is an activity of com.hkmc.system.app.userprofile.
+
+start: power-on
+state: parked
+
+states:
+  # Parked, IGN on, regulation off. The capture's boot record has the driving regulation set (byte 2),
+  # which first-run setup honours ("unavailable while driving"): the boot record and the three system
+  # frames (0x8103 regulation 0, 0x819a regulation B 0, 0x8129 parking brake 1) clear it.
+  parked:
+    still: 30s
+    scenario:
+      - { msg: "Boot record (full)", set: { ACC: true, IGN1: true, IGN3: true, "CAN DB generation": 2, "Driving regulation": false, "Parking brake": true } }
+      - { msg: "VCU ready", set: { "VCU ready": true } }
+      - { frame: "ff018a018103000200f5" }
+      - { frame: "ff018a01819a0002006c" }
+      - { frame: "ff018a018129000201de" }
+  # The capture's state as is: the driving regulation on.
+  regulated:
+    still: 30s
+    scenario:
+      - { msg: "Boot record (full)", set: { ACC: true, IGN1: true, IGN3: true, "CAN DB generation": 2 } }
+      - { msg: "VCU ready", set: { "VCU ready": true } }
+
+screens:
+  power-on: {}
+  # The welcome overlay: black (its video needs the VPU), on top of consent until IGN on removes it.
+  welcome:
+    expect: { activity: "^Welcome$" }
+  consent:
+    expect: { activity: "^ConsentScreen$" }
+  consent-language:
+    expect: { activity: "^ConsentScreenLocaleDialog$" }
+  first-run-setup:
+    expect: { activity: "userprofile/.*UserProfileFRSActivity", ui: [frs_start_layout, button_start] }
+  first-run-setup-regulated:
+    state: regulated
+    expect: { activity: "userprofile/.*UserProfileFRSActivity", ui: [regulation_layout_id] }
+  frs-language:
+    expect: { activity: "userprofile/.*UserProfileFRSActivity", ui: [frs_page_language] }
+  frs-user-name:
+    expect: { activity: "userprofile/.*UserProfileFRSActivity", ui: [frs_page_name] }
+  frs-rename-keyboard:
+    expect: { activity: "userprofile/.*UserProfileSettingActivity", ui: [userprofile_drivername, editor] }
+  frs-complete:
+    expect: { activity: "userprofile/.*UserProfileFRSActivity", ui: [frs_completion_layout] }
+  home:
+    expect: { activity: "com.android.launcher3/.*Launcher" }
+  frs-skip-confirm:
+    expect: { activity: "userprofile/.*UserProfileFRSActivity", dialog: true }
+  home-after-skip:
+    expect: { activity: "com.android.launcher3/.*Launcher" }
+
+# No VIOC: opening the image-enhancement device oopses the kernel into a reboot (~2 min into a boot here);
+# the bind mount (as overlay/init.emu.rc does) keeps a ramdisk without that fix up.
+transitions:
+  - from: power-on
+    to: welcome
+    do: [{ shell: "mount -o bind /dev/null /dev/display_image_enhancement" }, { until: "^Welcome$", timeout: 400 }]
+  - from: power-on
+    to: consent
+    do: [{ shell: "mount -o bind /dev/null /dev/display_image_enhancement" }, { until: "^ConsentScreen$", timeout: 600 }, { wait: 5 }]
+  - { from: consent, to: consent-language, do: [{ tap: [1544, 661] }, { wait: 5 }] }
+  - { from: consent, to: first-run-setup, do: [{ tap: [824, 661] }, { until: "UserProfileFRSActivity", timeout: 120 }, { wait: 5 }] }
+  - { from: consent, to: first-run-setup-regulated, do: [{ tap: [824, 661] }, { until: "UserProfileFRSActivity", timeout: 120 }, { wait: 5 }] }
+  - { from: first-run-setup, to: frs-language, do: [{ tap_id: button_start }, { wait: 5 }] }
+  - { from: frs-language, to: frs-user-name, do: [{ tap_id: button_next }, { wait: 5 }] }
+  - { from: frs-user-name, to: frs-rename-keyboard, do: [{ tap_id: btn_rename }, { wait: 5 }] }
+  - { from: frs-user-name, to: frs-complete, do: [{ tap_id: button_next }, { wait: 5 }] }
+  - { from: frs-complete, to: home, do: [{ tap_id: button_ok }, { wait: 10 }] }
+  - { from: first-run-setup, to: frs-skip-confirm, do: [{ tap_id: button_skip }, { wait: 5 }] }
+  - { from: frs-skip-confirm, to: home-after-skip, do: [{ tap: [720, 558] }, { wait: 10 }] }
+
+unreachable: {}

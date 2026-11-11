@@ -1,0 +1,27 @@
+# The stock apps (EV6, V015) as reached from the launcher, for drive.py --flow from a snapshot at home with
+# first-run setup done (README "Stock UI flows"). One file per launcher entry in apps/: its package and
+# activities, how it is reached, its screens, what is unreachable and why. The EV app's pages are in
+# ../stock-ui.yaml; here only the launcher's way in.
+#
+# Taps go by view id where uiautomator names one (tap_id), else by coordinates of the 1920x720 panel.
+# Split-screen apps (radio, HD Radio data, voice memo, quiet mode) use the left 1280 px; their status
+# bar menu is at x 338, a full-width app's at 474.
+
+start: home
+state: parked
+include: [apps/*.yaml]
+
+states:
+  # As boot.yaml's: parked, IGN on, the driving regulation off.
+  parked:
+    still: 30s
+    scenario:
+      - { msg: "Boot record (full)", set: { ACC: true, IGN1: true, IGN3: true, "CAN DB generation": 2, "Driving regulation": false, "Parking brake": true } }
+      - { msg: "VCU ready", set: { "VCU ready": true } }
+      - { frame: "ff018a018103000200f5" }
+      - { frame: "ff018a01819a0002006c" }
+      - { frame: "ff018a018129000201de" }
+
+screens:
+  home:
+    expect: { activity: "com.android.launcher3/.*Launcher" }

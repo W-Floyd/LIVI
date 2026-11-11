@@ -1,0 +1,17 @@
+# Phone (com.hkmc.bluetooth, DialtactsActivity) and Phone projection (com.daudio.app.phoneprojection,
+# com.google.android.projection.sink, com.daudio.app.dipo): launcher entries 4 and 5. No Bluetooth or USB
+# host in QEMU. Phone projection answers with a system popup (com.mobis.system's window) asking for a phone
+# on USB; com.daudio.app.dipo (CarPlay) crashes at start-up (DipoService, NullPointerException) and is
+# killed after repeated restarts.
+
+screens:
+  phone-projection-popup:
+    expect: { activity: "^com.mobis.system$" }
+
+transitions:
+  - { from: home-apps, to: phone-projection-popup, do: [{ tap_id: app_box_5 }, { wait: 6 }] }
+
+unreachable:
+  phone: "launcher Phone: nothing opens; no Bluetooth is modelled (a paired phone is the likely requirement, not confirmed)"
+  android-auto: "needs a phone on USB (no USB host modelled)"
+  carplay: "needs an iPhone on USB; its service crashes at start-up here"

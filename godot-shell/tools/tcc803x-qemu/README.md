@@ -262,3 +262,24 @@ QEMU=$TCC_QEMU EMMC=$TCC_EMMC LOADVM=ui BOOT_DIR=$TCC_BOOT_DIR RAMDISK=ramdisk.e
 `$OUT` (outside the repo: vendor UI) gets `<screen>.png`, the fake's log and record per screen, `console.log` and
 `report.json` (reached, stuck where, unreachable). `MICOM_CAPTURE` is optional: without it the state is the scenario alone.
 Each target costs about 30-60 s (resume, fake, taps, checks).
+
+The rest of the stock UI is in `stock-ui/`: `boot.yaml`, power-on to the launcher (welcome overlay, consent, its
+language dialog, first-run setup and its pages), walked from a cold boot per target, and `apps.yaml`, which includes
+`apps/*.yaml` (one per launcher entry: what it is, how it is reached, its screens, what is unreachable and why).
+All declared screens were reached (2026-11): boot 12, apps 52 (21 more listed unreachable with why, e.g. navigation, phone, Bluetooth and
+USB sources, HD Radio data services, SoundHound, device connections and general settings).
+Graph files can `include:` others (globs); a target can be a glob (`setup-*`); a top-level `state:` is the default
+car. Steps besides taps: `{tap_id: id}`, `{tap_text: text}` (the view's centre from a `uiautomator dump`; `index:` for
+the n-th) and `{until: regex, timeout: s}` (wait for a window to take the focus). `expect.ui` lists ids or texts
+`uiautomator` must see (dialogs, views `dumpsys activity top` does not name; not system windows, which it cannot
+dump). `TCCQ` (default `/tmp/tccq`) prefixes the monitor and micom sockets, to run beside another instance.
+
+```sh
+# boot flow: the raw image (snapshot=on: each boot is a first boot), no snapshot
+QEMU=$TCC_QEMU EMMC=$W/emmc8g.img LOADVM= BOOT_DIR=$TCC_BOOT_DIR RAMDISK=ramdisk.emu.gz ./drive.py --flow stock-ui/boot.yaml all $OUT
+# apps: the same snapshot as above (home, first-run setup done)
+QEMU=$TCC_QEMU EMMC=$TCC_EMMC LOADVM=ui BOOT_DIR=$TCC_BOOT_DIR RAMDISK=ramdisk.emu.gz ./drive.py --flow stock-ui/apps.yaml all $OUT
+```
+
+The capture's boot record has the driving regulation set (byte 2): first-run setup and other pages then show their
+driving lockout instead. The `parked` state of these files clears it (boot record, 0x8103 and 0x819a 0, 0x8129 1).

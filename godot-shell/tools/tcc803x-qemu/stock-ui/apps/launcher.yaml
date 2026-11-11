@@ -1,0 +1,41 @@
+# Launcher (com.android.launcher3, Launcher_WP3): a paged workspace. Page 1 is the home widgets (clock,
+# media, the EV widget, weather), page 2 the twelve app entries (app_box_1..12, left to right, top to
+# bottom), page 3 the user's manual. AppsMenu (com.android.launcher3/.view.AppsMenu, "Apps/Info") is
+# declared but has no entries on this unit (it lists connected-service apps). HOME twice lands on page 1.
+#
+# Entries (page 2): 1 EV (../../stock-ui.yaml), 2 Map and 3 Navigation menu (navigation.yaml: unreachable),
+# 4 Phone (phone.yaml), 5 Phone projection, 6 Voice memo, 7 Climate, 8 Quiet mode, 9 HD Radio data,
+# 10 Radio, 11 Media, 12 Setup; page 3: 1 User's manual.
+
+screens:
+  home-apps:
+    expect: { activity: "com.android.launcher3/.*Launcher", ui: [cell2, app_box_12] }
+  home-apps-more:
+    expect: { activity: "com.android.launcher3/.*Launcher", ui: [cell3, app_box_1] }
+  apps-info:
+    expect: { activity: "com.android.launcher3/.*AppsMenu", ui: [title_text] }
+  users-manual:
+    expect: { activity: "com.android.settings/.*WebManualSub" }
+  home-apps-menu:   # the status bar menu: display off, edit home icons, the web manual
+    expect: { activity: "launcher3", dialog: true }
+  edit-home-icons:
+    expect: { activity: "com.hkmc.system.app.homesetting/" }
+  ev-from-widget:   # the home page's EV widget opens the EV app (its pages: ../../stock-ui.yaml)
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity" }
+  user-profile:     # the status bar's profile picture
+    expect: { activity: "userprofile/.*UserProfileMainActivity", ui: [list_userprofile_main] }
+
+transitions:
+  - from: home
+    to: home-apps
+    do: [{ wait: 5 }, { key: HOME }, { wait: 4 }, { key: HOME }, { wait: 4 }, { shell: "input swipe 1700 400 200 400 300" }, { wait: 5 }]
+  - { from: home-apps, to: home-apps-more, do: [{ shell: "input swipe 1700 400 200 400 300" }, { wait: 4 }] }
+  - { from: home-apps-more, to: users-manual, do: [{ tap_id: app_box_1 }, { wait: 8 }] }
+  - { from: home-apps, to: home-apps-menu, do: [{ tap: [474, 44] }, { wait: 4 }] }
+  - { from: home-apps-menu, to: edit-home-icons, do: [{ tap: [200, 249] }, { wait: 8 }] }
+  - { from: home-apps, to: user-profile, do: [{ tap: [100, 44] }, { wait: 8 }] }
+  - { from: home, to: ev-from-widget, do: [{ tap: [969, 495] }, { wait: 8 }] }
+  - { from: home, to: apps-info, do: [{ shell: "am start -n com.android.launcher3/.view.AppsMenu" }, { wait: 8 }] }
+
+unreachable:
+  home-widgets: "the home page's clock, media and weather widgets open nothing here (no time, no media source, no network)"

@@ -1,0 +1,9 @@
+# Navigation (com.mnsoft.navi, MnSoft engine): launcher entries 2 (Map) and 3 (Navigation menu), the split
+# screen's map page, Setup's Navigation entry. NaviApp never draws: the split screen's map page keeps its
+# start-up message, the entries do nothing (docs/gnss-and-stock-nav.md: no map data on
+# this image, and the engine wants GLES 2, which the software renderer does not give).
+
+unreachable:
+  navigation-map: "launcher Map: nothing opens (the engine never starts: no map data, no GLES 2)"
+  navigation-menu: "launcher Navigation menu: nothing opens (as Map)"
+  navigation-settings: "Setup > Navigation: nothing opens (as Map)"

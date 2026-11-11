@@ -1,0 +1,12 @@
+# Quiet mode (com.android.rear_care/.RearCareModeMainActivity): launcher entry 8; split screen. One toggle
+# (rear_sleep_mode); on, it only changes the toggle here (no audio modelled).
+
+screens:
+  quiet-mode:
+    expect: { activity: "rear_care/.*RearCareModeMainActivity", ui: [rear_sleep_mode] }
+  quiet-mode-on:
+    expect: { activity: "rear_care/.*RearCareModeMainActivity", ui: [rear_sleep_mode] }
+
+transitions:
+  - { from: home-apps, to: quiet-mode, do: [{ tap_id: app_box_8 }, { wait: 8 }] }
+  - { from: quiet-mode, to: quiet-mode-on, do: [{ tap_id: rear_sleep_mode }, { wait: 4 }] }

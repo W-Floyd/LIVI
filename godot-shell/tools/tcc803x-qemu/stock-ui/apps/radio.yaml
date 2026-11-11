@@ -1,0 +1,37 @@
+# Radio (com.hkmc.av.app.radiona): launcher entry 10, or Media's FM/AM. RadioMainActivity hands over to
+# RadioFmAmMainActivity (left 1280 px; the right third is the split screen, which shows the navigation's
+# start-up message). No tuner in QEMU: FM 87.5 / AM 530, nothing found, no RDS or HD; the band button
+# toggles FM and AM (SiriusXM is skipped without its module). The station list searches forever.
+# Unreachable: SoundHound (needs network; the button does nothing), HD Radio on/off (no visible change
+# without an HD signal), the voice recognition key (no microphone: nothing opens).
+
+screens:
+  radio:
+    expect: { activity: "radiona/.*RadioFmAmMainActivity", ui: [band_toggle_sxm, btn_station_list] }
+  radio-am:
+    expect: { activity: "radiona/.*RadioFmAmMainActivity", ui: [text_am_frequency] }
+  radio-menu:
+    expect: { activity: "AtchDlg:.*radiona/.*RadioFmAmMainActivity" }
+  radio-add-station:
+    expect: { activity: "radiona/.*RadioFmAmMainActivity", ui: [listview_preset, layout_add_preset_footer] }
+  radio-station-list:
+    expect: { activity: "radiona/.*RadioStationListActivity", ui: [btn_band_fm, btn_preset] }
+  radio-station-list-presets:
+    expect: { activity: "radiona/.*RadioStationListActivity", ui: [btn_preset] }   # the presets tab (empty: the check cannot tell it from the list)
+  radio-enter-station:
+    expect: { activity: "radiona/.*FMAMRadioSearchActivity", ui: [button0, ch_no] }
+
+transitions:
+  - { from: home-apps, to: radio, do: [{ tap_id: app_box_10 }, { wait: 8 }] }
+  - { from: radio, to: radio-am, do: [{ tap_id: band_toggle_sxm }, { wait: 4 }] }
+  - { from: radio, to: radio-menu, do: [{ tap: [338, 44] }, { wait: 3 }] }
+  - { from: radio, to: radio-add-station, do: [{ tap_id: layout_empty_preset_btn }, { wait: 4 }] }
+  - { from: radio, to: radio-station-list, do: [{ tap_id: btn_station_list }, { wait: 5 }] }
+  - { from: radio-station-list, to: radio-station-list-presets, do: [{ tap_id: btn_preset }, { wait: 4 }] }
+  - { from: radio, to: radio-enter-station, do: [{ tap_id: search_btn_menu }, { wait: 5 }] }
+
+unreachable:
+  radio-soundhound: "SoundHound needs the network (none modelled): the button does nothing"
+  radio-hd: "HD Radio needs an HD signal (no tuner modelled)"
+  radio-sxm: "SiriusXM needs its module (not modelled): the band button skips it"
+  radio-voice: "voice recognition needs the microphone and the voice engine's audio (not modelled): nothing opens"

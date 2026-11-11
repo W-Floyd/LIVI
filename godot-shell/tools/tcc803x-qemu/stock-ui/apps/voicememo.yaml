@@ -1,0 +1,16 @@
+# Voice memo (com.daudio.app.voicememo/.MainActivity): launcher entry 6; split screen (left 1280 px).
+# Records with no microphone (the timer runs; nothing to play back). "Available" comes from the Voice Memo
+# service's 128 MiB budget (README "Result"), not the filesystem.
+
+screens:
+  voice-memo:
+    expect: { activity: "voicememo/.*MainActivity", ui: [startpauseButton, no_records] }
+  voice-memo-menu:
+    expect: { activity: "AtchDlg:.*voicememo/.*MainActivity" }
+  voice-memo-recording:
+    expect: { activity: "voicememo/.*MainActivity", ui: [timer_text] }
+
+transitions:
+  - { from: home-apps, to: voice-memo, do: [{ tap_id: app_box_6 }, { wait: 8 }] }
+  - { from: voice-memo, to: voice-memo-menu, do: [{ tap: [338, 44] }, { wait: 3 }] }
+  - { from: voice-memo, to: voice-memo-recording, do: [{ tap_id: startpauseButton }, { wait: 5 }] }

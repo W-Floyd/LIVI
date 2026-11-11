@@ -1386,6 +1386,19 @@ func _refresh(sections := {}) -> void:
 		detail = "off in settings"
 	elif stop is Dictionary and why is String and why != "":
 		detail = "auto: " + why.trim_prefix("the charger is ")
+	# The car's own word: conditioning it runs unasked, why it would not, its mode while asked.
+	var cond_err := CarStatus.conditioning_error(t.call("batteryConditioningError"))
+	var cond_mode = t.call("batteryConditioningMode")
+	if t.call("batteryConditioning") == true and not on and state != "running":
+		_precondition.label = "Warming battery"
+		_precondition.short_label = "Warming"
+		detail = "by the car"
+	if cond_err != "":
+		detail = cond_err
+	elif on and t.call("batteryConditioning") == true:
+		detail = "running"
+	elif on and cond_mode is String:
+		detail = "car mode " + cond_mode
 	# Off in settings stays switchable even when the car link reports nothing.
 	auto.disabled = state == null and allowed
 	auto.set_pressed_no_signal(allowed)

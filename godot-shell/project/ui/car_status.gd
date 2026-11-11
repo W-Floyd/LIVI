@@ -2,8 +2,9 @@ class_name CarStatus
 extends VBoxContainer
 ## The car's body and power at a glance on the EV page: what is open (the car from above with
 ## the open parts lit, and in words) and the 12 V battery's charge; under them the climate, while
-## its blower runs as the range's name has it, and the battery heater while it draws. Each shows
-## once the car reports it. Rows hug the side `side` names.
+## its blower runs as the range's name has it, the battery heater while it draws, and the car's
+## battery conditioning (running, its mode, or why it would not). Each shows once the car
+## reports it. Rows hug the side `side` names.
 
 ## The 12 V battery's charge under which it reads in the warning color.
 const AUX_LOW_PCT := 30
@@ -21,6 +22,7 @@ var _body: HBoxContainer
 var _aux: HBoxContainer
 var _climate: HBoxContainer
 var _heater: HBoxContainer
+var _cond: HBoxContainer
 var _rows: Array[HBoxContainer] = []
 ## The items with something to show, most important first.
 var _wanted: Array = []
@@ -46,7 +48,8 @@ func _init() -> void:
 	_aux = _chip(_rows[0], "Aux", "battery")
 	_climate = _chip(_rows[1], "Climate", "fan")
 	_heater = _chip(_rows[1], "Heater", "therm")
-	for c in [_body, _aux, _climate, _heater]:
+	_cond = _chip(_rows[1], "Conditioning", "therm")
+	for c in [_body, _aux, _climate, _heater, _cond]:
 		c.alignment = BoxContainer.ALIGNMENT_CENTER
 		c.visible = false
 
@@ -104,12 +107,36 @@ func show_for(t: Dictionary) -> bool:
 	_set_chip(_climate, "" if not (drawing and EvLive.blower_running()) else "Climate %s" % Units.power_text(float(w)))
 	var hw = t.get("batteryHeaterW")
 	_set_chip(_heater, "" if hw == null or float(hw) <= 0.0 else "Battery heater %s" % Units.power_text(float(hw)))
-	_wanted = [_body, _aux, _heater, _climate].filter(func(c): return c.visible)
+	var err := conditioning_error(t.get("batteryConditioningError"))
+	var mode = t.get("batteryConditioningMode")
+	var cond := ""
+	if err != "":
+		cond = "Conditioning: " + err
+	elif t.get("batteryConditioning") == true:
+		cond = "Conditioning battery"
+	elif mode is String:
+		cond = "Conditioning " + mode
+	_set_chip(_cond, cond, "warn" if err != "" else "text")
+	_wanted = [_body, _aux, _cond, _heater, _climate].filter(func(c): return c.visible)
 	return keep(_wanted.size())
 
 
-## Shows only the `n` most important items it has (what is open, the 12 V battery, the heater,
-## the climate), for a page with no room for them all; false when that is none.
+## Why the car would not condition its battery, its batteryConditioningError in words; "" for
+## none.
+static func conditioning_error(code) -> String:
+	match int(code) if code is float or code is int else 0:
+		1:
+			return "range too short"
+		2:
+			return "battery already at temperature"
+		3:
+			return "heat-management error"
+	return ""
+
+
+## Shows only the `n` most important items it has (what is open, the 12 V battery, the battery
+## conditioning, the heater, the climate), for a page with no room for them all; false when that
+## is none.
 func keep(n: int, terse := false) -> bool:
 	_open.text = _said[1 if terse else 0]
 	for i in _wanted.size():

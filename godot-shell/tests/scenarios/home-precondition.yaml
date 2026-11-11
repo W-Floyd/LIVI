@@ -49,3 +49,22 @@ steps:
   - screenshot: home-precondition-auto-off
   - tap: { node: Page/Body/Side/Panel/Precondition/Auto }
   - expect_action: { SetConfig: { patch: { batteryPreconditioning: auto } } }
+  # The car's own word: its conditioning mode while asked, conditioning it runs, why it would not.
+  - set: { core: { config: { batteryPreconditioning: auto }, precondition: { manualUntil: 1794213000 }, telemetry: { preconditionState: armed, preconditionWhy: "", batteryConditioningMode: "off" } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, label: Warming battery, detail: car mode off, button_pressed: true }
+  - set: { core: { telemetry: { batteryConditioningMode: "on" } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, detail: car mode on }
+  - set: { core: { telemetry: { batteryConditioning: true } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, label: Warming battery, detail: running }
+  - set: { core: { precondition: { manualUntil: null } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, label: Warming battery, detail: by the car, button_pressed: false }
+  - set: { core: { telemetry: { batteryConditioning: false, batteryConditioningError: 2 } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, label: Precondition battery, detail: battery already at temperature }
+  - set: { core: { telemetry: { batteryConditioningError: null, batteryConditioningMode: null } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, detail: for 30 min }

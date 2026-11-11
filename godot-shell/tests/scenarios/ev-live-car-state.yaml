@@ -103,3 +103,21 @@ steps:
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/ChargeCard, visible: "false" }
   - expect_node: { path: EvLive/CarStatus, visible: "false" }
+  # The car's battery conditioning: its mode, running, why it would not (a warning).
+  - set: { core: { telemetry: { batteryConditioningMode: "off" } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/CarStatus/Row1/Conditioning/Label, text: Conditioning off }
+  - set: { core: { telemetry: { batteryConditioningMode: "on", batteryConditioning: true } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/CarStatus/Row1/Conditioning/Label, text: Conditioning battery }
+  - set: { core: { telemetry: { batteryConditioning: false, batteryConditioningError: 1 } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/CarStatus/Row1/Conditioning/Label, text: "Conditioning: range too short" }
+  - gdscript: |
+      var l: Label = shell.get_node("EvLive/CarStatus/Row1/Conditioning/Label")
+      if l.get_theme_color("font_color") != ThemeManager.c.warn:
+          return "why the car would not condition is not in the warning color"
+  - gdscript: *apart
+  - set: { core: { telemetry: { batteryConditioning: null, batteryConditioningMode: null, batteryConditioningError: null } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/CarStatus, visible: "false" }

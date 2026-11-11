@@ -3,11 +3,15 @@
 # Env: BOOT_DIR  dir with the extracted stock `kernel` (zImage) and `ramdisk.gz` (see README)
 #      EMMC      optional raw eMMC image (GPT, by-name partitions), attached read-only (snapshot)
 #      TIMEOUT   seconds (default 60)     APPEND  kernel command line override
+#      CAR       the car's identity on the command line, as the bootloader passes it (default the EV6's:
+#                vehicle_info=0xcc country_info=0x01 ...; empty: the system boots as ECOKMC, another car)
 #      SMP       vCPUs (default 4; 1 is much slower and stalls, see README "Performance")
 #      QEMU      path to a native qemu-system-arm (build-native.sh): run without docker (about as fast or faster)
 #      LOADVM    with QEMU and a qcow2 EMMC: resume the savevm snapshot of that name (README "Snapshot")
 #      MON       with QEMU: unix socket path for the HMP monitor (drive.py screendumps)
 #      DEBUG     qemu -d flags (default none; `guest_errors,unimp` logs to qemu.log, harmless but noisy)
+#      MICOM     with QEMU: chardev for the micom UART, /dev/ttyTCC2 (e.g. unix:/tmp/m.sock,server=on,wait=off
+#                for micom-fake -connect; default null, micomd then reads nothing)
 #      EXTRA     extra qemu args
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -16,13 +20,15 @@ TIMEOUT=${TIMEOUT:-60}
 SMP=${SMP:-4}
 RAMDISK=${RAMDISK:-ramdisk.gz}
 APPEND=${APPEND:-"earlycon=pl011,mmio32,0x16600000 console=ttyTCC0,115200n8 earlyprintk ignore_loglevel androidboot.hardware=tcc803x androidboot.mode=emmc androidboot.selinux=disabled vmalloc=400M"}
+CAR=${CAR-"vehicle_info=0xcc country_info=0x01 daudio_hw_ver=526087 daudio_adc_hw=1312 daudio_adc_main=1313 daudio_adc_bt=163 daudio_adc_lcd=1390"}
+APPEND="$APPEND $CAR"
 [ "$SMP" -gt 1 ] || APPEND="$APPEND maxcpus=1"
 DEBUG=${DEBUG:-}
 if [ -n "${QEMU:-}" ]; then
   W=${TMPDIR:-/tmp}/tcc803x-run.$$; mkdir -p "$W"; trap 'rm -rf "$W"' EXIT
   clang -E -P -x assembler-with-cpp "$HERE/tcc803x-qemu.dts" | dtc -q -I dts -O dtb -o "$W/t.dtb" -
   set -- -M tcc803x -m 1024 -smp "$SMP" -kernel "$BOOT_DIR/kernel" -dtb "$W/t.dtb" -initrd "$BOOT_DIR/$RAMDISK" \
-    -append "$APPEND" -display none -serial mon:stdio
+    -append "$APPEND" -display none -serial mon:stdio -serial null -serial "${MICOM:-null}"
   case "${EMMC:-}" in
     "") ;;
     *.qcow2) set -- "$@" -drive "if=sd,index=0,format=qcow2,file=$EMMC" ;;

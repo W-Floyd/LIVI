@@ -21,6 +21,9 @@
 
 	aliases {
 		sdhc0 = &sdhc0;
+		/* the PL011 driver numbers ttyTCC<n> by alias, else by probe order */
+		serial0 = &uart0;
+		serial2 = &uart2;
 	};
 
 	chosen {
@@ -65,6 +68,15 @@
 		compatible = "arm,pl011", "arm,primecell";
 		reg = <0x16600000 0x1000>;
 		interrupts = <GIC_SPI 88 IRQ_TYPE_LEVEL_HIGH>;
+		clock-names = "uartclk", "apb_pclk";
+		clocks = <&uartclk>, <&uartclk>;
+	};
+
+	/* the micom link, /dev/ttyTCC2 (micomd); QEMU's third -serial */
+	uart2: serial@16620000 {
+		compatible = "arm,pl011", "arm,primecell";
+		reg = <0x16620000 0x1000>;
+		interrupts = <GIC_SPI 90 IRQ_TYPE_LEVEL_HIGH>;
 		clock-names = "uartclk", "apb_pclk";
 		clocks = <&uartclk>, <&uartclk>;
 	};

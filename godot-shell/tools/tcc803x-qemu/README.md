@@ -1,8 +1,9 @@
 # tcc803x-qemu
 
-Experiment: boot the **stock** Kia EV6 Gen5W kernel (Telechips TCC803x, Linux 3.18.24-tcc, Android 4.4.2)
-on a small custom QEMU machine that models the SoC, instead of on `virt`. Independent of
-`tools/gen5w-stock` (Linux 4.4 on `virt`), which is untouched.
+The stock emulator: the **stock** Kia EV6 Gen5W kernel (Telechips TCC803x, Linux 3.18.24-tcc, Android 4.4.2)
+on a small custom QEMU machine that models the SoC, with the micom link to an emulated micom
+(go-micomd's `micom-fake`) and a driver that walks the stock UI to declared screens (`stock-ui.yaml`).
+`tools/gen5w-stock` (Linux 4.4 on `virt`) is the fallback.
 
 Nothing Kia-derived is committed. The scripts read the firmware from local paths.
 
@@ -16,6 +17,7 @@ Nothing Kia-derived is committed. The scripts read the firmware from local paths
 | `make-emmc.sh` | pad a GPT by-name image to 8 GiB (QEMU eMMC must be a power of two) |
 | `run.sh` | run the machine; serial console on stdout (docker, or native with `QEMU=`) |
 | `bench.py` | cold-boot timing: wall to `sys.boot_completed`, guest/wall clock, `input tap` latency |
+| `stock-ui.yaml` | the stock UI as a graph of screens and transitions, for `drive.py --flow` |
 
 ## Run
 
@@ -27,7 +29,10 @@ Nothing Kia-derived is committed. The scripts read the firmware from local paths
 EMMC=$W/emmc8g.img BOOT_DIR=$W/boot TIMEOUT=100 ./run.sh
 ```
 
-`run.sh` knobs: `SMP` (vCPUs, default 4), `QEMU` (native binary, see Performance), `APPEND` (kernel cmdline), `DEBUG` (qemu `-d`
+`run.sh` knobs: `SMP` (vCPUs, default 4), `QEMU` (native binary, see Performance), `APPEND` (kernel cmdline), `CAR`
+(the car's identity on the command line as the bootloader passes it, default the EV6's `vehicle_info=0xcc country_info=0x01`
+and hardware ids; without it the system comes up as `ECOKMC`, another car, and the EV app shows that car's settings),
+`MICOM` (chardev of the micom UART, see "Micom link"), `DEBUG` (qemu `-d`
 flags, default none; `guest_errors,unimp` logs the unimplemented accesses and SiP calls to `qemu.log`, printed as a summary),
 `EXTRA` (more qemu args, e.g. `-trace sdhci_*`). The eMMC is attached with `snapshot=on`: nothing is written back.
 
@@ -63,6 +68,10 @@ ramdisk `/init` and `init.rc` run, `/system` (the decrypted V015 `system.ext4`) 
 mount from the emulated eMMC (`mmcblk0p1..15`), property service, `rild`, `healthd`, input devices and the
 console shell start (`shell@wp_daudioplus_ecokmc_us:/ $`). (Numbers in this paragraph and the next are from the first docker runs with `maxcpus=1`; see Performance for current ones.)
 
+Now: with `CAR` (default) it boots as the EV6 (`wp_daudioplus_cvev_us`); with `MICOM` and `micom-fake` the micom link is up
+and the stock apps show the car's data, the EV settings round-trip (see "Micom link"); `drive.py --flow` walks the EV pages
+(see "Stock UI flows"). Not modelled: audio, Mali/VPU, USB, ethernet, GPS, the navigation's map data.
+
 Stubs and what each was needed for:
 
 | address / call | what the kernel wanted |
@@ -90,7 +99,8 @@ E/tc_hwc (101): tc_cfg_open(49): can't open[No such file or directory] '/dev/gra
 E/SurfaceFlinger(101): ERROR: failed to open framebuffer (No such file or directory), aborting
 ```
 
-(`mediaserver` also aborts once with `Unable to open the mixer`; `micomd` logs `/dev/ttyTCC2 open failed`; neither loops.)
+(`mediaserver` also aborts once with `Unable to open the mixer`; without the micom UART `micomd` logs `/dev/ttyTCC2 open
+failed`, see "Micom link"; neither loops.)
 
 The stock kernel has `FB_TCC` (Telechips VIOC) but no simplefb/bochs/DRM, the vendor source for it is not available and its
 DT bindings are undocumented, so instead of modelling VIOC:
@@ -136,7 +146,25 @@ setup was in front.
 print `Division by zero in kernel` (`mmc_mmc_erase_timeout`, 70-130 times per run). `make-emmc.sh` clones with `cp -c` where possible.
 `DATA_MIB`/`CACHE_MIB` for `tools/gen5w-stock/build-emmc.sh` resize the partitions (3072/512 still fits 8 GiB).
 `drive.py`: `PROMPT_TIMEOUT` (default 120) for slow commands; `input tap` takes 30-120 s here, so wait before the next tap.
-Not modelled: `/dev/ttyTCC2` (micomd), audio mixer, Mali/VPU/USB/ethernet.
+Not modelled: audio mixer, Mali/VPU/USB/ethernet.
+
+## Micom link
+
+`/dev/ttyTCC2` is the SoC's third PL011, `0x16620000`, SPI 90 (as the mainline `tcc803x.dtsi`); the DT names it
+(`serial2` alias, the driver numbers `ttyTCC<n>` by alias) and QEMU's third `-serial` backs it: `MICOM=unix:$SOCK,server=on,wait=off`
+in `run.sh`. Stock micomd needs no DMA or modem lines: interrupt-driven PL011 at 115200 is enough. On it, go-micomd's
+`cmd/micom-fake` (its `docs/fake-micom.md`) plays the micom:
+
+```sh
+MICOM=unix:$SOCK,server=on,wait=off QEMU=$TCC_QEMU EMMC=... BOOT_DIR=... RAMDISK=ramdisk.emu.gz ./run.sh
+micom-fake -connect unix:$SOCK -replay $MICOM_CAPTURE -still 30s -scenario <go-micomd>/cmd/micom-fake/scenarios/ev6-parked.json
+```
+
+Stock micomd sends its hello (`8a 01 01 01` cmd 01) every 2 s, five times, then waits; the boot record answers it (the fake
+also sends it at connect). Then `onMicomReady` runs: HEVService's start-up reads (0x0C5F, 0C01, 0C67, 0C4A-0C55) are answered,
+the launcher's EV widget and the EV app show the car's state of charge and range (range only once `VCU ready` is 1), and
+the EV settings round-trip through the fake (charge limits, AC current, battery conditioning; their frames are in the commit
+that added this). Without the fake the link stays silent and the EV pages show `--`.
 
 ## Performance
 
@@ -198,3 +226,22 @@ the display immediately and the whole consent -> home click-through takes under 
 into the serial console in the first second after `loadvm` can be lost; send a newline first.
 Recommended for golden screenshots: one cold boot to `boot_completed` + `am force-stop com.mobis.welcome`, `savevm`, then
 `loadvm` per capture session (or simply keep one machine running and use `#shot`/QMP `screendump`: the guest clock is real time).
+
+## Stock UI flows
+
+`stock-ui.yaml` declares the stock UI as screens (how each is recognised: the focused activity, view ids shown in
+`dumpsys activity top`), transitions (taps, keys, `am start`, waits), the car state the fake micom plays for a screen, and
+system modes a screen needs. `drive.py --flow` resumes the snapshot for each target, starts `micom-fake` with the screen's
+state, applies its modes, walks the shortest path from the start screen, checks every screen on the way and screenshots
+the target. Screens it cannot reach are listed in the YAML with why.
+
+```sh
+. ../../scripts/dotenv.sh        # TCC_QEMU, TCC_BOOT_DIR, TCC_EMMC (qcow2 with the snapshot), MICOM_FAKE, MICOM_CAPTURE
+# once: boot with the micom attached (MICOM, above), dismiss the welcome, consent and first-run screens, HOME, then
+# savevm ui (monitor) or drive.py's #savevm
+QEMU=$TCC_QEMU EMMC=$TCC_EMMC LOADVM=ui BOOT_DIR=$TCC_BOOT_DIR RAMDISK=ramdisk.emu.gz ./drive.py --flow stock-ui.yaml all $OUT
+```
+
+`$OUT` (outside the repo: vendor UI) gets `<screen>.png`, the fake's log and record per screen, `console.log` and
+`report.json` (reached, stuck where, unreachable). `MICOM_CAPTURE` is optional: without it the state is the scenario alone.
+Each target costs about 30-60 s (resume, fake, taps, checks).

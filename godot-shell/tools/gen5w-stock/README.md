@@ -1,5 +1,10 @@
 # gen5w-stock
 
+Fallback stock emulator. The primary one is `../tcc803x-qemu`: the stock 3.18 kernel on a modelled
+TCC803x, faster, snapshots, the micom link (car data from `micom-fake`) and the UI-flow driver. Use this
+one only for what that cannot do yet (it boots a Linux 4.4 on `virt` instead of the stock kernel), or to
+cross-check a screenshot.
+
 Boot the stock Kia EV6 (Mobis Gen5W, Android 4.4.2 `KVT49L`, armv7) firmware under
 the third-party `gen5w-emulator` (QEMU `virt`, Cortex-A7, TCG in Docker) to take
 golden-reference screenshots of the stock apps at 1920x720.

@@ -1,0 +1,123 @@
+# The stock UI (EV6, V015) as a graph, for drive.py --flow: screens, how to tell each is up, and the
+# transitions between them. Coordinates are the 1920x720 panel's. A screen's state is the car the fake
+# micom plays while it is driven there (states:), its needs are system settings applied before
+# (modes:). Screenshots go outside the repo (vendor UI).
+#
+# expect: activity (the focused window, `dumpsys window windows`), ids (views shown, `dumpsys activity
+# top`: app:id/<name> with visibility V; a parent's is not checked), dialog (true: a dialog window over the activity, so ids are not
+# checked). A transition's do: is a list of {tap: [x, y]}, {tap_id: name}, {key: BACK|HOME|<code>},
+# {shell: "..."} and {wait: seconds}.
+
+start: home   # what the snapshot shows (README "Stock UI flows")
+
+states:
+  # Parked, IGN on, nothing scheduled: the values stock's EV settings show, by the variant's names.
+  parked:
+    still: 30s   # with MICOM_CAPTURE: the capture's state at 30 s, then the scenario over it
+    scenario:
+      - { msg: "Boot record (full)", set: { ACC: true, IGN1: true, IGN3: true, "CAN DB generation": 2 } }
+      - { msg: "VCU ready", set: { "VCU ready": true } }
+      - { msg: "Charge limit, AC", set: { "Charge limit, AC": 80 } }
+      - { msg: "Charge limit, DC", set: { "Charge limit, DC": 90 } }
+      - { msg: "AC charging current", set: { "AC charging current": maximum } }
+      - { msg: "Battery conditioning mode", set: { "Battery conditioning mode": "off" } }
+
+modes:
+  # The EV app's engineering capture mode (pref_ev_capture_mode, read at start): the only mode in
+  # which V015 enables the main page's departure and schedule tiles (data/a/b.I(), set only by the
+  # capture-mode helper). Its demo values replace the micom's on the main page.
+  capture-mode:
+    setup:
+      - shell: "cd /data/data/com.hkmc.system.app.engineering/shared_prefs"
+      - shell: "echo \"<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\" > pref_ev_capture_mode.xml"
+      - shell: "echo '<map><boolean name=\"prefkey_ev_capture_mode_value\" value=\"true\" /></map>' >> pref_ev_capture_mode.xml"
+      - shell: "chmod 666 pref_ev_capture_mode.xml; chown system:system pref_ev_capture_mode.xml; cd /"
+      - shell: "am force-stop com.hkmc.daudio.app.ev3"
+
+screens:
+  home:
+    expect: { activity: "com.android.launcher3/.*Launcher" }
+  ev-main:
+    state: parked
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity", ids: [mainview_settings_layout_widget] }
+  ev-menu:
+    state: parked
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity", dialog: true }
+  ev-energy-information:
+    state: parked
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity" }
+  ev-settings:
+    state: parked
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*EvSettingActivity", ids: [ev_settings_utilitymode_button] }
+  ev-settings-charge-limit:
+    state: parked
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*EvSettingActivity", ids: [eco_evsettings_maxcharge_view_layout] }
+  ev-settings-charge-limit-dc:   # the DC limit's picker open (the check cannot tell it from closed)
+    state: parked
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*EvSettingActivity", ids: [eco_evsettings_maxcharge_view_layout] }
+  ev-settings-ac-current:
+    state: parked
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*EvSettingActivity", ids: [eco_evsettings_chargingcurrent_new_view_layout] }
+  ev-settings-battery-conditioning:
+    state: parked
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*EvSettingActivity", ids: [eco_evsettings_battery_cond_checkbox] }
+  ev-settings-utility-mode:
+    state: parked
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*EvSettingActivity", ids: [eco_evsettings_utilitymode_view_layout] }
+  ev-main-capture:
+    state: parked
+    needs: [capture-mode]
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity", ids: [mainview_settings_layout_widget] }
+  ev-next-departure:
+    state: parked
+    needs: [capture-mode]
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity" }
+  ev-departure-dialog:
+    state: parked
+    needs: [capture-mode]
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity", dialog: true }
+  ev-next-departure-set:
+    state: parked
+    needs: [capture-mode]
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity" }
+  ev-scheduled:
+    state: parked
+    needs: [capture-mode]
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity" }
+  ev-off-peak-dialog:
+    state: parked
+    needs: [capture-mode]
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity", dialog: true }
+  ev-climate-dialog:
+    state: parked
+    needs: [capture-mode]
+    expect: { activity: "com.hkmc.daudio.app.ev3/.*MainActivity", dialog: true }
+
+transitions:
+  - { from: home, to: ev-main, do: [{ shell: "am start -n com.hkmc.daudio.app.ev3/.MainActivity" }, { wait: 8 }] }
+  - { from: home, to: ev-main-capture, do: [{ shell: "am start -n com.hkmc.daudio.app.ev3/.MainActivity" }, { wait: 8 }] }
+  - { from: ev-main, to: ev-menu, do: [{ tap: [331, 44] }, { wait: 4 }] }
+  - { from: ev-menu, to: ev-energy-information, do: [{ tap: [239, 248] }, { wait: 5 }] }
+  - { from: ev-main, to: ev-settings, do: [{ tap: [1207, 655] }, { wait: 6 }] }
+  - { from: ev-settings, to: ev-settings-charge-limit, do: [{ tap: [160, 234] }, { wait: 4 }] }
+  - { from: ev-settings-charge-limit, to: ev-settings-charge-limit-dc, do: [{ tap: [1228, 234] }, { wait: 4 }] }
+  - { from: ev-settings, to: ev-settings-ac-current, do: [{ tap: [135, 348] }, { wait: 4 }] }
+  - { from: ev-settings, to: ev-settings-battery-conditioning, do: [{ tap: [140, 495] }, { wait: 4 }] }
+  - { from: ev-settings, to: ev-settings-utility-mode, do: [{ tap: [138, 637] }, { wait: 4 }] }
+  - { from: ev-main-capture, to: ev-next-departure, do: [{ tap: [290, 660] }, { wait: 6 }] }
+  - { from: ev-next-departure, to: ev-departure-dialog, do: [{ tap: [1203, 260] }, { wait: 6 }] }
+  # 01:10 AM, Monday and Wednesday (hour up twice, minute up once more, AM/PM, the days), OK.
+  - from: ev-departure-dialog
+    to: ev-next-departure-set
+    do: [{ tap: [136, 256] }, { tap: [136, 256] }, { tap: [328, 256] }, { tap: [328, 256] }, { tap: [502, 256] },
+         { tap: [445, 588] }, { tap: [708, 588] }, { tap: [333, 665] }, { wait: 5 }]
+  - { from: ev-next-departure-set, to: ev-scheduled, do: [{ key: BACK }, { wait: 4 }, { tap: [845, 660] }, { wait: 6 }] }
+  - { from: ev-scheduled, to: ev-off-peak-dialog, do: [{ tap: [1202, 234] }, { wait: 6 }] }
+  - { from: ev-scheduled, to: ev-climate-dialog, do: [{ tap: [1202, 344] }, { wait: 6 }] }
+
+# Declared, not reached, and why.
+unreachable:
+  ev-scheduled-normal: "the main page's schedule tiles stay disabled outside capture mode (V015), whatever the micom sends; reached with capture-mode instead"
+  ev-charging-station-list: "needs the navigation, which stays on its start screen (no map data in the image)"
+  navigation: "stays on its start screen (no map data in the image)"
+  launcher-apps: "the rest of the launcher's tree is not mapped yet"

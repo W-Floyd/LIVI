@@ -1,0 +1,83 @@
+name: settings-devices
+# LIVI's custom settings pages: the paired phones as stock shows them (kind, link, battery,
+# signal, presence), shown or forgotten as stock does it, Forget asking again first; a
+# station's tools; and Import browsing for its file.
+viewport: { width: 1920, height: 720 }
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - set:
+      core:
+        config: { darkMode: true, appearanceMode: auto }
+        devices:
+          - { id: a, name: iPhone, protocol: carplay, lastTransport: wifi, status: active, batteryLevel: 54, batteryCharging: true, signalStrength: 3, session: 1 }
+          - { id: b, model: Pixel 8, protocol: androidauto, lastTransport: usb, status: offline, session: 2 }
+        fm:
+          stations:
+            - { khz: 99500, name: Rock }
+            - { khz: 101100, name: Jazz, favorite: true }
+  - page: settings
+  - tap: { node: Settings/Sections/List/Devices }
+  - expect_node: { path: Settings/Heading/Title, text: Devices }
+  - wait: { frames: 3 }
+  - gdscript: |
+      for n in ["iPhone/Box/Protocol", "iPhone/Box/Device/Battery", "iPhone/Box/Device/Signal", "iPhone/Box/Device/Transport", "iPhone/Box/Tool0", "Pixel 8/Box/Device/Presence"]:
+          if not shell.has_node("Settings/Rows/List/" + n):
+              return "no %s" % n
+  - screenshot: settings-devices-day
+  # Forget asks again first; the offline phone can still be forgotten.
+  - tap: { node: Settings/Rows/List/Pixel 8/Box/Tool0 }
+  - gdscript: |
+      await runner.frames(2)
+      var texts := []
+      for l in shell.get_node("Settings/Rows/List/Pixel 8").find_children("*", "Label", true, false):
+          texts.append(l.text)
+      if not "Tap again: Delete device" in texts:
+          return "not armed: %s" % [texts]
+      if Core.fake_sent().any(func(m): return m.get("type") == "action" and m.action.has("ForgetDevice")):
+          return "forgot on the first tap"
+  - tap: { node: Settings/Rows/List/Pixel 8/Box/Tool0 }
+  - expect_action: { ForgetDevice: { id: b } }
+  # The offline phone is not shown on a tap.
+  - tap: { node: Settings/Rows/List/Pixel 8 }
+  - gdscript: |
+      if Core.fake_sent().any(func(m): return m.get("type") == "action" and m.action.has("SelectDevice")):
+          return "an offline phone was selected"
+  - theme: { appearance: night, appearance_mode: night }
+  - wait: { frames: 3 }
+  - screenshot: settings-devices-night
+  - theme: { appearance_mode: auto }
+  # A station's tools act at once.
+  - tap: { node: Settings/Sections/List/General }
+  - gdscript: |
+      # Below the panel's fold.
+      var rows: DragScroll = shell.get_node("Settings/Rows")
+      rows.reveal(rows.get_node("List/FM"))
+      await runner.frames(2)
+  - tap: { node: Settings/Rows/List/FM }
+  - tap: { node: Settings/Rows/List/Station list }
+  - expect_node: { path: Settings/Heading/Title, text: Station list }
+  - tap: { node: "Settings/Rows/List/Rock · 99_5 MHz/Box/Tool0" }
+  - expect_action: { FmFavorite: { khz: 99500, favorite: true } }
+  # Import opens the browser in the page; Up leaves it before the page.
+  - tap: { node: Settings/Sections/List/General }
+  - gdscript: |
+      # Below the panel's fold.
+      var rows: DragScroll = shell.get_node("Settings/Rows")
+      rows.reveal(rows.get_node("List/MFi"))
+      await runner.frames(2)
+  - tap: { node: Settings/Rows/List/MFi }
+  - tap: { node: Settings/Rows/List/Certificate }
+  - tap: { node: Settings/Rows/List/Identity/Box/Act }
+  - expect_node: { path: Settings/Heading/Title, text: Identity }
+  - tap: { node: Settings/Heading/Up }
+  - expect_node: { path: Settings/Heading/Title, text: Certificate }
+  # A phone with a session is shown, on the phone's own page.
+  - tap: { node: Settings/Sections/List/Devices }
+  - tap: { node: Settings/Rows/List/iPhone }
+  - expect_action: { SelectDevice: { id: a } }
+  - wait: { frames: 3 }
+  - gdscript: |
+      if shell._page_name != "projection":
+          return "on %s, not the phone's page" % shell._page_name

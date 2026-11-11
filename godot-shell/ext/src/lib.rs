@@ -255,6 +255,12 @@ impl CoreLink {
         self.settings_do(|c, _| c.press(row.max(0) as usize));
     }
 
+    /// A row's tool button, `tool` its index in the row's `tools`.
+    #[func]
+    fn settings_tool(&mut self, row: i64, tool: i64) {
+        self.settings_do(|c, _| c.tool(row.max(0) as usize, tool.max(0) as usize));
+    }
+
     #[func]
     fn settings_pick(&mut self, row: i64, option: i64) {
         self.settings_do(|c, s| c.pick(row, option.max(0) as usize, s));

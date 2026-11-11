@@ -12,7 +12,9 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+base64 = "0.23.1"
 godot = { version = "0.5.5", features = ["api-4-7"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 livi-core-client = { path = "../../native/crates/livi-core-client" }
 livi-core-proto = { path = "../../native/crates/livi-core-proto" }
 livi-ui-model = { path = "../../native/crates/livi-ui-model" }

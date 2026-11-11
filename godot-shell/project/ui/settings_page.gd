@@ -13,7 +13,7 @@ const INLINE_OPTIONS := 4
 const INLINE_CHARS := 28
 ## Sliders send while they move, at most this often, as stock's do.
 const SLIDE_MS := 100
-## A second tap within this arms nothing: it restarts or powers off.
+## A second tap within this acts: restarts, powers off, forgets a phone, removes a file.
 const CONFIRM_MS := 4000
 ## Core sections whose change can show on a settings page.
 const READS := ["config", "system", "sessions", "devices", "precondition", "telemetry", "mfi", "dab", "fm", "update", "cluster", "cameras"]
@@ -26,7 +26,8 @@ var section: Variant = 0
 var _view := {}
 var _shown_json := ""
 var _look_pick := ""
-var _armed := -1
+## What a second tap acts on: a row's index, or "row/tool".
+var _armed := ""
 var _armed_ms := 0
 var _sliding := false
 var _slide_ms := 0
@@ -101,8 +102,8 @@ func _process(delta: float) -> void:
 	if _dirty and not _sliding and _dirty_s >= REFRESH_S:
 		_dirty = false
 		_refresh()
-	if _armed >= 0 and Time.get_ticks_msec() - _armed_ms > CONFIRM_MS:
-		_armed = -1
+	if _armed != "" and Time.get_ticks_msec() - _armed_ms > CONFIRM_MS:
+		_armed = ""
 		_refresh(true)
 
 
@@ -125,7 +126,7 @@ func _on_core_changed(sections: PackedStringArray) -> void:
 func open_section(s: Variant) -> void:
 	section = s
 	_look_pick = ""
-	_armed = -1
+	_armed = ""
 	Core.settings_section(s if s is int else -1)
 	_rows.offset = 0.0
 	_refresh(true)
@@ -277,7 +278,7 @@ func _build_livi() -> void:
 				# Skipped, not removed: a row's index is what a touch sends back.
 				if r.get("hidden", false):
 					continue
-				if i == _armed:
+				if str(i) == _armed:
 					r = r.duplicate()
 					r.label = "Tap again: %s" % r.label
 					r.alert = true
@@ -307,6 +308,7 @@ func _row(r: Dictionary, id: Variant) -> Button:
 	b.focus_mode = Control.FOCUS_NONE
 	var enabled := bool(r.get("enabled", true))
 	var kind := str(r.get("kind", "value"))
+	var tools: Array = r.get("tools", [])
 	var opts: Array = r.get("options", [])
 	var inline := _inline(opts) and not bool(r.get("readOnly", false))
 	var tap := ""
@@ -317,7 +319,7 @@ func _row(r: Dictionary, id: Variant) -> Button:
 			tap = ""
 		elif bool(r.get("opens", false)) or (opts.size() > 0 and not bool(r.get("readOnly", false))):
 			tap = "open"
-		elif bool(r.get("acts", false)) and kind != "button":
+		elif bool(r.get("acts", false)) and kind != "button" and kind != "item":
 			tap = "press"
 	b.mouse_filter = Control.MOUSE_FILTER_STOP if tap != "" else Control.MOUSE_FILTER_IGNORE
 	var box: StyleBox = ThemeManager.card_box() if ThemeManager.material == "solid" and not ThemeManager.is_scene() else _flat_box(ThemeManager.c.surface)
@@ -329,7 +331,14 @@ func _row(r: Dictionary, id: Variant) -> Button:
 	b.add_theme_stylebox_override("pressed", down)
 	b.add_theme_stylebox_override("hover_pressed", down)
 
-	var label := UI.label(str(r.get("label", "")), "strong", "body", "crit" if r.get("alert", false) else "text")
+	var armed_tool := -1
+	for j in tools.size():
+		if _armed == "%s/%d" % [id, j]:
+			armed_tool = j
+	var title := str(r.get("label", ""))
+	if armed_tool >= 0:
+		title = "Tap again: %s" % str(tools[armed_tool].get("label", ""))
+	var label := UI.label(title, "strong", "body", "crit" if r.get("alert", false) or armed_tool >= 0 else "text")
 	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.clip_text = true
@@ -353,6 +362,8 @@ func _row(r: Dictionary, id: Variant) -> Button:
 		act.disabled = not enabled
 		act.pressed.connect(func(): if not _rows.dragged: _livi_or_look(id, "press"))
 		side = act
+	elif kind == "progress":
+		side = _progress(float(r.get("level", 0.0)))
 	# The value says what a control would; with a control, the row says it already.
 	if value != "" and side == null:
 		var v := UI.label(value, "body", "body", "dim")
@@ -374,11 +385,18 @@ func _row(r: Dictionary, id: Variant) -> Button:
 		sw.custom_minimum_size = Vector2.ONE * ThemeManager.px.icon
 		sw.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		parts.append(sw)
+	var lead := _lead(r)
+	if lead:
+		parts.append(lead)
 	parts.append(text)
 	if side:
 		if side is Label or side is SwitchMark:
 			side.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		parts.append(side)
+	if r.get("device") is Dictionary:
+		parts.append(_device_marks(r.device, bool(r.get("dimmed", false))))
+	for j in tools.size():
+		parts.append(_tool_button(tools[j], int(id), j, j == armed_tool))
 	if tap == "open":
 		parts.append(UI.icon("chevron", "icon", "dim"))
 	var row := UI.hbox(parts, 1.0)
@@ -392,11 +410,139 @@ func _row(r: Dictionary, id: Variant) -> Button:
 	var fit := func(): b.custom_minimum_size.y = maxf(ThemeManager.px.touch * 1.3, row.get_combined_minimum_size().y + g * 1.4)
 	row.minimum_size_changed.connect(fit)
 	fit.call()
-	if not enabled or r.get("dimmed", false):
+	# A phone's row stays lit for its tools: offline only dims what it shows of the phone.
+	if r.get("device") is Dictionary:
+		if r.get("dimmed", false):
+			text.modulate.a = 0.5
+			if lead:
+				lead.modulate.a = 0.5
+	elif not enabled or r.get("dimmed", false):
 		b.modulate.a = 0.5
 	if tap != "":
 		b.pressed.connect(func(): if not _rows.dragged: _livi_or_look(id, tap))
 	return b
+
+
+## What leads a row: its file or folder, the phone's kind (lit while it is the one shown), a
+## station's logo or initials, or a picture (the phone icon).
+func _lead(r: Dictionary) -> Control:
+	var px: float = ThemeManager.px.icon
+	if str(r.get("kind", "")) == "picture":
+		var tex := _png(str(r.get("value", "")))
+		if tex == null:
+			return null
+		var pic := TextureRect.new()
+		pic.name = "Picture"
+		pic.texture = tex
+		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		pic.custom_minimum_size = Vector2.ONE * ThemeManager.px.touch * 2.4
+		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		return pic
+	if r.get("device") is Dictionary:
+		var d: Dictionary = r.device
+		var lit := str(d.get("presence", "")) == "active"
+		var ic := UI.icon(str(d.get("protocol", "phone")), "icon", "accent" if lit else "dim")
+		ic.name = "Protocol"
+		return ic
+	if r.get("badge") is Dictionary:
+		return Badge.new(r.badge, _png(str(r.badge.get("logo", "")) if r.badge.get("logo") != null else ""), px * 1.5)
+	if str(r.get("glyph", "")) != "":
+		return UI.icon(str(r.glyph), "icon", "dim")
+	return null
+
+
+## A phone's link, battery, signal and presence, as stock's device row shows them.
+func _device_marks(d: Dictionary, dimmed: bool) -> Control:
+	var parts: Array = []
+	var t = d.get("transport")
+	if t != null and str(t) != "":
+		var ic := UI.icon(str(t), "icon", "dim")
+		ic.name = "Transport"
+		parts.append(ic)
+	if d.get("battery") != null:
+		parts.append(BatteryMark.new(int(d.battery), bool(d.get("charging", false))))
+	if d.get("signal") != null:
+		parts.append(SignalMark.new(int(d.signal)))
+	parts.append(PresenceDot.new(str(d.get("presence", "offline"))))
+	var box := UI.hbox(parts, 0.8)
+	box.name = "Device"
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for c in box.get_children():
+		if c is Control:
+			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			c.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if dimmed:
+		box.modulate.a = 0.45
+	return box
+
+
+## A row's tool: an icon button (tinted when on), or a switch; armed, it turns critical.
+func _tool_button(t: Dictionary, row: int, j: int, armed: bool) -> Control:
+	var enabled := bool(t.get("enabled", true))
+	var b: Button
+	if bool(t.get("switch", false)):
+		b = Button.new()
+		b.add_child(SwitchMark.new(bool(t.get("on", false))))
+		b.custom_minimum_size = Vector2(ThemeManager.px.touch * 1.6, ThemeManager.px.touch)
+		var sw: Control = b.get_child(0)
+		sw.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		sw.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		for st in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
+			b.add_theme_stylebox_override(st, _flat_box(Color(0, 0, 0, 0)))
+	else:
+		b = _flat_button(str(t.get("icon", "")), str(t.get("icon", "close")))
+		_style_flat(b)
+		var tint = t.get("tint")
+		var c: Color = ThemeManager.c.crit if armed else (Color.from_string(str(tint), ThemeManager.c.text) if tint != null else ThemeManager.c.text)
+		for k in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_focus_color"]:
+			b.add_theme_color_override(k, c)
+		if armed:
+			b.add_theme_stylebox_override("normal", _flat_box(Color(ThemeManager.c.crit, 0.18)))
+	b.name = "Tool%d" % j
+	b.tooltip_text = str(t.get("label", ""))
+	b.focus_mode = Control.FOCUS_NONE
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	b.disabled = not enabled
+	b.pressed.connect(func(): if not _rows.dragged: _tool(row, j, t))
+	return b
+
+
+func _progress(level: float) -> Control:
+	var bar := ProgressBar.new()
+	bar.name = "Progress"
+	bar.min_value = 0.0
+	bar.max_value = 1.0
+	bar.value = clampf(level, 0.0, 1.0)
+	bar.show_percentage = false
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	bar.custom_minimum_size = Vector2(size.x * 0.2, ThemeManager.px.gap * 0.7)
+	var track := _flat_box(ThemeManager.c.surface2)
+	var fill := _flat_box(ThemeManager.c.accent)
+	for f in [track, fill]:
+		f.set_corner_radius_all(roundi(ThemeManager.px.gap * 0.35))
+		f.content_margin_left = 0
+		f.content_margin_right = 0
+	bar.add_theme_stylebox_override("background", track)
+	bar.add_theme_stylebox_override("fill", fill)
+	return bar
+
+
+static var _pngs := {}
+
+
+## A base64 PNG (the phone icon, a station's logo) as a texture; null when it is not one.
+static func _png(b64: String) -> Texture2D:
+	if b64 == "":
+		return null
+	var key := b64.hash()
+	if not _pngs.has(key):
+		var img := Image.new()
+		var ok := img.load_png_from_buffer(Marshalls.base64_to_raw(b64)) == OK
+		_pngs[key] = ImageTexture.create_from_image(img) if ok else null
+	return _pngs[key]
 
 
 func _inline(opts: Array) -> bool:
@@ -591,18 +737,43 @@ func _livi_or_look(id: Variant, what: String) -> void:
 		"toggle":
 			Core.settings_toggle(i)
 		"press":
+			var r: Dictionary = _view.get("rows", [])[i]
 			Core.settings_press(i)
+			# Stock shows the phone it just switched to.
+			if str(r.get("local", "")) == "projection":
+				_to_projection()
+				return
 		"open":
 			var r: Dictionary = _view.get("rows", [])[i]
-			if bool(r.get("confirms", false)) and _armed != i:
-				_armed = i
-				_armed_ms = Time.get_ticks_msec()
-				_refresh(true)
+			if bool(r.get("confirms", false)) and _armed != str(i):
+				_arm(str(i))
 				return
-			_armed = -1
+			_armed = ""
 			Core.settings_open(i)
 			_rows.offset = 0.0
 	_refresh(true)
+
+
+func _arm(key: String) -> void:
+	_armed = key
+	_armed_ms = Time.get_ticks_msec()
+	_refresh(true)
+
+
+func _tool(row: int, j: int, t: Dictionary) -> void:
+	var key := "%d/%d" % [row, j]
+	if bool(t.get("confirms", false)) and _armed != key:
+		_arm(key)
+		return
+	_armed = ""
+	Core.settings_tool(row, j)
+	_refresh(true)
+
+
+func _to_projection() -> void:
+	var shell := get_parent()
+	if shell and shell.has_method("open_page"):
+		shell.open_page.call_deferred("projection")
 
 
 func _pick(id: Variant, i: int) -> void:
@@ -742,3 +913,107 @@ class SwitchMark:
 		var r := h * 0.36
 		var x := size.x - h / 2.0 if on else h / 2.0
 		draw_circle(Vector2(x, h / 2.0), r, ThemeManager.c.on_accent if on else ThemeManager.c.dim, true, -1.0, true)
+
+
+## A station's logo, or its initials on its colour, as stock's badge.
+class Badge:
+	extends Control
+	var initials := ""
+	var color := Color.GRAY
+	var logo: Texture2D
+
+	func _init(b: Dictionary, tex: Texture2D, px: float) -> void:
+		name = "Badge"
+		initials = str(b.get("initials", ""))
+		color = Color.from_string(str(b.get("color", "#808080")), Color.GRAY)
+		logo = tex
+		custom_minimum_size = Vector2.ONE * px
+		size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _draw() -> void:
+		var r := Rect2(Vector2.ZERO, size)
+		if logo:
+			draw_texture_rect(logo, r, false)
+			return
+		var box := StyleBoxFlat.new()
+		box.bg_color = color
+		box.set_corner_radius_all(roundi(size.y * 0.2))
+		box.anti_aliasing = true
+		draw_style_box(box, r)
+		var font: Font = ThemeManager.fonts.strong
+		var fs := roundi(size.y * 0.4)
+		var w := font.get_string_size(initials, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_string(font, Vector2((size.x - w) / 2.0, size.y / 2.0 + fs * 0.35), initials, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+
+
+## Battery: an outline filled to the level, red under 10, amber under 20; a bolt while charging.
+class BatteryMark:
+	extends Control
+	var level := 0
+	var charging := false
+
+	func _init(l: int, c: bool) -> void:
+		name = "Battery"
+		level = clampi(l, 0, 100)
+		charging = c
+		custom_minimum_size = Vector2(ThemeManager.px.icon * 2.0, ThemeManager.px.icon)
+
+	func _draw() -> void:
+		var h := size.y * 0.72
+		var y := (size.y - h) / 2.0
+		var w := size.x - h * 0.18
+		var line := maxf(1.5, h * 0.08)
+		draw_rect(Rect2(line / 2.0, y, w - line, h), ThemeManager.c.dim, false, line, true)
+		draw_rect(Rect2(w, y + h * 0.3, h * 0.14, h * 0.4), ThemeManager.c.dim)
+		var c := Color("#ff3b30") if level < 10 else (Color("#ffcc00") if level < 20 else Color("#34c759"))
+		var inner := w - line * 4
+		draw_rect(Rect2(line * 2, y + line * 1.5, maxf(line, inner * level / 100.0), h - line * 3), c)
+		var font: Font = ThemeManager.fonts.strong
+		var fs := roundi(h * 0.62)
+		var text := str(level)
+		var tw := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var at := Vector2(w - line * 3 - tw, y + h / 2.0 + fs * 0.36)
+		draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, 3, ThemeManager.c.bg)
+		draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ThemeManager.c.text)
+		if charging:
+			draw_texture_rect(Icons.texture("bolt", h), Rect2(line, y, h * 0.8, h), false, ThemeManager.c.text)
+
+
+## Signal: five rising bars, lit to the level.
+class SignalMark:
+	extends Control
+	var level := 0
+
+	func _init(l: int) -> void:
+		name = "Signal"
+		level = clampi(l, 0, 5)
+		custom_minimum_size = Vector2(ThemeManager.px.icon * 1.1, ThemeManager.px.icon * 0.7)
+
+	func _draw() -> void:
+		var bw := size.x / 5.0
+		for i in 5:
+			var h := size.y * (0.3 + 0.175 * i)
+			var c: Color = ThemeManager.c.text if i < level else Color(ThemeManager.c.dim, 0.35)
+			draw_rect(Rect2(i * bw, size.y - h, bw * 0.62, h), c)
+
+
+## Presence: filled in the accent while shown, in the text colour while there, a ring offline.
+class PresenceDot:
+	extends Control
+	var presence := ""
+
+	func _init(p: String) -> void:
+		name = "Presence"
+		presence = p
+		custom_minimum_size = Vector2.ONE * ThemeManager.px.icon * 0.5
+
+	func _draw() -> void:
+		var r := size.x / 2.0
+		match presence:
+			"active":
+				draw_circle(size / 2.0, r, ThemeManager.c.accent, true, -1.0, true)
+			"available":
+				draw_circle(size / 2.0, r, ThemeManager.c.text, true, -1.0, true)
+			_:
+				draw_circle(size / 2.0, r - 1.0, ThemeManager.c.dim, false, 2.0, true)

@@ -2,14 +2,24 @@
 //! shell: a stack into the tree, the screen it shows as plain JSON for GDScript, and the core
 //! messages each touch sends, as livi-ui's settings controller sends them.
 
-use livi_core_proto::message::{Action, Radio as CoreRadio, ToCore};
+mod browser;
+
+use std::path::{Path, PathBuf};
+
+use livi_core_proto::message::{Action, MfiFile, Radio as CoreRadio, ToCore};
 use livi_ui_model::i18n::Strings;
 use livi_ui_model::settings::custom::Watch;
+use livi_ui_model::settings::custom::files::Wanted;
+use livi_ui_model::settings::custom::icon;
 use livi_ui_model::settings::node::Radio;
 use livi_ui_model::settings::restart::{pending, sessions_open};
 use livi_ui_model::settings::schema;
-use livi_ui_model::settings::view::{Change, Dialog, Facts, Row, RowKind, Screen, Settings};
+use livi_ui_model::settings::view::{
+    Change, Dialog, Facts, Local, Presence, Row, RowKind, Screen, Settings,
+};
 use serde_json::{Value, json};
+
+use browser::{Browser, Picked};
 
 /// Inline steppers stop here: past it, a number opens its own page with coarser steps.
 /// What a touch sends the core: an action, or a message of its own (link speed).
@@ -33,6 +43,10 @@ pub struct Controller {
     dialog: Option<Dialog>,
     dismissed: Option<String>,
     watching: Vec<Watch>,
+    /// A page's Import open: its folders replace the page until a file is picked or Up leaves.
+    browser: Option<Browser>,
+    /// Where the browser starts; empty is home and the mounted volumes.
+    pub browse_roots: Vec<PathBuf>,
 }
 
 impl Default for Controller {
@@ -59,6 +73,8 @@ impl Controller {
             dialog: None,
             dismissed: None,
             watching: Vec::new(),
+            browser: None,
+            browse_roots: Vec::new(),
         }
     }
 
@@ -84,7 +100,7 @@ impl Controller {
                 .collect(),
             _ => Vec::new(),
         };
-        let titles: Vec<String> = (1..=self.stack.len())
+        let mut titles: Vec<String> = (1..=self.stack.len())
             .filter_map(|n| {
                 let node = self.model.node(&self.stack[..n])?;
                 Some(livi_ui_model::settings::view::label(
@@ -93,6 +109,9 @@ impl Controller {
                 ))
             })
             .collect();
+        if let Some(b) = &self.browser {
+            titles.push(b.title(t));
+        }
         let mut out = json!({
             "depth": self.stack.len(),
             "section": self.stack.first().map_or(-1, |&i| i as i64),
@@ -101,9 +120,12 @@ impl Controller {
             "apply": open && waiting,
             "applyText": t.t("settings.apply", "Apply"),
         });
-        let Some(screen) = self.model.screen(&self.stack, state, t) else {
+        let Some(mut screen) = self.model.screen(&self.stack, state, t) else {
             return out;
         };
+        if let Some(b) = &self.browser {
+            screen = Screen::List { title: b.title(t), rows: b.rows(t), dialog: None };
+        }
         let body = match screen {
             Screen::List { rows, dialog, .. } => {
                 let shown: Vec<Value> = rows.iter().map(|r| self.row_json(r, state)).collect();
@@ -137,6 +159,9 @@ impl Controller {
 
     fn row_json(&self, r: &Row, state: &Value) -> Value {
         let mut v = plain_row(r);
+        if self.browser.is_some() {
+            return v;
+        }
         // LIVI's own UI's colours: the shell's colours are its theme's (Look), so not offered here.
         let mut here = self.stack.clone();
         here.push(r.node);
@@ -187,12 +212,16 @@ impl Controller {
 
     /// The sections' list: `-1` closes any section.
     pub fn open_section(&mut self, i: i64) -> Vec<Out> {
+        self.browser = None;
         self.stack = if i < 0 { Vec::new() } else { vec![i as usize] };
         Vec::new()
     }
 
     /// A row that opens its page.
     pub fn open(&mut self, row: usize) -> Vec<Out> {
+        if self.browser.is_some() {
+            return Vec::new();
+        }
         if let Some(r) = self.rows.get(row)
             && self.model.opens(&self.stack, r.node)
         {
@@ -203,6 +232,12 @@ impl Controller {
 
     /// Up one page, not past the section.
     pub fn back(&mut self) -> Vec<Out> {
+        if let Some(b) = &mut self.browser {
+            if !b.up() {
+                self.browser = None;
+            }
+            return Vec::new();
+        }
         if self.stack.len() > 1 {
             self.stack.pop();
         }
@@ -221,12 +256,37 @@ impl Controller {
         send(self.model.toggle(&self.stack, r.node, state).into_iter().collect())
     }
 
-    /// A button, item or device row: its action, its change, or both.
+    /// A button, item, device or file row: its action, its change, or both; an Import opens the
+    /// browser, and a file picked in it is imported as stock imports it.
     pub fn press(&mut self, row: usize) -> Vec<Out> {
         let Some(r) = self.rows.get(row).filter(|r| r.enabled).cloned() else {
             return Vec::new();
         };
-        send(r.action.map(Change::Act).into_iter().chain(r.change).collect())
+        let mut changes: Vec<Change> = r.action.map(Change::Act).into_iter().chain(r.change).collect();
+        match r.local {
+            Some(Local::Browse(wanted)) => self.browser = Some(Browser::open(wanted, &self.browse_roots)),
+            Some(Local::PickEntry(n)) => {
+                if let Some(Picked::File(wanted, path)) = self.browser.as_mut().and_then(|b| b.pick(n)) {
+                    let got = picked(wanted, &path);
+                    if !got.is_empty() {
+                        self.browser = None;
+                    }
+                    changes.extend(got);
+                }
+            }
+            _ => {}
+        }
+        send(changes)
+    }
+
+    /// A row's tool (forget, favourite, hide, move, show): its action, as stock's tool buttons.
+    pub fn tool(&mut self, row: usize, tool: usize) -> Vec<Out> {
+        self.rows
+            .get(row)
+            .and_then(|r| r.tools.get(tool))
+            .filter(|t| t.enabled)
+            .map(|t| vec![act(t.action.clone())])
+            .unwrap_or_default()
     }
 
     /// An option of the select page open now (`row < 0`), or of a row's select set in place.
@@ -311,6 +371,47 @@ impl Controller {
     }
 }
 
+/// livi-ui's `picked`: the browser's file as the change its page wants.
+fn picked(wanted: Wanted, path: &Path) -> Vec<Change> {
+    let mfi = |file| vec![Change::Act(Action::ImportMfi { file, path: path.to_string_lossy().into_owned() })];
+    match wanted {
+        Wanted::Picture => match browser::import_icon(path) {
+            Ok(pngs) => vec![Change::Config(icon::icons(pngs))],
+            Err(e) => {
+                eprintln!("settings: icon import {} failed: {e}", path.display());
+                Vec::new()
+            }
+        },
+        Wanted::Certificate => mfi(MfiFile::Certificate),
+        Wanted::Identity => mfi(MfiFile::Identity),
+    }
+}
+
+/// LIVI's Material icon names to the shell's (`Icons`); empty where the shell draws none.
+fn glyph(material: &str) -> &'static str {
+    match material {
+        "Close" => "close",
+        "StarRounded" => "star",
+        "StarBorderRounded" => "star_outline",
+        "VisibilityRounded" => "eye",
+        "VisibilityOffRounded" => "eye_off",
+        "ExpandLess" => "chevron_up",
+        "ExpandMore" => "chevron_down",
+        "PhoneIphone" => "phone",
+        "Android" => "android",
+        "DirectionsCar" => "car",
+        "CableOutlined" => "usb",
+        "WifiOutlined" => "wifi",
+        "FolderOutlined" => "folder",
+        "ImageOutlined" | "VerifiedUserOutlined" | "KeyOutlined" => "file",
+        _ => "",
+    }
+}
+
+fn hex(c: [u8; 3]) -> String {
+    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
+}
+
 fn kind_name(k: RowKind) -> &'static str {
     match k {
         RowKind::Route => "route",
@@ -334,22 +435,77 @@ fn kind_name(k: RowKind) -> &'static str {
 const SHELL_HIDDEN: &[&str] = &["ui-colors"];
 
 fn plain_row(r: &Row) -> Value {
-    json!({
+    // Stock's touch calibration runs on its own full-screen targets, which the shell lacks.
+    let calibrates = matches!(r.local, Some(Local::CalibrateTouch(_)));
+    let mut v = json!({
         "kind": kind_name(r.kind),
         "label": r.label,
         "icon": r.icon,
         "value": r.value,
         "checked": r.checked,
         "level": r.level,
-        "enabled": r.enabled,
+        "enabled": r.enabled && !calibrates,
         "swatch": r.swatch,
         "button": r.button,
         "outlined": r.outlined,
         "dimmed": r.dimmed,
         "mono": r.mono,
         "alert": r.alert,
-        "acts": r.action.is_some() || r.change.is_some(),
-    })
+        "acts": r.action.is_some()
+            || r.change.is_some()
+            || matches!(r.local, Some(Local::Browse(_) | Local::PickEntry(_))),
+    });
+    if let Some(local) = r.local {
+        v["local"] = json!(match local {
+            Local::CloseDialog => "close",
+            Local::ToProjection => "projection",
+            Local::Browse(_) => "browse",
+            Local::PickEntry(_) => "file",
+            Local::CalibrateTouch(_) => "calibrate",
+        });
+    }
+    if calibrates {
+        v["detail"] = json!("Needs LIVI's own screen");
+    }
+    if let Some(g) = r.icon.map(glyph).filter(|g| !g.is_empty()) {
+        v["glyph"] = json!(g);
+    }
+    if let Some(d) = &r.device {
+        v["device"] = json!({
+            "protocol": glyph(d.protocol_icon),
+            "transport": d.transport_icon.map(glyph),
+            "battery": d.battery.map(|b| b.0),
+            "charging": d.battery.is_some_and(|b| b.1),
+            "signal": d.signal,
+            "presence": match d.presence {
+                Presence::Active => "active",
+                Presence::Available => "available",
+                Presence::Offline => "offline",
+            },
+        });
+    }
+    if let Some(b) = &r.badge {
+        v["badge"] = json!({ "initials": b.initials, "color": hex(b.color), "logo": b.logo });
+    }
+    if !r.tools.is_empty() {
+        v["tools"] = r
+            .tools
+            .iter()
+            .map(|t| {
+                json!({
+                    "icon": glyph(t.icon),
+                    "label": t.label,
+                    "on": t.on,
+                    "tint": t.tint.map(hex),
+                    "enabled": t.enabled,
+                    "switch": t.switch,
+                    // Stock forgets or removes at once; the shell asks again first.
+                    "confirms": matches!(t.action, Action::ForgetDevice { .. } | Action::RemoveMfi { .. }),
+                })
+            })
+            .collect();
+    }
+    v
 }
 
 fn act(a: Action) -> Out {
@@ -400,41 +556,153 @@ mod tests {
         c.view(s)
     }
 
-    fn config(out: &[Out]) -> Vec<Value> {
-        out.iter()
-            .filter_map(|o| match o {
-                Out::Act(Action::SetConfig { patch }) => Some(patch.clone()),
-                _ => None,
-            })
-            .collect()
+    fn set(patch: Value) -> Out {
+        Out::Act(Action::SetConfig { patch })
     }
 
-    /// Each touch sends what stock's settings UI sends for it.
+    /// Two phones: an iPhone shown now over Wi-Fi, a Pixel offline.
+    fn phones() -> Value {
+        json!({ "devices": [
+            { "id": "a", "name": "iPhone", "protocol": "carplay", "lastTransport": "wifi",
+              "status": "active", "batteryLevel": 54.4, "batteryCharging": true, "signalStrength": 3, "session": 1 },
+            { "id": "b", "model": "Pixel 8", "protocol": "androidauto", "lastTransport": "usb", "status": "offline", "session": 2 },
+        ] })
+    }
+
+    /// Opens a section, then each page below it by its row's label.
+    fn path(c: &mut Controller, s: &Value, pages: &[&str]) -> Value {
+        let mut v = section(c, s, pages[0]);
+        for p in &pages[1..] {
+            c.open(row(&v, p));
+            v = c.view(s);
+        }
+        v
+    }
+
+    /// Each touch sends what stock's settings UI sends for it, and leaves the page where it was.
     #[test]
     fn touches_send_what_stock_sends() {
         type Touch = fn(&mut Controller, usize, &Value) -> Vec<Out>;
-        let cases: [(&str, &str, Value, Touch, Vec<Value>); 5] = [
-            ("Appearance", "Dark Mode", json!({ "config": { "darkMode": true } }),
-                |c, r, s| c.toggle(r, s), vec![json!({ "darkMode": false })]),
-            ("Appearance", "Phone Appearance", json!({}),
-                |c, r, s| c.pick(r as i64, 2, s), vec![json!({ "appearanceMode": "night" })]),
-            ("Audio", "Sampling Frequency", json!({}),
-                |c, r, s| c.pick(r as i64, 0, s), vec![json!({ "samplingFrequency": 0 })]),
-            ("Audio", "Head Unit", json!({}),
-                |c, r, _| c.level(r as i64, 0.25), vec![json!({ "huVolume": 0.25 })]),
-            ("Audio", "Disable Audio", json!({ "config": { "disableAudioOutput": false } }),
-                |c, r, s| c.toggle(r, s), vec![json!({ "disableAudioOutput": true })]),
+        let press: Touch = |c, r, _| c.press(r);
+        let toggle: Touch = |c, r, s| c.toggle(r, s);
+        let tool0: Touch = |c, r, _| c.tool(r, 0);
+        let fm = json!({ "fm": { "stations": [{ "khz": 99500, "name": "Rock" }, { "khz": 101100, "name": "Jazz", "favorite": true }] } });
+        type Case = (&'static [&'static str], &'static str, Value, Touch, Vec<Out>);
+        let cases: Vec<Case> = vec![
+            (&["Appearance"], "Dark Mode", json!({ "config": { "darkMode": true } }),
+                toggle, vec![set(json!({ "darkMode": false }))]),
+            (&["Appearance"], "Phone Appearance", json!({}),
+                |c, r, s| c.pick(r as i64, 2, s), vec![set(json!({ "appearanceMode": "night" }))]),
+            (&["Audio"], "Sampling Frequency", json!({}),
+                |c, r, s| c.pick(r as i64, 0, s), vec![set(json!({ "samplingFrequency": 0 }))]),
+            (&["Audio"], "Head Unit", json!({}),
+                |c, r, _| c.level(r as i64, 0.25), vec![set(json!({ "huVolume": 0.25 }))]),
+            (&["Audio"], "Disable Audio", json!({ "config": { "disableAudioOutput": false } }),
+                toggle, vec![set(json!({ "disableAudioOutput": true }))]),
+            // A phone with a session is shown; one offline is not, but either can be forgotten.
+            (&["Devices"], "iPhone", phones(), press, vec![act(Action::SelectDevice { id: "a".into() })]),
+            (&["Devices"], "iPhone", phones(), tool0, vec![act(Action::ForgetDevice { id: "a".into() })]),
+            (&["Devices"], "Pixel 8", phones(), press, vec![]),
+            (&["Devices"], "Pixel 8", phones(), tool0, vec![act(Action::ForgetDevice { id: "b".into() })]),
+            (&["General", "FM"], "0 stations", json!({ "dab": { "receiver": "RTL2832U" } }), press, vec![act(Action::FmScan)]),
+            (&["General", "FM", "Station list"], "Rock · 99.5 MHz", fm.clone(), tool0,
+                vec![act(Action::FmFavorite { khz: 99500, favorite: true })]),
+            (&["General", "FM", "Station list"], "Jazz · 101.1 MHz", fm.clone(), |c, r, _| c.tool(r, 2),
+                vec![act(Action::FmMove { khz: 101100, by: -1 })]),
+            // The last station cannot move down.
+            (&["General", "FM", "Station list"], "Jazz · 101.1 MHz", fm, |c, r, _| c.tool(r, 3), vec![]),
+            (&["General", "MFi", "Certificate"], "Identity", json!({ "mfi": { "identity": true } }), tool0,
+                vec![act(Action::RemoveMfi { file: MfiFile::Identity })]),
+            (&["Car", "Battery Preconditioning"], "Precondition Battery",
+                json!({ "config": { "batteryPreconditioning": "auto" } }), toggle,
+                vec![act(Action::PreconditionBattery { on: true })]),
+            (&["System", "Software Update"], "Check for Updates", json!({}), press, vec![act(Action::CheckUpdate)]),
+            (&["Appearance", "UI Icon"], "UI Icon", json!({ "config": { "carplayIcon180": "abc" } }), press,
+                vec![set(json!({ "carplayIcon120": "", "carplayIcon180": "", "carplayIcon256": "" }))]),
         ];
-        for (sec, label, partial, touch, want) in cases {
+        for (pages, label, partial, touch, want) in cases {
             let s = state(partial);
             let mut c = Controller::new();
-            let v = section(&mut c, &s, sec);
-            assert_eq!(v["kind"], "list", "{sec}");
+            let v = path(&mut c, &s, pages);
+            assert_eq!(v["kind"], "list", "{pages:?}");
             let r = row(&v, label);
-            assert_eq!(config(&touch(&mut c, r, &s)), want, "{sec} / {label}");
-            // Set in place: the page stays where it was.
-            assert_eq!(c.view(&s)["depth"], 1, "{sec} / {label}");
+            assert_eq!(touch(&mut c, r, &s), want, "{pages:?} / {label}");
+            assert_eq!(c.view(&s)["depth"], pages.len(), "{pages:?} / {label}");
         }
+    }
+
+    /// A phone's row carries what stock's device row shows, and asks again before forgetting.
+    #[test]
+    fn a_phone_row_shows_its_state() {
+        let s = state(phones());
+        let mut c = Controller::new();
+        let v = section(&mut c, &s, "Devices");
+        let shown = &v["rows"][row(&v, "iPhone")];
+        assert_eq!(
+            shown["device"],
+            json!({ "protocol": "phone", "transport": "wifi", "battery": 54, "charging": true, "signal": 3, "presence": "active" })
+        );
+        assert_eq!((shown["local"].as_str(), shown["acts"].as_bool()), (Some("projection"), Some(true)));
+        assert_eq!(shown["tools"][0]["icon"], "close");
+        assert_eq!(shown["tools"][0]["confirms"], true);
+        let off = &v["rows"][row(&v, "Pixel 8")];
+        assert_eq!((off["device"]["protocol"].as_str(), off["device"]["presence"].as_str()), (Some("android"), Some("offline")));
+        assert_eq!((off["enabled"].as_bool(), off["dimmed"].as_bool()), (Some(false), Some(true)));
+        assert_eq!(off["tools"][0]["enabled"], true);
+        let fm = state(json!({ "fm": { "stations": [{ "khz": 99500, "name": "Rock", "favorite": true }] } }));
+        let st = path(&mut c, &fm, &["General", "FM", "Station list"]);
+        let rock = &st["rows"][0];
+        assert!(rock["badge"]["initials"].as_str().is_some_and(|i| !i.is_empty()));
+        assert_eq!(rock["tools"][0]["icon"], "star");
+        assert_eq!(rock["tools"][0]["tint"], "#ffa726");
+        assert_eq!(rock["tools"][0]["confirms"], false);
+    }
+
+    /// Import opens a browser in the page; a file picked in it is imported as stock imports it,
+    /// and Up from the folders' top leaves it.
+    #[test]
+    fn import_browses_for_the_file() {
+        let root = std::env::temp_dir().join(format!("shell-settings-browse-{}", std::process::id()));
+        let keys = root.join("keys");
+        std::fs::create_dir_all(&keys).unwrap();
+        std::fs::write(keys.join("identity.pk8"), b"x").unwrap();
+        std::fs::write(keys.join("notes.txt"), b"x").unwrap();
+        image::RgbaImage::from_pixel(400, 300, image::Rgba([0, 0, 255, 255])).save(keys.join("icon.png")).unwrap();
+        let s = state(json!({ "mfi": {} }));
+        let mut c = Controller::new();
+        c.browse_roots = vec![root.clone()];
+        let v = path(&mut c, &s, &["General", "MFi", "Certificate"]);
+        assert_eq!(v["rows"][row(&v, "Identity")]["local"], "browse");
+        c.press(row(&v, "Identity"));
+        let v = c.view(&s);
+        assert_eq!(v["titles"].as_array().unwrap().last().unwrap(), "Identity");
+        c.press(row(&v, &root.file_name().unwrap().to_string_lossy()));
+        { let v = c.view(&s); c.press(row(&v, "keys")) };
+        let v = c.view(&s);
+        let names: Vec<&str> = v["rows"].as_array().unwrap().iter().filter_map(|r| r["label"].as_str()).collect();
+        assert_eq!(names, ["identity.pk8"]);
+        assert_eq!(v["rows"][0]["glyph"], "file");
+        let path_of = keys.join("identity.pk8").to_string_lossy().into_owned();
+        assert_eq!(c.press(0), vec![act(Action::ImportMfi { file: MfiFile::Identity, path: path_of })]);
+        assert_eq!(c.view(&s)["titles"], json!(["General", "MFi", "Certificate"]));
+        // Up walks back out of the browser before leaving the page.
+        { let v = c.view(&s); c.press(row(&v, "Identity")) };
+        c.back();
+        assert_eq!(c.view(&s)["titles"], json!(["General", "MFi", "Certificate"]));
+        // A picture becomes the phone icon in its three sizes.
+        let v = path(&mut c, &s, &["Appearance", "UI Icon"]);
+        c.press(row(&v, "Import PNG"));
+        c.view(&s);
+        c.press(0);
+        { let v = c.view(&s); c.press(row(&v, "keys")) };
+        let out = { let v = c.view(&s); c.press(row(&v, "icon.png")) };
+        let [Out::Act(Action::SetConfig { patch })] = out.as_slice() else {
+            panic!("icon import sent {out:?}");
+        };
+        for k in ["carplayIcon120", "carplayIcon180", "carplayIcon256"] {
+            assert!(patch[k].as_str().is_some_and(|b| !b.is_empty()), "{k}");
+        }
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

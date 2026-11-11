@@ -1,6 +1,6 @@
 class_name ArtView
 extends Control
-## A cover, cropped to fill, in rounded corners; without one, the theme's placeholder with a
+## A cover, cropped square and centred in the rect, in rounded corners; without one, the theme's placeholder with a
 ## note. A new cover fades in over the old unless motion is reduced.
 
 const FADE_S := 0.25
@@ -43,12 +43,13 @@ func _init() -> void:
 		_shader = Shader.new()
 		# Masks everything drawn to a rounded rect of `size`, in the control's own pixels.
 		_shader.code = """shader_type canvas_item;
+uniform vec2 origin;
 uniform vec2 size;
 uniform float radius;
 varying vec2 local;
 void vertex() { local = VERTEX; }
 void fragment() {
-	vec2 q = abs(local - size * 0.5) - (size * 0.5 - vec2(radius));
+	vec2 q = abs(local - origin - size * 0.5) - (size * 0.5 - vec2(radius));
 	float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 	COLOR.a *= clamp(0.5 - d, 0.0, 1.0);
 }"""
@@ -66,8 +67,10 @@ func _ready() -> void:
 
 func _shape() -> void:
 	var r := radius if radius >= 0.0 else float(ThemeManager.px.radius) * 1.5
-	(material as ShaderMaterial).set_shader_parameter("size", size)
-	(material as ShaderMaterial).set_shader_parameter("radius", minf(r, minf(size.x, size.y) / 2.0))
+	var sq := square()
+	(material as ShaderMaterial).set_shader_parameter("origin", sq.position)
+	(material as ShaderMaterial).set_shader_parameter("size", sq.size)
+	(material as ShaderMaterial).set_shader_parameter("radius", minf(r, sq.size.x / 2.0))
 	queue_redraw()
 
 
@@ -96,28 +99,34 @@ func _draw() -> void:
 	_draw_one(texture, _mix)
 
 
+## Where it draws: the largest square centred in the rect, so a stretched rect never stretches it.
+func square() -> Rect2:
+	var side := minf(size.x, size.y)
+	return Rect2(((size - Vector2(side, side)) / 2.0).round(), Vector2(side, side))
+
+
 func _draw_one(t: Texture2D, alpha: float) -> void:
-	var r := Rect2(Vector2.ZERO, size)
+	var r := square()
 	if t == null:
 		var ground: Color = fill if fill.a > 0.0 else ThemeManager.c.surface2.lerp(ThemeManager.c.accent, 0.15)
 		ground.a *= alpha
 		draw_rect(r, ground)
-		var side := minf(size.x, size.y)
+		var side := r.size.x
 		if initials != "":
 			var font: Font = ThemeManager.fonts.display
 			var fs := roundi(side * 0.36)
 			var w := font.get_string_size(initials, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			var y := size.y / 2.0 + (font.get_ascent(fs) - font.get_descent(fs)) / 2.0
-			draw_string(font, Vector2((size.x - w) / 2.0, y), initials, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.92 * alpha))
+			var y := r.get_center().y + (font.get_ascent(fs) - font.get_descent(fs)) / 2.0
+			draw_string(font, Vector2(r.get_center().x - w / 2.0, y), initials, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.92 * alpha))
 			return
 		var s := roundf(side * NOTE_SHARE)
 		var note := Icons.texture("note", s)
 		var col: Color = ThemeManager.c.accent
 		col.a *= alpha
-		draw_texture_rect(note, Rect2((size - Vector2(s, s)) / 2.0, Vector2(s, s)), false, col)
+		draw_texture_rect(note, Rect2(r.get_center() - Vector2(s, s) / 2.0, Vector2(s, s)), false, col)
 		return
-	# Cover: the middle of the image at the rect's aspect.
+	# Cover: the middle square of the image.
 	var ts := t.get_size()
-	var k := maxf(size.x / ts.x, size.y / ts.y)
-	var src := Rect2((ts - size / k) / 2.0, size / k)
+	var m := minf(ts.x, ts.y)
+	var src := Rect2((ts - Vector2(m, m)) / 2.0, Vector2(m, m))
 	draw_texture_rect_region(t, r, src, Color(1, 1, 1, alpha))

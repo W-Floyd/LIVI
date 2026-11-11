@@ -17,6 +17,13 @@ var gap := 16.0
 ## The dashboard's share of the width for the stacked cards: they keep their column look, a
 ## little wider; the hero takes the rest.
 const LIST_SHARE := 0.42
+## Beside the phone, a column with room for two splits: `tall` gets TALL_SHARE of it, full
+## height, on the outer edge, at least TALL_TOUCH touch targets wide; the rest stack in the
+## other, at least REST_TOUCH wide (a card's title on one line).
+const TALL_SHARE := 0.36
+const TALL_TOUCH := 5.5
+const REST_TOUCH := 10.0
+var tall: Control
 
 
 func _get_minimum_size() -> Vector2:
@@ -26,6 +33,10 @@ func _get_minimum_size() -> Vector2:
 ## The height the visible cards need in the column (false) or the dashboard (true).
 func needed(dashboard: bool) -> float:
 	var shown := _shown()
+	if not dashboard and split(shown):
+		var rest := shown.duplicate()
+		rest.erase(tall)
+		return maxf(_stack_height(rest), tall.get_combined_minimum_size().y)
 	var hero: Control = _hero(shown) if dashboard else null
 	var h := 0.0
 	var n := 0
@@ -48,9 +59,50 @@ func _notification(what: int) -> void:
 		fit_child_in_rect(shown[i], Rect2(a[i].position.lerp(b[i].position, wide), a[i].size.lerp(b[i].size, wide)))
 
 
+## The width `c` gets at the panel's present size, shown or not: for a card that arranges itself
+## by its width before the panel decides whether it fits.
+func child_width(c: Control) -> float:
+	var shown := _with(c)
+	var i := shown.find(c)
+	return lerpf(_column_rects(shown)[i].size.x, _dashboard_rects(shown)[i].size.x, wide)
+
+
+## Whether `c` has a column of its own, full height (`tall`), shown or not.
+func is_tall(c: Control) -> bool:
+	return c == tall and wide < 0.5 and split(_with(c))
+
+
+## Whether the column splits in two with `shown`: wide enough, and `tall` beside something.
+func split(shown: Array[Control]) -> bool:
+	if tall == null or not tall in shown or shown.size() < 2:
+		return false
+	var w := minf(column, size.x) - gap
+	return w * TALL_SHARE >= ThemeManager.px.touch * TALL_TOUCH and w * (1.0 - TALL_SHARE) >= ThemeManager.px.touch * REST_TOUCH
+
+
+func _with(c: Control) -> Array[Control]:
+	var shown := _shown()
+	if not c in shown:
+		# Where it would be among its siblings.
+		shown.clear()
+		for ch in get_children():
+			if ch is Control and (ch == c or (ch.visible and not ch.top_level)):
+				shown.append(ch)
+	return shown
+
+
 func _column_rects(shown: Array[Control]) -> Array[Rect2]:
 	var w := minf(column, size.x)
-	return _stack(shown, 0.0 if column_left else size.x - w, w)
+	var x := 0.0 if column_left else size.x - w
+	if not split(shown):
+		return _stack(shown, x, w)
+	var tall_w := roundf((w - gap) * TALL_SHARE)
+	var rest_w := w - gap - tall_w
+	var rest := shown.duplicate()
+	rest.erase(tall)
+	var out := _stack(rest, x + tall_w + gap if column_left else x, rest_w)
+	out.insert(shown.find(tall), Rect2(x if column_left else x + rest_w + gap, 0.0, tall_w, size.y))
+	return out
 
 
 func _dashboard_rects(shown: Array[Control]) -> Array[Rect2]:
@@ -64,6 +116,13 @@ func _dashboard_rects(shown: Array[Control]) -> Array[Rect2]:
 	var hero_w := maxf(size.x - list_w - gap, 0.0)
 	out.insert(shown.find(hero), Rect2(list_w + gap if column_left else 0.0, 0.0, hero_w, size.y))
 	return out
+
+
+func _stack_height(cards: Array) -> float:
+	var h := 0.0
+	for c in cards:
+		h += c.get_combined_minimum_size().y
+	return h + gap * maxi(cards.size() - 1, 0)
 
 
 func _stack(cards: Array, x: float, w: float) -> Array[Rect2]:

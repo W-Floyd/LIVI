@@ -262,6 +262,14 @@ band's stations (`dabPlay`/`fmPlay`, the tuned one playing `dabPause`) and favou
 is `phoneMedia` on the phone's tab, a band's resume when it is not on air, else `media`. Volume
 is `huVolume`, as the hard keys. The core has no shuffle or repeat. Scenario `media`.
 
+Home's player (`MiniPlayer`) lays itself out by the room `HomeCards` gives it, hidden or not:
+beside the phone, a cards column wide enough for two (`TALL_SHARE`, `TALL_TOUCH`, `REST_TOUCH`;
+the 680 px snap) gives it a column of its own, full height, with the cover as large as fits,
+title, artist, album, a position bar and larger controls. Otherwise one row; when the text would
+keep fewer than `MIN_CHARS` beside the controls, they take a row under it; where the panel has no
+height for that row, one row without prev. The cover is drawn square at every size
+(`ArtView.square`). Scenario `media-player`.
+
 ## App launcher
 
 `page: apps` (the rail's grid) lists what the unit can run and starts it as a client of the
@@ -398,6 +406,13 @@ as they open, so their rows ask for a second tap.
 (`status_position`) runs along the top (stock), the bottom, as a column of stacked items down the
 left or right, or is Off. Every page with the bar lays out in the rest (`Shell.content_rect`); on
 the driver's side a docked rail stays at the edge and the column sits beside it as one band.
+
+The docked rail's order is the look's too (`rail_order`, item ids top first; unknown ids are
+dropped and missing ones follow in the default order). On the rail, a press held still for 400 ms
+lifts an item, the others make room as it is dragged, and the release drops it; a press that moves
+first does nothing, and a drag off the rail puts it back. With the rail docked, Look's "Navigation
+rail" lists every item, one the rail hides (Phone, with no phone) dimmed with why, each moved by
+its arrows, and "Reset order". Scenario `nav-rail`.
 
 The look resolved is also written, on every change, to `tokens.json` beside `look.json`: the
 contract for apps the shell hosts (godot-maps), so they need not read theme files. It holds

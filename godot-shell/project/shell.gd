@@ -171,6 +171,8 @@ func _ready() -> void:
 	_precondition.pressed.connect(_on_precondition)
 	_player.control.connect(func(c): now_playing.pressed(c); Core.act({kind = "media", control = c}))
 	_player.opened.connect(func(): open_page.call_deferred("media"))
+	_player.now_playing = now_playing
+	(_side.get_node("Panel") as HomeCards).tall = _player
 	now_playing.changed.connect(_update_player)
 	now_playing.art_changed.connect(_update_player)
 	_update_player()
@@ -820,6 +822,7 @@ func _fit() -> void:
 	var room: float = _rect_beside_status().size.y \
 		- _side.get_theme_constant("margin_top") - _side.get_theme_constant("margin_bottom")
 	left_out.clear()
+	_player.allow_two_rows = true
 	var order := PRIORITY.duplicate()
 	order.reverse()
 	for n in order:
@@ -827,6 +830,12 @@ func _fit() -> void:
 		if need <= room:
 			break
 		var item: Control = panel.get_node(n)
+		# A tight player in one row rather than none.
+		if item == _player and item.visible and _player.two_rows:
+			_player.allow_two_rows = false
+			if panel.needed(dashboard) <= room:
+				break
+			need = panel.needed(dashboard)
 		if item.visible:
 			item.visible = false
 			# The hero beside a too-tall stack: leaving it out would not make the stack fit.
@@ -1031,14 +1040,18 @@ func _update_player() -> void:
 	var band: Dictionary = np.dab if np.on_air() == "dab" else np.fm if np.on_air() == "fm" else {}
 	if band.is_empty():
 		_player.title = np.title
-		_player.subtitle = " · ".join([np.artist, np.album].filter(func(s): return s))
+		_player.artist = np.artist
+		_player.album = np.album
+		_player.show_position = np.duration_ms > 0.0
 		_player.playing = np.playing()
 		_player.art = np.art
 		_player.initials = ""
 		_player.badge = Color(0, 0, 0, 0)
 	else:
 		_player.title = band.title if band.title != "" else ("DAB+" if np.on_air() == "dab" else "FM")
-		_player.subtitle = " · ".join([band.text, band.detail].filter(func(s): return s))
+		_player.artist = band.text
+		_player.album = band.detail
+		_player.show_position = false
 		_player.playing = band.playing
 		_player.art = NowPlaying.logo(band.logo) if band.logo != "" else null
 		_player.initials = band.initials

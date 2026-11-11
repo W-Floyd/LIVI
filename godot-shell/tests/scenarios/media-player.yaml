@@ -1,0 +1,112 @@
+name: media-player
+# Home's player beside the phone, at each of the phone's widths, status bar edge, text scale and
+# hand: a column of its own, full height, where the cards' column has room for two; else the
+# cover square at the text's height, the controls beside the text while it keeps MIN_CHARS
+# there, else in a row under it (prev only while that row holds three), else one row without
+# prev; the cover drawn square; nothing of the text under the controls or out of the card.
+clock: 2026-11-09T08:30:00
+nav: true
+fixtures:
+  core: fixtures/media.json
+  clients:
+    - { role: app, app_id: livi-video-main, pattern: grid, size: 1920x1080, buffer: nv12, video: true }
+theme: { theme_name: calm, appearance: day, reduced_motion: true }
+steps:
+  - set: { core: { config: { projectionWidth: 1920, projectionHeight: 720 }, dab: { receiver: null }, nowPlaying: { title: A Remarkably Long Song Title That Goes On, artist: The Extraordinarily Named Ensemble } } }
+  - wait: { window: livi-video-main }
+  - gdscript: &art |
+      var np = shell.now_playing
+      for i in 120:
+          if np.art != null:
+              break
+          await runner.frames(1)
+      if np.art == null:
+          return "the cover was not decoded"
+      await runner.frames(3)
+  # Rows: the phone's share of home (snapping to 680, 912 and 1117 px), the status bar's edge,
+  # text scale, hand; the player's layout (one row, two, or a column of its own), whether prev
+  # shows, and whether the panel holds the player.
+  - gdscript: |
+      var rows := [
+          [0.0, "top", 1.0, "lhd", "one", true, true],
+          # The phone's widest snap leaves the column room for two: the player a column of its own.
+          [0.37, "top", 1.0, "lhd", "tall", true, true],
+          [0.5, "top", 1.0, "lhd", "one", true, true],
+          # Tight, and no height for a second row: one row, prev's room to the text.
+          [0.62, "top", 1.0, "lhd", "one", false, true],
+          [0.37, "left", 1.0, "lhd", "one", true, true],
+          [0.5, "right", 1.0, "rhd", "one", true, true],
+          [0.62, "left", 1.0, "lhd", "two", true, true],
+          [0.62, "right", 1.0, "rhd", "two", true, true],
+          # Larger text: no room for two columns, and none for the player under the rest.
+          [0.37, "bottom", 1.3, "lhd", "one", true, false],
+          [0.37, "top", 1.3, "rhd", "one", true, false],
+          [0.5, "top", 1.3, "lhd", "one", true, false],
+          [0.62, "top", 1.3, "rhd", "one", false, false],
+          [0.37, "left", 1.6, "lhd", "one", false, false],
+      ]
+      var player: Control = shell.get_node("Page/Body/Side/Panel/Player")
+      var bad := PackedStringArray()
+      for r in rows:
+          ThemeManager.set_look({home_phone = r[0] > 0.0, home_split = r[0], status_position = r[1], text_scale = r[2], hand = r[3]})
+          await runner.frames(6)
+          var label := "share %s, status %s, text %s, %s" % [r[0], r[1], r[2], r[3]]
+          var prev: Control = player.find_child("Previous", true, false)
+          print("media-player %s: panel h %d, card h %d, card %d, text %d (needs %d), %s, prev %s, shown %s" % [label, shell.get_node("Page/Body/Side/Panel").size.y, player.size.y, player.inner_width(), roundi(player.one_row_text_width()), roundi(player.min_text_width()), player.layout, prev.visible, player.visible])
+          if r[4] != null and (player.layout != r[4] or prev.visible != r[5] or player.visible != r[6]):
+              bad.append("%s: %s, prev %s, shown %s; want %s, %s, %s" % [label, player.layout, prev.visible, player.visible, r[4], r[5], r[6]])
+          var tight: bool = player.one_row_text_width() < player.min_text_width()
+          var want: String = "tall" if shell.get_node("Page/Body/Side/Panel").is_tall(player) else "two" if tight and player.allow_two_rows else "one"
+          if player.layout != want:
+              bad.append("%s: %s, not %s, for %d of %d" % [label, player.layout, want, player.one_row_text_width(), player.min_text_width()])
+          if not player.is_visible_in_tree():
+              continue
+          var card := player.get_global_rect()
+          var art_view = player.find_child("Art", true, false)
+          var sq: Rect2 = art_view.square()
+          var art := Rect2(art_view.get_global_rect().position + sq.position, sq.size)
+          var t: Rect2 = player.find_child("Title", true, false).get_global_rect()
+          var s: Rect2 = player.find_child("Subtitle", true, false).get_global_rect()
+          var buttons: Rect2 = player.find_child("Buttons", true, false).get_global_rect()
+          var drawn: Vector2 = art_view.size
+          if player.layout == "tall":
+              # As large as the column leaves: its width or its height.
+              if absf(art.size.x - minf(drawn.x, drawn.y)) > 0.5 or art.size.x < ThemeManager.px.touch:
+                  bad.append("%s: the tall cover %s in %s" % [label, art.size, drawn])
+          elif absf(drawn.x - drawn.y) > 1.0 or absf(drawn.y - player.art_side()) > 1.0:
+              bad.append("%s: the cover %s, not a square of %d" % [label, drawn, player.art_side()])
+          if absf(card.size.x - player.inner_width() - player.get_theme_stylebox("panel").get_minimum_size().x) > 1.0:
+              bad.append("%s: the card %s, arranged for %d" % [label, card.size, player.inner_width()])
+          for x in [art, t, s, buttons]:
+              if not card.grow(0.5).encloses(x):
+                  bad.append("%s: %s out of the card %s" % [label, x, card])
+          if t.intersects(buttons) or s.intersects(buttons) or art.intersects(buttons):
+              bad.append("%s: the text or cover under the controls %s" % [label, buttons])
+      ThemeManager.set_look({home_phone = true, home_split = 0.0, status_position = "top", text_scale = 1.0, hand = "lhd"})
+      await runner.frames(4)
+      if not bad.is_empty():
+          return "\n".join(bad)
+  - set: { core: { nowPlaying: { title: Short, artist: Band } } }
+  - wait: { frames: 4 }
+  - expect_node: { path: Page/Body/Side/Panel/Player, layout: one }
+  - screenshot: media-player-phone
+  - set: { core: { nowPlaying: { title: A Remarkably Long Song Title That Goes On, artist: The Extraordinarily Named Ensemble } } }
+  - theme: { home_split: 0.62 }
+  - wait: { frames: 4 }
+  - expect_node: { path: Page/Body/Side/Panel/Player, layout: one }
+  - screenshot: media-player-tight
+  - theme: { home_split: 0.37 }
+  - wait: { frames: 4 }
+  - expect_node: { path: Page/Body/Side/Panel/Player, layout: tall }
+  - screenshot: media-player-tall
+  # The tall card's bar seeks, under CarPlay.
+  - tap: { node: Page/Body/Side/Panel/Player/Rows/Seek }
+  - expect_action: { Seek: { positionMs: 100000 } }
+  - theme: { status_position: right, hand: rhd, appearance: night, home_split: 0.62 }
+  - wait: { frames: 4 }
+  - expect_node: { path: Page/Body/Side/Panel/Player, layout: two }
+  - screenshot: media-player-two-rows-night-rhd
+  - theme: { home_split: 0.37, status_position: top }
+  - wait: { frames: 4 }
+  - expect_node: { path: Page/Body/Side/Panel/Player, layout: tall }
+  - screenshot: media-player-tall-night-rhd

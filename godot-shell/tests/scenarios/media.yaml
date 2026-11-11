@@ -24,6 +24,13 @@ steps:
       var art = shell.get_node("Page/Body/Side/Panel/Player").find_child("Art", true, false)
       if art.texture != np.art:
           return "home's player shows %s" % art.texture
+      # Wide, beside nothing: one row, prev shown, the cover a square of the text's height.
+      var player = shell.get_node("Page/Body/Side/Panel/Player")
+      var r: Rect2 = art.get_global_rect()
+      if player.layout != "one" or not player.find_child("Previous", true, false).visible:
+          return "a wide card: %s" % player.layout
+      if absf(r.size.x - r.size.y) > 1.0 or absf(r.size.y - player.art_side()) > 1.0:
+          return "home's cover is %s" % r.size
   - screenshot: media-home
   # Home's own buttons go to whichever source is on air.
   - gdscript: |
@@ -43,6 +50,9 @@ steps:
       var page: Control = shell.get_node("Media")
       if page.get_node("Art").texture != shell.now_playing.art:
           return "the page's cover is not the track's"
+      var sq: Rect2 = page.get_node("Art").square()
+      if sq.size != page.get_node("Art").size:
+          return "the page's cover %s in %s" % [sq, page.get_node("Art").size]
       var rail: Rect2 = runner._vp.get_node("NavRail").get_global_rect()
       for n in ["Art", "Info"]:
           if page.get_node(n).get_global_rect().intersects(rail):

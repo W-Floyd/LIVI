@@ -16,6 +16,7 @@ use crate::stream::{Codec, RTP_HEADER_LEN, aac_raw_caps, alac_caps, reframe_aac,
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
+use std::time::Duration;
 
 pub struct Config {
     pub codec: Codec,
@@ -98,6 +99,30 @@ struct UnitClock {
 
 const UNIT_HEADROOM: gst::ClockTime = gst::ClockTime::from_mseconds(250);
 
+// Fed PCM is acked to the phone on receipt, so nothing paces the sender to the sink: a stall
+// in the host (its main loop held up by a display restart) comes back as a burst that would
+// play that much late for the rest of the stream. Past HIGH queued ahead of the sink, incoming
+// buffers are dropped until it is back under LOW: one skip, not continuous resampling.
+const BACKLOG_HIGH: Duration = Duration::from_millis(300);
+const BACKLOG_LOW: Duration = Duration::from_millis(150);
+
+#[derive(Default)]
+struct Backlog {
+    dropping: bool,
+}
+
+impl Backlog {
+    /// Whether a buffer arriving with `queued` already waiting for the sink is played.
+    fn admit(&mut self, queued: Duration) -> bool {
+        if queued > BACKLOG_HIGH {
+            self.dropping = true;
+        } else if queued <= BACKLOG_LOW {
+            self.dropping = false;
+        }
+        !self.dropping
+    }
+}
+
 fn unit_duration(asc: &[u8]) -> gst::ClockTime {
     const RATES: [u64; 13] = [
         96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
@@ -127,6 +152,9 @@ pub struct Player {
     codec: Codec,
     payload_type: u8,
     units: Mutex<UnitClock>,
+    pcm_bytes_per_second: Option<u64>,
+    backlog: Mutex<Backlog>,
+    label: String,
 }
 
 impl Player {
@@ -246,6 +274,11 @@ impl Player {
                 next: None,
                 frame: unit_duration(&cfg.codec_data),
             }),
+            pcm_bytes_per_second: matches!(cfg.codec, Codec::Lpcm | Codec::PcmLe)
+                .then(|| u64::from(cfg.clock_rate) * u64::from(cfg.channels) * 2)
+                .filter(|b| *b > 0),
+            backlog: Mutex::default(),
+            label: cfg.label.clone(),
         })
     }
 
@@ -290,6 +323,29 @@ impl Player {
     }
 
     pub fn push_samples(&self, samples: &[u8]) -> bool {
+        if let Some(rate) = self.pcm_bytes_per_second
+            && let Ok(mut backlog) = self.backlog.lock()
+        {
+            let queued = Duration::from_nanos(
+                self.appsrc.current_level_bytes() * 1_000_000_000 / rate
+                    + self
+                        .pipeline
+                        .by_name("out")
+                        .map_or(0, |q| q.property::<u64>("current-level-time")),
+            );
+            let was_dropping = backlog.dropping;
+            if !backlog.admit(queued) {
+                if !was_dropping {
+                    eprintln!(
+                        "[cp_audio:{}] {} ms queued ahead of the sink, dropping to {} ms",
+                        self.label,
+                        queued.as_millis(),
+                        BACKLOG_LOW.as_millis()
+                    );
+                }
+                return true;
+            }
+        }
         let mut buffer = gst::Buffer::from_slice(samples.to_vec());
         if self.codec == Codec::AacRaw
             && let Ok(mut clock) = self.units.lock()
@@ -507,6 +563,46 @@ mod tests {
         assert!(desc.contains("do-timestamp=false"));
         assert_eq!(&elements(&desc)[..3], ["appsrc", "aacparse", "faad"]);
         assert!(pipeline_desc(&cfg(Codec::Opus, false)).contains("do-timestamp=true"));
+    }
+
+    #[test]
+    fn fed_pcm_stays_within_the_backlog_bound() {
+        const PACKET_MS: u64 = 20;
+        // (case, when each packet reaches the host in ms, whether a drop is expected); the sink
+        // drains in real time.
+        let steady: Vec<u64> = (0..500).map(|i| i * PACKET_MS).collect();
+        let jitter: Vec<u64> = (0..500)
+            .map(|i| if (100..110).contains(&i) { 2200 } else { i * PACKET_MS })
+            .collect();
+        let stall_then_burst: Vec<u64> = (0..1500)
+            .map(|i| i * PACKET_MS)
+            .map(|t| if (2_000..12_000).contains(&t) { 12_000 } else { t })
+            .collect();
+        let fast_phone: Vec<u64> = (0..30_000).map(|i| i * PACKET_MS * 99 / 100).collect();
+        let cases = [
+            ("steady", steady, false),
+            ("200 ms of wifi jitter", jitter, false),
+            ("10 s stall, then the burst", stall_then_burst, true),
+            ("phone clock 1% fast", fast_phone, true),
+        ];
+
+        for (case, arrivals, drops) in cases {
+            let mut backlog = Backlog::default();
+            let (mut queued, mut now, mut dropped, mut worst) = (0u64, 0u64, 0, 0u64);
+            for at in arrivals {
+                queued = queued.saturating_sub(at.saturating_sub(now));
+                now = now.max(at);
+                if backlog.admit(Duration::from_millis(queued)) {
+                    queued += PACKET_MS;
+                } else {
+                    dropped += 1;
+                }
+                worst = worst.max(queued);
+            }
+            let bound = BACKLOG_HIGH.as_millis() as u64 + PACKET_MS;
+            assert!(worst <= bound, "{case}: {worst} ms queued, bound {bound} ms");
+            assert_eq!(dropped > 0, drops, "{case}: {dropped} packets dropped");
+        }
     }
 
     #[test]

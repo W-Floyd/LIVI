@@ -14,7 +14,8 @@ gitignored `godot-shell/ref/`).
 | `Dockerfile` | build image (Ubuntu 20.04, armhf gcc 9, e2fsprogs, gdisk) |
 | `build-kernel.sh`, `gen5w.config`, `kernel-backports.sh` | Linux 4.4.302 `zImage` from kernel.org |
 | `build-ramdisk.sh`, `ramdisk-overlay/` | stock `boot.img` ramdisk plus the emulator changes |
-| `build-emmc.sh` | GPT eMMC around the decrypted V015 `system.ext4` |
+| `build-emmc.sh` | GPT eMMC around the decrypted V015 `system.ext4` (`DATA_MIB`/`CACHE_MIB` resize `data`/`cache`, default 520/278) |
+| `swap-rb.py` | swap red/blue of a screenshot (see below) |
 | `emulator-macos.patch` | `emuctl image-import` on macOS (`cp -c` instead of GNU `cp` flags) |
 | `screenshots.sh` | consent/first-run click-through and screenshots |
 
@@ -68,3 +69,8 @@ setup, EV home widget, FM radio, home settings, voice memo, user profile all ren
   service (`com.hkmc.telematics.service`, fed by `micomd` over `/dev/ttyTCC2` and the
   CAN managers) to report ignition on. Battery shows 0 % and range `--- km` meanwhile.
 - No netfilter beyond basics, no audio, no GPS/BT/radio hardware; `netd` logs iptables errors.
+
+## Screenshot colours
+
+The guest asks the fbdev for RGBA byte order and bochs ignores it, so `emuctl screenshot` has red and blue swapped.
+`swap-rb.py in.png out.png` fixes that (needs Pillow).

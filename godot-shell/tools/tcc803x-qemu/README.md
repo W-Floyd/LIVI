@@ -120,5 +120,19 @@ launcher reports `Displayed ... total +13s` guest). No more crash loop; `drive.p
 Compared with the Linux 4.4 screenshots (`ref/gen5w-stock`): consent, home settings and user profile are pixel-identical (apart from
 the 8x16 px top-left corner, a clock stub) once red and blue are swapped; radio differs only in the top-left clock/animation area.
 The 4.4 references are red/blue swapped: gralloc asks the fbdev for RGBA byte order and bochs ignores it. Fonts and layout do not differ.
-Open: the launcher (`com.android.launcher3`) draws a blank dark screen here, not the home screen of the 4.4 reference; the
-voicememo capture differs (not settled when captured). Not modelled: SMP (`maxcpus=1`), `/dev/ttyTCC2` (micomd), audio mixer, Mali/VPU/USB/ethernet.
+Home screen: it is timing, not storage. With the click-through of `drive.py`, the launcher draws a flat `#121214` frame twice
+(`logcat`: `Displayed com.android.launcher3/.view.Launcher: +58s347ms`, again `+5s180ms`; between them `mCurrentFocus=null`, the old
+process a zombie, a new pid), and after each start the widgets are bound some 10-60 s later (background and page dots first). The same
+capture taken >= 180 s after the last tap equals the 4.4 one except ~1100 px (page dots, EQ bars). What kills the launcher is not
+established (no `am_kill`/`has died` in the main log). Partition size makes no difference: `data` 495 MiB (stock) and 2.9 GiB give the same
+sequence. Voice Memo: the free-space check is not a filesystem check. `StatFs` is used only for the USB path; the internal "available"
+is `0x8000000` (128 MiB) minus the DB-recorded usage, handed to the framework `VoiceMemoManager.setAvailableMemory` by the Voice Memo
+service, and "Storage Full" is `getAvailableMemory() <= 0`. The 4.4 run logs `setAvailableMemory ... 134217728` on the first launch (the
+reference shows `Available 128 MB`); the stock-kernel capture is the popup with the three per-user figures at 0 MB (an empty DB), presumably
+the manager value was still 0 (not confirmed: the log buffer had rolled over). The popup appeared on a launch while the first-run
+setup was in front.
+`build-ramdisk.py` drops ext4 `discard` from the fstabs: the model's eMMC has no erase group size and every discard made the kernel
+print `Division by zero in kernel` (`mmc_mmc_erase_timeout`, 70-130 times per run). `make-emmc.sh` clones with `cp -c` where possible.
+`DATA_MIB`/`CACHE_MIB` for `tools/gen5w-stock/build-emmc.sh` resize the partitions (3072/512 still fits 8 GiB).
+`drive.py`: `PROMPT_TIMEOUT` (default 120) for slow commands; `input tap` takes 30-120 s here, so wait before the next tap.
+Not modelled: SMP (`maxcpus=1`), `/dev/ttyTCC2` (micomd), audio mixer, Mali/VPU/USB/ethernet.

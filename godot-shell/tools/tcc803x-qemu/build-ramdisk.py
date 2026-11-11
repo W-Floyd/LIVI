@@ -1,5 +1,5 @@
 #!/usr/bin/env python3 -I
-"""Stock ramdisk.gz -> ramdisk.emu.gz: root console, ro.secure=0, init.emu.rc imported.
+"""Stock ramdisk.gz -> ramdisk.emu.gz: root console, ro.secure=0, init.emu.rc imported, fstab without discard.
 Kia-derived output stays next to the input.
 usage: build-ramdisk.py ramdisk.gz ramdisk.emu.gz overlay/init.emu.rc [qfb.ko]"""
 import gzip, re, sys
@@ -45,5 +45,10 @@ nxt = max(e["ino"] for e in ents) + 1
 ents.append(dict(ino=nxt, mode=0o100644, uid=0, gid=0, nl=1, mt=0, rmaj=0, rmin=0, name="init.emu.rc", data=open(rc, "rb").read()))
 if ko:
     ents.append(dict(ino=nxt + 1, mode=0o100644, uid=0, gid=0, nl=1, mt=0, rmaj=0, rmin=0, name="qfb.ko", data=open(ko, "rb").read()))
+# The model's eMMC has no erase group size: ext4 `discard` makes mmc_erase divide by zero ("Division by
+# zero in kernel") and stalls everything on the filesystem.
+for e in ents:
+    if e["name"].startswith("fstab."):
+        e["data"] = e["data"].replace(b",discard", b"")
 p["data"] += b"ro.kernel.qemu=1\nro.kernel.qemu.gles=0\n"
 open(dst, "wb").write(gzip.compress(emit(ents), 6))

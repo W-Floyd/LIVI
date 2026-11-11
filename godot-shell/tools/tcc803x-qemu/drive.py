@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Drive the root console of run.sh from a script file and take screenshots.
-usage: EMMC=... BOOT_DIR=... RAMDISK=ramdisk.emu.gz TIMEOUT=2400 drive.py script.txt out.log
+usage: EMMC=... BOOT_DIR=... RAMDISK=ramdisk.emu.gz TIMEOUT=2400 [PROMPT_TIMEOUT=120] drive.py script.txt out.log
 script lines: a shell command (waits for the prompt), `#sleep N`, `#shot NAME` (NAME.ppm/.png next to out.log).
 Needs the ramdisk from build-ramdisk.py (root console) and docker; the container is named tccq."""
 import subprocess, sys, time, threading, os, re
@@ -29,6 +29,7 @@ def wait(pat, t):
         if re.search(pat, bytes(buf[-3000:])): return True
         time.sleep(0.5)
     return False
+PT = float(os.environ.get("PROMPT_TIMEOUT", "120"))
 print("prompt", wait(rb"(shell|root)@\S+:/ [\$#] ", 400), flush=True)
 for c in cmds:
     if c.startswith("#shot"):
@@ -41,5 +42,5 @@ for c in cmds:
     if c.startswith("#sleep"): time.sleep(float(c.split()[1])); continue
     del buf[:]
     p.stdin.write((c+"\n").encode()); p.stdin.flush()
-    print(c, wait(rb"(shell|root)@\S+:\S+ [\$#] $", 120), flush=True)
+    print(c, wait(rb"(shell|root)@\S+:\S+ [\$#] $", PT), flush=True)
 p.terminate()

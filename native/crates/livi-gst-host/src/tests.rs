@@ -13,6 +13,7 @@ struct PlaneLog {
     started: usize,
     pushed: Vec<Vec<u8>>,
     gamma: Option<[f64; 5]>,
+    failed: bool,
 }
 
 #[derive(Default, Clone)]
@@ -47,6 +48,10 @@ impl Plane for FakePlane {
 
     fn set_gamma(&self, gamma: f64, contrast: f64, r: f64, g: f64, b: f64) {
         self.0.borrow_mut().gamma = Some([gamma, contrast, r, g, b]);
+    }
+
+    fn failed(&self) -> bool {
+        self.0.borrow().failed
     }
 }
 
@@ -208,6 +213,7 @@ struct World {
     refuse_url: bool,
     cameras: Vec<(u32, CameraOrder)>,
     camera_watches: usize,
+    display: u64,
 }
 
 type SharedMediaSink = Rc<RefCell<Box<dyn MediaSink>>>;
@@ -346,6 +352,10 @@ impl Outside for Fake {
         w.feed_paths.push(path.to_owned());
         w.feeds.push(shared.clone());
         Some(shared)
+    }
+
+    fn display(&self) -> u64 {
+        self.0.borrow().display
     }
 }
 
@@ -2007,4 +2017,176 @@ fn a_tap_message_short_of_its_device_opens_nothing() {
     let mut f = Fixture::new();
     f.send(OP_TAP_OPEN, 0x7c01, &[0, 0, 0, 0, 1, 9]);
     assert!(f.world.0.borrow().taps.is_empty());
+}
+
+mod mend_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    const SPS: u8 = 7;
+
+    impl Fixture {
+        /// A plane playing a fed stream that has shown a keyframe and a delta.
+        fn playing(display: u64) -> Self {
+            let world = Fake::default();
+            world.0.borrow_mut().display = display;
+            let sent = Sent::default();
+            let host = Host::new(world.clone(), Arc::new(sent.clone()));
+            let mut f = Fixture { host, world, sent };
+            f.send(
+                OP_CREATE,
+                MAIN_PLANE,
+                &livi_host_proto::plane_body(VideoCodec::H264, &[9]),
+            );
+            f.send(OP_FEED_OPEN, 9, b"/tmp/x.feed");
+            f.fed(&[0], feedproto::KIND_VIDEO_START);
+            for n in [nal(SPS, 0), nal(KEYFRAME, 1), nal(DELTA, 2)] {
+                f.fed(&n, feedproto::KIND_VIDEO);
+            }
+            f
+        }
+
+        fn fed(&self, payload: &[u8], kind: u8) {
+            let sink = self.world.0.borrow().feeds.last().unwrap().clone();
+            sink.borrow_mut().on_record(feedproto::Record {
+                kind,
+                id: MAIN_PLANE,
+                ts: 1,
+                payload: payload.to_vec(),
+            });
+        }
+
+        fn newest(&self) -> FakePlane {
+            self.world.0.borrow().planes.last().unwrap().clone()
+        }
+
+        fn rebuilt(&self) -> usize {
+            self.replies()
+                .iter()
+                .filter(|r| **r == (REPLY_REBUILT, MAIN_PLANE, vec![]))
+                .count()
+        }
+    }
+
+    #[test]
+    fn a_plane_is_rebuilt_only_when_its_pipeline_or_its_display_is_gone() {
+        let fail = |f: &mut Fixture| f.newest().0.borrow_mut().failed = true;
+        let display = |to: u64| move |f: &mut Fixture| f.world.0.borrow_mut().display = to;
+        type Event = Box<dyn Fn(&mut Fixture)>;
+        let cases: [(&str, u64, Event, bool); 6] = [
+            ("pipeline error", 1, Box::new(fail), true),
+            ("display restarted", 1, Box::new(display(2)), true),
+            ("display gone, not back yet", 1, Box::new(display(0)), false),
+            (
+                "display shows up first time",
+                0,
+                Box::new(display(2)),
+                false,
+            ),
+            ("no display, pipeline error", 0, Box::new(fail), true),
+            ("nothing happened", 1, Box::new(|_: &mut Fixture| {}), false),
+        ];
+        for (name, at_start, event, rebuilds) in cases {
+            let mut f = Fixture::playing(at_start);
+            let old = f.newest();
+            event(&mut f);
+            f.host.mend_planes(Instant::now());
+            f.fed(&nal(DELTA, 3), feedproto::KIND_VIDEO);
+
+            assert_eq!(f.planes(), 1 + usize::from(rebuilds), "{name}");
+            assert_eq!(f.rebuilt(), usize::from(rebuilds), "{name}");
+            let codecs = f.world.0.borrow().codecs.clone();
+            assert!(
+                codecs
+                    .iter()
+                    .all(|c| *c == (MAIN_PLANE, VideoCodec::H264, vec![9])),
+                "{name}"
+            );
+            let new = f.newest();
+            assert_eq!(new.started(), 1, "{name}");
+            // The new plane starts at the cached GOP and follows the stream on.
+            let tail = [nal(SPS, 0), nal(KEYFRAME, 1), nal(DELTA, 2), nal(DELTA, 3)];
+            assert_eq!(new.pushed(), tail, "{name}");
+            if rebuilds {
+                assert_eq!(
+                    old.pushed(),
+                    tail[..3],
+                    "{name}: the old plane is left behind"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_rebuilt_plane_without_a_whole_gop_waits_for_the_next_keyframe() {
+        for (deltas, primed_with_gop) in [(1, true), (livi_video::fanout::CACHE_MAX, false)] {
+            let mut f = Fixture::playing(1);
+            for n in 0..deltas {
+                f.fed(&nal(DELTA, (n % 200) as u8 + 10), feedproto::KIND_VIDEO);
+            }
+            f.newest().0.borrow_mut().failed = true;
+            f.host.mend_planes(Instant::now());
+            let primed = f.newest().pushed();
+            f.fed(&nal(DELTA, 3), feedproto::KIND_VIDEO);
+            f.fed(&nal(KEYFRAME, 4), feedproto::KIND_VIDEO);
+
+            assert_eq!(primed[0], nal(SPS, 0), "parameter sets lead");
+            assert_eq!(primed.len() > 1, primed_with_gop, "deltas {deltas}");
+            let after = &f.newest().pushed()[primed.len()..];
+            let expect = if primed_with_gop {
+                vec![nal(DELTA, 3), nal(KEYFRAME, 4)]
+            } else {
+                vec![nal(KEYFRAME, 4)]
+            };
+            assert_eq!(after, expect, "deltas {deltas}");
+        }
+    }
+
+    #[test]
+    fn a_plane_that_keeps_failing_is_retried_less_and_less_often() {
+        let t0 = Instant::now();
+        let s = Duration::from_secs;
+        let ms = Duration::from_millis;
+        // (when, fail the current plane first, refuse to build, planes built so far)
+        let steps = [
+            (s(0), true, false, 2),
+            (s(0), true, false, 2),
+            (ms(999), false, false, 2),
+            (s(1), false, false, 3),
+            (s(1), true, true, 3),
+            (s(3), false, true, 3),
+            (s(7), false, false, 4),
+            // Held long enough: the next failure is mended at once.
+            (s(40), true, false, 5),
+        ];
+        let mut f = Fixture::playing(1);
+        for (i, (at, fail, refuse, built)) in steps.into_iter().enumerate() {
+            f.world.0.borrow_mut().refuse_plane = refuse;
+            if fail {
+                f.newest().0.borrow_mut().failed = true;
+            }
+            f.host.mend_planes(t0 + at);
+            assert_eq!(f.planes(), built, "step {i}");
+        }
+        assert_eq!(f.rebuilt(), 4);
+    }
+
+    #[test]
+    fn a_stopped_or_replaced_plane_is_not_mended() {
+        for (op, body) in [
+            (OP_STOP, vec![]),
+            (
+                OP_PLAY_URL,
+                livi_host_proto::url_body("file:///x.mp4", "sink"),
+            ),
+        ] {
+            let mut f = Fixture::playing(1);
+            f.newest().0.borrow_mut().failed = true;
+            f.send(op, MAIN_PLANE, &body);
+            f.world.0.borrow_mut().display = 2;
+            f.host.mend_planes(Instant::now());
+            assert_eq!(f.planes(), 1, "op {op}");
+            assert_eq!(f.rebuilt(), 0, "op {op}");
+        }
+    }
 }

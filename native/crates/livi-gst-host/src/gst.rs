@@ -168,6 +168,31 @@ impl Outside for Gst {
             }
         }
     }
+
+    fn display(&self) -> u64 {
+        wayland_socket().map_or(0, |path| socket_identity(&path))
+    }
+}
+
+fn wayland_socket() -> Option<std::path::PathBuf> {
+    let name = std::env::var_os("WAYLAND_DISPLAY")?;
+    let name = std::path::PathBuf::from(name);
+    if name.is_absolute() {
+        return Some(name);
+    }
+    Some(std::path::PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?).join(name))
+}
+
+/// A restarted compositor binds a fresh socket under the same name: new inode, new ctime.
+fn socket_identity(path: &std::path::Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::metadata(path) else {
+        return 0;
+    };
+    let mut h = std::hash::DefaultHasher::new();
+    (meta.dev(), meta.ino(), meta.ctime(), meta.ctime_nsec()).hash(&mut h);
+    h.finish().max(1)
 }
 
 pub fn probe() -> Probe {

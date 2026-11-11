@@ -29,6 +29,10 @@ pub enum HostEvent {
     Started {
         plane: u32,
     },
+    /// The plane's pipeline was rebuilt under a running stream: it needs a keyframe.
+    Rebuilt {
+        plane: u32,
+    },
     AudioStarted {
         stream: u32,
         first_sample: u32,
@@ -412,6 +416,9 @@ impl GstHost {
             }
             REPLY_STARTED => {
                 let _ = self.inner.events.send(HostEvent::Started { plane: id });
+            }
+            REPLY_REBUILT => {
+                let _ = self.inner.events.send(HostEvent::Rebuilt { plane: id });
             }
             REPLY_AUDIO_PORTS => {
                 if let Some(w) = self.state().audio_waiters.remove(&id) {
@@ -938,6 +945,7 @@ mod tests {
             .await;
         fake.reply(REPLY_AUDIO_DELAY, req.id, &120u32.to_le_bytes())
             .await;
+        fake.reply(REPLY_REBUILT, 0x7a00_0001, &[]).await;
         assert_eq!(
             events.recv().await.unwrap(),
             HostEvent::Config {
@@ -959,6 +967,10 @@ mod tests {
                 stream: req.id,
                 ms: 120
             }
+        );
+        assert_eq!(
+            events.recv().await.unwrap(),
+            HostEvent::Rebuilt { plane: 0x7a00_0001 }
         );
     }
 

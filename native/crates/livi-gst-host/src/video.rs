@@ -10,35 +10,52 @@ impl<O: Outside> Host<O> {
             return;
         };
 
-        self.planes.borrow_mut().remove(&id);
+        self.forget_plane(id);
         self.url_players.remove(&id);
         let Some(plane) = self.outside.create_plane(id, codec, codec_data) else {
             eprintln!("livi: create player 0x{id:x} (codec {codec}) FAILED");
             return;
         };
         plane.start();
+        self.prime(id, &plane, false);
+        self.planes.borrow_mut().insert(id, plane);
+        self.plane_specs.insert(id, (codec, codec_data.to_vec()));
+    }
 
-        let feeder = feeder_of(id);
-        if let Some(state) = self.active_feeder(feeder) {
-            for frame in state.borrow().fan.primer() {
-                plane.push(frame);
+    pub(super) fn forget_plane(&mut self, id: u32) {
+        self.planes.borrow_mut().remove(&id);
+        self.plane_specs.remove(&id);
+        self.mends.remove(&id);
+    }
+
+    /// Hands a new plane what its feeders hold. A rebuilt plane follows a stream
+    /// already running: a feeder without a whole GOP since the last keyframe
+    /// waits for the next one, else the decoder would start on deltas.
+    pub(super) fn prime(&self, id: u32, plane: &O::Plane, rebuilt: bool) {
+        let feed = |fan: &mut Fanout| {
+            if rebuilt && fan.cached().is_empty() {
+                fan.restart();
             }
-        }
-        if let Some(Some(fan)) = self.feed_fans.borrow().get(&feeder) {
             for frame in fan.primer() {
                 plane.push(frame);
             }
+        };
+        let feeder = feeder_of(id);
+        if let Some(state) = self.active_feeder(feeder) {
+            feed(&mut state.borrow_mut().fan);
         }
-        for feed in self.feeds_to(Route::Plane(feeder), None) {
-            if let Some(Some(fan)) = self.feed_fans.borrow().get(&feed)
+        let routed = self.feeds_to(Route::Plane(feeder), None);
+        let mut fans = self.feed_fans.borrow_mut();
+        if let Some(Some(fan)) = fans.get_mut(&feeder) {
+            feed(fan);
+        }
+        for f in routed {
+            if let Some(Some(fan)) = fans.get_mut(&f)
                 && fan.is_active()
             {
-                for frame in fan.primer() {
-                    plane.push(frame);
-                }
+                feed(fan);
             }
         }
-        self.planes.borrow_mut().insert(id, plane);
     }
 
     pub(super) fn play_url(&mut self, id: u32, rest: &[u8]) {
@@ -46,7 +63,7 @@ impl<O: Outside> Host<O> {
             return;
         };
 
-        self.planes.borrow_mut().remove(&id);
+        self.forget_plane(id);
         self.url_players.remove(&id);
         let Some(player) = self.outside.play_url(id, &url, &device) else {
             eprintln!("livi: play 0x{id:x} from {url} FAILED");

@@ -23,6 +23,7 @@ use livi_video::nal::CpCodec;
 mod audio;
 pub mod feed;
 pub mod gst;
+mod mend;
 pub mod process;
 #[cfg(target_os = "android")]
 mod shown;
@@ -82,6 +83,10 @@ pub trait Plane: 'static {
     fn push(&self, nal: &[u8]);
     fn flush(&self);
     fn set_gamma(&self, gamma: f64, contrast: f64, r: f64, g: f64, b: f64);
+    /// The pipeline stopped on an error and will show nothing more.
+    fn failed(&self) -> bool {
+        false
+    }
 }
 
 pub trait UrlPlay: 'static {
@@ -129,6 +134,12 @@ pub trait Outside: 'static {
     type FeedEars;
 
     fn open_feed(&self, path: &str, sink: Box<dyn MediaSink>) -> Option<Self::FeedEars>;
+
+    /// Identity of the display server the planes draw on, 0 while there is none.
+    /// A change means the old one is gone with every window it held.
+    fn display(&self) -> u64 {
+        0
+    }
 }
 
 pub trait MediaSink {
@@ -359,6 +370,9 @@ pub struct Host<O: Outside> {
     outside: O,
     framer: Framer,
     planes: Planes<O::Plane>,
+    plane_specs: HashMap<u32, (VideoCodec, Vec<u8>)>,
+    mends: HashMap<u32, mend::Mend>,
+    display: u64,
     receivers: HashMap<u32, Receiver<O::Ears>>,
     audio: Streams<O::Speaker, O::AudioEars>,
     uplinks: HashMap<u32, O::Uplink>,
@@ -378,9 +392,12 @@ pub struct Host<O: Outside> {
 impl<O: Outside> Host<O> {
     pub fn new(outside: O, wire: Arc<dyn Wire>) -> Self {
         Self {
+            display: outside.display(),
             outside,
             framer: Framer::new(),
             planes: Rc::new(RefCell::new(HashMap::new())),
+            plane_specs: HashMap::new(),
+            mends: HashMap::new(),
             receivers: HashMap::new(),
             audio: Rc::new(RefCell::new(HashMap::new())),
             uplinks: HashMap::new(),
@@ -414,7 +431,7 @@ impl<O: Outside> Host<O> {
                 }
             }
             OP_STOP => {
-                self.planes.borrow_mut().remove(&id);
+                self.forget_plane(id);
                 self.cameras.remove(&id);
                 if self.url_players.remove(&id).is_some() {
                     eprintln!(

@@ -692,6 +692,10 @@ impl Projection {
                         println!("[core] main video: first frame at the decoder");
                         self.main_video_shown();
                     }
+                    Ok(HostEvent::Rebuilt { plane }) => {
+                        println!("[core] video plane 0x{plane:x} rebuilt, asking for a keyframe");
+                        self.keyframe();
+                    }
                     Ok(_) => {}
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         eprintln!("[core] missed {n} gst-host events");

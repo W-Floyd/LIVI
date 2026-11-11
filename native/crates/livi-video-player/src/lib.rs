@@ -7,6 +7,7 @@ use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_base as gst_base;
 use livi_host_proto::VideoCodec;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Once};
 
 #[cfg(target_os = "android")]
@@ -64,12 +65,18 @@ pub fn ensure_init() {
     });
 }
 
-pub fn log_bus_messages(pipeline: &gst::Pipeline) {
-    let Some(bus) = pipeline.bus() else { return };
-    bus.set_sync_handler(|_, msg| {
+/// The returned flag goes up on the first error: the pipeline has stopped for good.
+pub fn log_bus_messages(pipeline: &gst::Pipeline) -> Arc<AtomicBool> {
+    let failed = Arc::new(AtomicBool::new(false));
+    let Some(bus) = pipeline.bus() else {
+        return failed;
+    };
+    let flag = failed.clone();
+    bus.set_sync_handler(move |_, msg| {
         let src = msg.src().map(|s| s.name().to_string()).unwrap_or_default();
         match msg.view() {
             gst::MessageView::Error(e) => {
+                flag.store(true, Ordering::Relaxed);
                 eprintln!(
                     "[gst_video] ERROR from {src}: {} | {}",
                     e.error(),
@@ -87,6 +94,7 @@ pub fn log_bus_messages(pipeline: &gst::Pipeline) {
         }
         gst::BusSyncReply::Pass
     });
+    failed
 }
 
 pub fn force_sinks_realtime(pipeline: &gst::Pipeline) {
@@ -234,6 +242,7 @@ pub struct Player {
     appsrc: Option<gst_app::AppSrc>,
     glshader: Option<gst::Element>,
     view: WindowView,
+    failed: Arc<AtomicBool>,
 }
 
 impl Player {
@@ -278,6 +287,7 @@ impl Player {
             glshader: pipeline.by_name("cal"),
             view: WindowView::new(),
             appsrc,
+            failed: log_bus_messages(&pipeline),
             pipeline,
         };
 
@@ -302,7 +312,6 @@ impl Player {
             }
             install_decoder_probes(&dec, decoder, &to_stderr());
         }
-        log_bus_messages(&player.pipeline);
         player.view.attach(
             handle,
             RANK_FRAMES,
@@ -360,7 +369,14 @@ impl Player {
     }
 
     pub fn start(&self) {
-        let _ = self.pipeline.set_state(gst::State::Playing);
+        if self.pipeline.set_state(gst::State::Playing).is_err() {
+            self.failed.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// An error stopped the pipeline (decoder, caps, or the display it drew on).
+    pub fn failed(&self) -> bool {
+        self.failed.load(Ordering::Relaxed)
     }
 
     pub fn stop(&self) {

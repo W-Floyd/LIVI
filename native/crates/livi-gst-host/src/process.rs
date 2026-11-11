@@ -110,6 +110,9 @@ fn attach(sock: UnixStream, hung_up: impl Fn() + 'static) -> Vec<SourceId> {
         move || {
             status_host.borrow().pump_url_status();
             status_host.borrow().pump_audio_delays();
+            status_host
+                .borrow_mut()
+                .mend_planes(std::time::Instant::now());
             ControlFlow::Continue
         },
     ));

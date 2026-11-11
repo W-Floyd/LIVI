@@ -40,3 +40,5 @@ pub const REPLY_FEED: u8 = 7;
 pub const REPLY_URL_STATUS: u8 = 8;
 pub const REPLY_AUDIO_DELAY: u8 = 9;
 pub const REPLY_CAMERAS: u8 = 10;
+/// The plane's pipeline was rebuilt mid-stream; it needs a keyframe.
+pub const REPLY_REBUILT: u8 = 11;

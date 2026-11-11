@@ -22,6 +22,10 @@ impl Plane for Player {
     fn set_gamma(&self, gamma: f64, contrast: f64, r: f64, g: f64, b: f64) {
         Player::set_gamma(self, gamma, contrast, r, g, b)
     }
+
+    fn failed(&self) -> bool {
+        Player::failed(self)
+    }
 }
 
 impl UrlPlay for UrlPlayer {

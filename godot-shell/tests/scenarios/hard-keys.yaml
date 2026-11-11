@@ -1,0 +1,41 @@
+name: hard-keys
+# The head unit's keys (micomd's virtual keyboard): volume steps the core's level and the
+# overlay shows the level the core then has; a bound media or voice key goes to the core.
+viewport: { width: 1920, height: 720 }
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - set: { core: { config: { huVolume: 0.5, bindings: { next: MediaTrackNext, voiceAssistant: F13 } } } }
+  - wait: { frames: 2 }
+  - key: VolumeUp
+  - expect_action: { SetConfig: { patch: { huVolume: 0.56 } } }
+  # The core's echo is what the overlay shows.
+  - set: { core: { config: { huVolume: 0.56 } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: HardKeys/Volume, visible: true }
+  - screenshot: hard-keys-volume
+  - key: VolumeDown
+  - expect_action: { SetConfig: { patch: { huVolume: 0.5 } } }
+  - set: { core: { config: { huVolume: 0.5 } } }
+  - key: VolumeMute
+  - expect_action: { SetConfig: { patch: { huVolume: 0 } } }
+  - set: { core: { config: { huVolume: 0 } } }
+  - key: VolumeMute
+  - expect_action: { SetConfig: { patch: { huVolume: 0.5 } } }
+  - key: MediaNext
+  - expect_input: { key: { code: MediaTrackNext, down: true } }
+  # The voice assistant holds while pressed: its release goes too.
+  - key: F13
+  - expect_input: { key: { code: F13, down: false } }
+  - gdscript: |
+      if HardKeys.volume_after("AudioVolumeUp", 0.98, 0.0) != 1.0:
+          return "up past full"
+      if HardKeys.volume_after("AudioVolumeDown", 0.03, 0.0) != 0.0:
+          return "down past zero"
+      if HardKeys.volume_after("AudioVolumeMute", 0.0, 0.0) != HardKeys.STEP:
+          return "unmute with no level to go back to"
+      if HardKeys.volume_after("MediaTrackNext", 0.5, 0.0) != -1.0:
+          return "a media key is no volume key"
+      if HardKeys.bound_to({next = "MediaTrackNext"}, "F13") != "":
+          return "an unbound key is bound"

@@ -144,5 +144,10 @@ scons platform=linuxbsd arch=arm32 target=template_release production=yes \
 - Godot's `wayland` driver under cage: fullscreen, 1920x720 mode of the connector, touch
   through cage's seat (libinput on `/dev/input/event*`; the `input` group).
 - Audio: Godot's PulseAudio driver talks to the unit's PipeWire-pulse.
+- Hard keys: micomd's virtual keyboard reaches the shell through cage's libinput. The volume
+  keys step the core's `huVolume`, which the core sets on the default sink with `pactl`, and
+  mobis-g5w-amp mirrors that sink onto the amp: both need the user's PipeWire-pulse, whose
+  socket is not under the units' `XDG_RUNTIME_DIR=/run/livi-shell`, and mobis-g5w-amp is a
+  user unit that needs a user session (GNOME's, under stock).
 - The user (`user`), `seat`/`video`/`input`/`render` groups, and whether GNOME's gdm has to be
   stopped (the unit `Conflicts=` it) are the nura image's.

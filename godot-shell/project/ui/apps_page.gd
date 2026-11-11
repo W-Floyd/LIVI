@@ -1,20 +1,23 @@
 class_name AppsPage
 extends Control
-## The launcher's page: every app as a tile, and the running windows in a strip by the title to
-## bring forward or close. Tapping an app starts it, or shows its window when it runs; holding it
-## opens its menu, the app's size on the panel.
+## The launcher's page: every app as a tile, and the running windows in a strip above them to
+## bring forward or close. No title: the rail says which page this is. Tapping an app starts it, or
+## shows its window when it runs; holding it opens its menu, the app's size on the panel.
+
+## Rows the grid's height shows: two whole, and enough of a third to read as more below.
+const ROWS_SHOWN := 2.4
 
 var launcher: Launcher
 ## The status bar's height, which the page leaves clear.
 var top_inset := 0.0
 
-var _title: Label
 var _note: Label
 ## Says why tiles are greyed while the car is driven.
 var _parked_only: HBoxContainer
 var _running: HBoxContainer
 var _scroll: DragScroll
 var _grid: GridContainer
+var _foot: Control
 ## App id -> its tile, kept across changes so the grid's scroll stays put.
 var _tiles := {}
 ## An app's menu while it shows.
@@ -24,9 +27,6 @@ var _menu: Control
 func _init() -> void:
 	name = "Apps"
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_title = UI.label("Apps", "display", "title")
-	_title.name = "Title"
-	add_child(_title)
 	_running = UI.hbox([], 1.0)
 	_running.name = "Running"
 	_running.clip_contents = true
@@ -45,6 +45,11 @@ func _init() -> void:
 	_grid = GridContainer.new()
 	_grid.name = "Grid"
 	_scroll.list.add_child(_grid)
+	# The last row clear of the page's edge when scrolled to the end.
+	_foot = Control.new()
+	_foot.name = "Foot"
+	_foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_scroll.list.add_child(_foot)
 
 
 func _ready() -> void:
@@ -64,45 +69,56 @@ func _draw() -> void:
 
 func _style() -> void:
 	UI.restyle(self)
-	var g: float = ThemeManager.px.gap
-	_grid.add_theme_constant_override("h_separation", roundi(g * 2.0))
-	_grid.add_theme_constant_override("v_separation", roundi(g * 2.0))
 	_update()
 	queue_redraw()
 
 
-## The right margin's, beside a docked rail (`Shell.rail_width`); without one, still the room
-## the rail took when it floated over the page.
-func _left() -> float:
-	var rail = get_parent().get("rail_width") if get_parent() else null
-	return ThemeManager.px.gap * 4.0 + (0.0 if rail != null and rail > 0.0 else ThemeManager.px.touch)
+## The gutter between tiles, and round the grid.
+static func gutter() -> int:
+	return roundi(ThemeManager.px.gap * 1.5)
+
+
+## Columns and tile size from the grid's room: as many columns as tiles at their least width
+## allow, widened to fill it; tall enough that `ROWS_SHOWN` rows fill its height, within the
+## tile's least height (two lines of name at the text scale) and a little taller than wide.
+static func cells(room: Vector2) -> Dictionary:
+	var sep := gutter()
+	var least := AppTile.least_cell()
+	var cols := maxi(1, int((room.x + sep) / (least.x + sep)))
+	var w := floorf((room.x - sep * (cols - 1)) / cols)
+	var h := floorf(clampf((room.y - sep * floorf(ROWS_SHOWN)) / ROWS_SHOWN, least.y, maxf(least.y, w * 1.15)))
+	return {columns = cols, cell = Vector2(maxf(w, 1.0), h)}
 
 
 func _layout() -> void:
-	var g: float = ThemeManager.px.gap
-	var x := _left()
-	var right := size.x - g * 4.0
-	var head_h := maxf(ThemeManager.px.touch, _title.get_combined_minimum_size().y)
-	var y := top_inset + g * 2.0
-	_title.position = Vector2(x, y + (head_h - _title.get_combined_minimum_size().y) / 2.0)
-	_title.size = _title.get_combined_minimum_size()
-	var rx := _title.position.x + _title.size.x + g * 4.0
-	_running.position = Vector2(rx, y)
-	_running.size = Vector2(maxf(0.0, right - rx), head_h)
-	_note.position = Vector2(rx, y + (head_h - _note.get_combined_minimum_size().y) / 2.0)
-	_note.size = Vector2(maxf(0.0, right - rx), _note.get_combined_minimum_size().y)
-	var top := y + head_h + g * 3.0
+	var sep := float(gutter())
+	var x := sep
+	var right := size.x - sep
+	var y := top_inset + sep
+	# The running strip, or the note, above the grid: only when there is one.
+	var head := _running.get_child_count() > 0 or _note.text != ""
+	var head_h: float = ThemeManager.px.touch if head else 0.0
+	_running.position = Vector2(x, y)
+	_running.size = Vector2(maxf(0.0, right - x), head_h)
+	_note.position = Vector2(x, y + (head_h - _note.get_combined_minimum_size().y) / 2.0)
+	_note.size = Vector2(maxf(0.0, right - x), _note.get_combined_minimum_size().y)
+	var top := y + (head_h + sep if head else 0.0)
 	var foot := 0.0
 	if _parked_only.visible:
 		var ph := _parked_only.get_combined_minimum_size().y
-		_parked_only.position = Vector2(x, size.y - g * 2.0 - ph)
+		_parked_only.position = Vector2(x, size.y - sep - ph)
 		_parked_only.size = Vector2(maxf(0.0, right - x), ph)
-		foot = ph + g * 3.0
+		foot = ph + sep
 	_scroll.position = Vector2(x, top)
 	_scroll.size = Vector2(maxf(0.0, right - x), maxf(0.0, size.y - top - foot))
-	var tile_w: float = ThemeManager.px.touch * 4.0
-	var sep: float = g * 2.0
-	_grid.columns = maxi(1, int((_scroll.size.x + sep) / (tile_w + sep)))
+	_grid.add_theme_constant_override("h_separation", int(sep))
+	_grid.add_theme_constant_override("v_separation", int(sep))
+	_scroll.list.add_theme_constant_override("separation", 0)
+	_foot.custom_minimum_size = Vector2(0, sep)
+	var k := cells(Vector2(_scroll.size.x, size.y - top - foot))
+	_grid.columns = k.columns
+	for t in _tiles.values():
+		t.cell = k.cell
 
 
 func _update() -> void:

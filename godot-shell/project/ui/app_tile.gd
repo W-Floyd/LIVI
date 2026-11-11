@@ -28,12 +28,21 @@ var slow := false:
 		slow = v
 		_refresh()
 var chip := false
+## The grid's size for a tile (`AppsPage.cells`); its least size until set.
+var cell := Vector2.ZERO:
+	set(v):
+		if v != cell:
+			cell = v
+			if not chip:
+				custom_minimum_size = cell.max(least_cell())
 ## A hold fired since the last press, so its release is no tap.
 var held := false
 
 var _icon: AppIcon
 var _name: Label
 var _close: Button
+## Seconds since this launch began: drives the spinner and the icon's breathing.
+var _spin_t := 0.0
 
 
 func _init() -> void:
@@ -93,14 +102,28 @@ func _style() -> void:
 		_close.add_theme_color_override("icon_pressed_color", ThemeManager.c.text)
 		_fit_chip()
 	else:
-		custom_minimum_size = Vector2(t * 4.0, t * 1.5 + g * 4.0 + _line_h() * 2.0)
+		custom_minimum_size = cell.max(least_cell())
 	_refresh()
 	_layout()
 
 
-func _line_h() -> float:
+## With the Label's spacing between lines: two lines in less never show the second.
+static func _line_h() -> float:
 	var f: Font = ThemeManager.fonts.body
-	return f.get_height(ThemeManager.font_size("caption"))
+	return f.get_height(ThemeManager.font_size("caption")) + ThemeDB.get_default_theme().get_constant("line_spacing", "Label")
+
+
+static func _pad() -> float:
+	return ThemeManager.px.gap * 0.75
+
+
+## Wide enough for a ten-letter word of the name at the text scale; tall enough for a touch-sized
+## icon over two lines of it.
+static func least_cell() -> Vector2:
+	var g: float = ThemeManager.px.gap
+	var t: float = ThemeManager.px.touch
+	var line := _line_h()
+	return Vector2(maxf(t * 2.5, line * 4.5), _pad() * 2.0 + t + g * 0.5 + line * 2.0).ceil()
 
 
 func _layout() -> void:
@@ -115,11 +138,15 @@ func _layout() -> void:
 		_name.position = Vector2(_icon.position.x + side + g, 0)
 		_name.size = Vector2(maxf(0.0, _close.position.x - _name.position.x), size.y)
 	else:
-		var side := t * 1.5
-		_icon.position = Vector2((size.x - side) / 2.0, g * 1.5)
+		# The icon takes the height two lines of name leave, within half the width.
+		var pad := _pad()
+		var text := _line_h() * 2.0
+		var side := floorf(clampf(size.y - pad * 2.0 - g * 0.5 - text, t * 0.6, size.x * 0.55))
+		var top := maxf(pad, (size.y - side - g * 0.5 - text) / 2.0)
+		_icon.position = Vector2(roundf((size.x - side) / 2.0), roundf(top))
 		_icon.size = Vector2(side, side)
-		_name.position = Vector2(g, _icon.position.y + side + g)
-		_name.size = Vector2(size.x - g * 2.0, size.y - _name.position.y)
+		_name.position = Vector2(pad, _icon.position.y + side + g * 0.5)
+		_name.size = Vector2(size.x - pad * 2.0, text)
 	queue_redraw()
 
 
@@ -129,6 +156,8 @@ func _refresh() -> void:
 	_icon.path = icon_path
 	_icon.label = app_name
 	_icon.modulate.a = 0.45 if state == "launching" else 1.0
+	_spin_t = 0.0
+	set_process(state == "launching")
 	match state:
 		"launching":
 			_name.text = "Still starting…" if slow else "Starting…"
@@ -151,6 +180,13 @@ func _fit_chip() -> void:
 	custom_minimum_size = Vector2(clampf(w + t * 2.0 + g * 3.0, t * 3.0, t * 7.0), t)
 
 
+func _process(delta: float) -> void:
+	_spin_t += delta
+	if not ThemeManager.reduced_motion:
+		_icon.modulate.a = 0.45 + 0.25 * (0.5 + 0.5 * sin(_spin_t * TAU / 1.6))
+	queue_redraw()
+
+
 func _draw() -> void:
 	var c := ThemeManager.c
 	var box := StyleBoxFlat.new()
@@ -160,6 +196,16 @@ func _draw() -> void:
 	box.set_border_width_all(2)
 	box.border_color = c.accent if state == "running" and not chip else c.line
 	draw_style_box(box, Rect2(Vector2.ZERO, size))
+	if state == "launching":
+		# A ring round the icon with a lit arc chasing round it; still under reduced motion.
+		var r := Rect2(_icon.position, _icon.size)
+		var centre := r.get_center()
+		var rad := maxf(r.size.x, r.size.y) * 0.62
+		var w: float = maxf(3.0, ThemeManager.px.gap * 0.3)
+		draw_arc(centre, rad, 0.0, TAU, 64, Color(c.accent, 0.18), w, true)
+		var a0 := 0.0 if ThemeManager.reduced_motion else _spin_t * TAU / 1.1
+		var sweep := TAU * (0.22 + (0.0 if ThemeManager.reduced_motion else 0.12 * sin(_spin_t * 2.3)))
+		draw_arc(centre, rad, a0, a0 + sweep, 32, c.accent, w, true)
 	if state == "running" and not chip:
 		var rad: float = ThemeManager.px.gap * 0.9
 		draw_circle(Vector2(size.x - rad * 2.2, rad * 2.2), rad, c.accent, true, -1.0, true)

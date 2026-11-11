@@ -75,3 +75,39 @@ steps:
   - expect_node: { path: Apps/Scroll/List/Grid/livi-broken/Name, text: "Couldn't start" }
   - theme: { appearance: night }
   - screenshot: apps-night
+  # The grid in the page's rect at every bar edge, hand and text scale, rail or none: even
+  # columns filling its width, room for two whole rows and part of a third (the running strip
+  # shown; fewer at a large text scale), tiles at least a touch target and names their own two
+  # lines.
+  - gdscript: |
+      for docked in [false, true]:
+          if docked:
+              NavRail.attach(shell)
+          for pos in ["top", "bottom", "left", "right", "off"]:
+              for hand in ["lhd", "rhd"]:
+                  for scale in [1.0, 1.4]:
+                      ThemeManager.set_look({status_position = pos, hand = hand, text_scale = scale})
+                      var e: String = shell.open_page("apps")
+                      if e != "":
+                          return e
+                      await runner.frames(3)
+                      var at := "rail %s, %s, %s, %s: " % [docked, pos, hand, scale]
+                      var page: Control = shell.get_node("Apps")
+                      var scroll: Control = page.get_node("Scroll")
+                      var grid: GridContainer = page.get_node("Scroll/List/Grid")
+                      var sep := AppsPage.gutter()
+                      var cell: Vector2 = grid.get_child(0).size
+                      for t in grid.get_children():
+                          if t.size != cell:
+                              return at + "%s is %s, %s is %s" % [grid.get_child(0).name, cell, t.name, t.size]
+                          var n: Label = t.get_node("Name")
+                          if n.get_visible_line_count() < mini(n.get_line_count(), 2) or not Rect2(Vector2.ZERO, t.size).encloses(n.get_rect()) or not Rect2(Vector2.ZERO, t.size).encloses(t.get_node("Icon").get_rect()):
+                              return at + "%s's name or icon runs out of it" % t.name
+                      var used := cell.x * grid.columns + sep * (grid.columns - 1)
+                      if used > scroll.size.x or scroll.size.x - used >= grid.columns:
+                          return at + "%d columns of %s fill %s of %s" % [grid.columns, cell, used, scroll.size.x]
+                      if absf((scroll.position.x) - (page.size.x - scroll.position.x - scroll.size.x)) > 0.5:
+                          return at + "the grid at %s, off centre in %s" % [scroll.get_rect(), page.size]
+                      var rows := (scroll.size.y + sep) / (cell.y + sep)
+                      if mini(cell.x, cell.y) < ThemeManager.px.touch or rows < (2.2 if scale == 1.0 else 1.5) or (scale == 1.0 and rows > 2.9):
+                          return at + "tiles %s, %.2f rows in %s" % [cell, rows, scroll.size]

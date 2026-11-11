@@ -54,6 +54,10 @@ impl FakeCore {
         })
     }
 
+    pub fn open_page(&mut self, path: String) -> io::Result<()> {
+        self.write(&FromCore::OpenPage { path })
+    }
+
     /// Everything the client has sent so far, oldest first.
     pub fn sent(&mut self) -> &[ToCore] {
         let mut buf = [0u8; 16 * 1024];

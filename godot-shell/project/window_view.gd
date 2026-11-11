@@ -7,12 +7,22 @@ extends TextureRect
 var window_id := -1:
 	set(v):
 		window_id = v
-		texture = Wayland.texture(v) if v >= 0 else null
+		_show()
 
 var _pointer_inside := false
 ## The window is projection video: touches go to the phone through the core, as points over the
-## view (the projection area) from 0 to 1, not to the window, which takes no input.
-var to_core := false
+## picture (the phone's visible area) from 0 to 1, not to the window, which takes no input. It
+## shows the video at its own size (`Wayland.set_native`) cut to the visible area, so on a panel
+## the size of the core's projection screen it is 1:1.
+var to_core := false:
+	set(v):
+		to_core = v
+		_show()
+
+## The window's own texture, and while `to_core` the visible area of it, which is what shows.
+var _raw: Texture2D
+var _crop: AtlasTexture
+var _cropped_size := Vector2.ZERO
 
 
 func _init() -> void:
@@ -22,13 +32,71 @@ func _init() -> void:
 	focus_mode = Control.FOCUS_ALL
 
 
+func _ready() -> void:
+	Core.changed.connect(func(sections): if sections.has("config"): _fit_crop(true))
+
+
+## The part of a `stream`-sized projection frame that the phone fills for a `screen`-sized
+## projection screen: the centred area of the screen's shape, as livi-media's `crop_for` computes
+## it. The core maps touches over this area into the stream (`android_auto::to_stream`).
+static func projection_crop(stream: Vector2, screen: Vector2) -> Rect2:
+	if stream.x <= 0 or stream.y <= 0 or screen.x <= 0 or screen.y <= 0:
+		return Rect2(Vector2.ZERO, stream)
+	var even := func(v: float) -> float: return maxf(float(int(floor(v)) & ~1), 2.0)
+	var screen_ar := screen.x / screen.y
+	var c := Vector2(even.call(stream.y * screen_ar), stream.y) if screen_ar <= stream.x / stream.y \
+		else Vector2(stream.x, even.call(stream.x / screen_ar))
+	return Rect2(((stream - c) / 2.0).max(Vector2.ZERO), c)
+
+
+func _show() -> void:
+	if _raw and _raw.changed.is_connected(_fit_crop):
+		_raw.changed.disconnect(_fit_crop)
+	_raw = Wayland.texture(window_id) if window_id >= 0 else null
+	if _raw == null or not to_core:
+		texture = _raw
+		return
+	Wayland.set_native(window_id, true)
+	_crop = AtlasTexture.new()
+	_crop.atlas = _raw
+	_raw.changed.connect(_fit_crop)
+	_fit_crop(true)
+	texture = _crop
+
+
+## Again when the video's size changes (the phone's resolution tier), not every frame.
+func _fit_crop(force := false) -> void:
+	if _crop == null or _raw == null or (_raw.get_size() == _cropped_size and not force):
+		return
+	_cropped_size = _raw.get_size()
+	_crop.region = projection_crop(_cropped_size, _projection_screen())
+
+
+## The core's projection screen size, which its crop and touch mapping use; else the panel's.
+func _projection_screen() -> Vector2:
+	var w = Core.get_value("/config/projectionWidth")
+	var h = Core.get_value("/config/projectionHeight")
+	if w != null and h != null and w > 0 and h > 0:
+		return Vector2(w, h)
+	return get_viewport_rect().size
+
+
+## Where the picture is drawn in the view: the texture fitted and centred.
+func picture_rect() -> Rect2:
+	if texture == null:
+		return Rect2(Vector2.ZERO, size)
+	var tex := texture.get_size()
+	var s: float = min(size.x / tex.x, size.y / tex.y)
+	return Rect2((size - tex * s) / 2.0, tex * s)
+
+
 ## Where `local` falls on the window's surface, or null outside the picture.
 func to_surface(local: Vector2) -> Variant:
 	if texture == null:
 		return null
+	var r := picture_rect()
 	var tex := texture.get_size()
-	var s: float = min(size.x / tex.x, size.y / tex.y)
-	var p := (local - (size - tex * s) / 2.0) / s
+	var p := (local - r.position) * tex / r.size
 	if p.x < 0 or p.y < 0 or p.x >= tex.x or p.y >= tex.y:
 		return null
 	return p
@@ -94,7 +162,8 @@ func _core_input(event: InputEvent) -> void:
 
 
 func _to_core(index: int, at: Vector2, phase: String) -> void:
-	var p: Vector2 = (at / size).clamp(Vector2.ZERO, Vector2.ONE)
+	var r := picture_rect()
+	var p: Vector2 = ((at - r.position) / r.size).clamp(Vector2.ZERO, Vector2.ONE)
 	var err: String = Core.input({kind = "pointer", screen = "main", points = [{id = index, x = p.x, y = p.y, phase = phase}]})
 	if err != "":
 		push_warning("projection touch: %s" % err)

@@ -35,8 +35,16 @@ var _scene: SceneSkin
 ## A pack's page standing in for the home page, while one is open.
 var _page: Control
 var _live_bar := false
-## The "app" page: the newest hosted window fills the panel, nothing else drawn.
+## The "app" page: the newest hosted window fills the panel, nothing else drawn. "projection"
+## too, with the newest projection video, no rail and only `_back` over it.
 var _app_page := false
+var _projection_page := false
+## The page showing, as `open_page` resolved it, and where the projection page goes back to.
+var _page_name := "home"
+var _return_to := "home"
+var _back: BackTab
+## The core's `/front/main` last seen: the phone's video focus.
+var _front := ""
 
 
 func _init() -> void:
@@ -76,6 +84,10 @@ func _init() -> void:
 	body.add_child(side)
 	page.add_child(body)
 	add_child(page)
+	_back = BackTab.new()
+	_back.visible = false
+	_back.pressed.connect(func(): open_page(_return_to))
+	add_child(_back)
 
 
 func _ready() -> void:
@@ -83,6 +95,7 @@ func _ready() -> void:
 	ThemeManager.changed.connect(_style)
 	Core.welcome.connect(func(_v): _refresh())
 	Core.changed.connect(_on_core_changed)
+	Core.open_page.connect(_on_core_page)
 	_precondition.icon_name = "therm"
 	_precondition.pressed.connect(_on_precondition)
 	_player.control.connect(func(c): Core.act({kind = "media", control = c}))
@@ -135,21 +148,26 @@ func _style() -> void:
 
 ## "home"; a screen of the theme's pack, which replaces the home page until "home" again
 ## (`ev_main`, the pack's image page); `ev_live`, the Godot-rendered "Electric vehicle" page,
-## which every theme has; or `ev`, whichever of the two the theme and the look choose
-## (`ThemeManager.ev_page_kind`). An error message when there is no such page.
+## which every theme has; `ev`, whichever of the two the theme and the look choose
+## (`ThemeManager.ev_page_kind`); `app`; or `projection`, the phone's picture alone on the panel.
+## An error message when there is no such page.
 func open_page(page: String) -> String:
 	if page == "ev":
 		page = "ev_live" if ThemeManager.ev_page_kind() == "live" else "ev_main"
 	if page == "ev_live":
 		if _powertrain() != "electric":
 			return "ev_live needs an electric car"
-	elif page != "home" and page != "app" and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
+	elif page not in ["home", "app", "projection"] and not (ThemeManager.pack and ThemeManager.pack.has_screen(page)):
 		return "theme %s has no page %s" % [ThemeManager.theme_name, page]
 	if _page:
 		remove_child(_page)
 		_page.free()
 		_page = null
-	_app_page = page == "app"
+	if page == "projection" and _page_name != "projection":
+		_return_to = _page_name
+	_page_name = page
+	_projection_page = page == "projection"
+	_app_page = page == "app" or _projection_page
 	var home := page == "home"
 	var live := page == "ev_live"
 	var own_bar := live and _own_bar()
@@ -173,10 +191,49 @@ func open_page(page: String) -> String:
 		_page = PackScreen.new()
 		_page.screen_name = page
 		add_child(_page)
+	_show_app()
+	_back.visible = _projection_page
+	if _projection_page:
+		_back.reveal()
+	_tell_front()
 	queue_redraw()
 	page_changed.emit(page)
 	return ""
 
+
+## Whether the phone's picture is what the page shows.
+func _on_projection() -> bool:
+	return _projection_page or (_app_page and _projection.window.to_core)
+
+
+## As the stock UI does: the phone has video focus while its picture is the page, and gives it
+## back when the page goes. The core passes touches on only while it does.
+func _tell_front() -> void:
+	Core.act({kind = "show", screen = "main", front = "projection" if _on_projection() else "livi"})
+
+
+## Follows the core's main screen: the phone asking for it (navigation, a call) opens the
+## projection page; Android Auto's own exit, or the end of that ask, leaves it.
+func _follow_front() -> void:
+	var f = Core.get_value("/front/main")
+	if f == null or str(f) == _front:
+		return
+	var was := _front
+	_front = str(f)
+	if _front == "projection" and not _on_projection():
+		open_page("projection")
+	elif _front == "livi" and was != "" and _on_projection():
+		open_page(_return_to if _projection_page else "home")
+
+
+## The car's own buttons and telemetry open pages by path; the shell has the projection only.
+func _on_core_page(path: String) -> void:
+	var first := path.trim_prefix("/").get_slice("/", 0)
+	if first == "" or first == "projection":
+		if not _on_projection():
+			open_page("projection")
+	else:
+		print("core asks for %s: the shell has no such page" % path)
 
 
 ## Draws the live page's 3D scene once into a tiny viewport, so its shaders are compiled before
@@ -230,9 +287,14 @@ func _fit() -> void:
 
 
 func _show_app() -> void:
-	var id: int = _windows[-1] if not _windows.is_empty() else -1
-	# livi-gst-host names its video windows livi-video; their touches are the phone's.
-	_projection.show_window(id, id >= 0 and str(_app_ids.get(id, "")).begins_with("livi-video"))
+	var shown: Array = _windows.filter(_is_projection) if _projection_page else Array(_windows)
+	var id: int = shown[-1] if not shown.is_empty() else -1
+	_projection.show_window(id, id >= 0 and _is_projection(id))
+
+
+## livi-gst-host names its video windows livi-video; their touches are the phone's.
+func _is_projection(id: int) -> bool:
+	return str(_app_ids.get(id, "")).begins_with("livi-video")
 
 
 ## Sections changed since the last refresh. A phone session changes the track, with its artwork,
@@ -257,6 +319,8 @@ func _refresh_dirty() -> void:
 
 ## `sections` are the changed ones; empty means all.
 func _refresh(sections := {}) -> void:
+	if sections.is_empty() or sections.has("front"):
+		_follow_front()
 	var t := func(p: String): return Core.get_value("/telemetry/" + p)
 	# fuelPct is the charge for an electric car and the tank otherwise.
 	var power := _powertrain()

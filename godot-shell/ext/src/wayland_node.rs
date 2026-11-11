@@ -367,6 +367,15 @@ impl WaylandCompositor {
         self.server.as_ref().map_or(0, |s| s.state.windows.len() as i64)
     }
 
+    /// The window's texture becomes its video at the buffer's own size, not as the client
+    /// scaled it (see `compositor::Window::native`).
+    #[func]
+    fn set_native(&mut self, id: i64, on: bool) {
+        if let Some(s) = self.server.as_mut() {
+            s.state.set_native(id as u64, on);
+        }
+    }
+
     /// The newest mapped window with this app_id, or -1.
     #[func]
     fn find_window(&self, app_id: GString) -> i64 {

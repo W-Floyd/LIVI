@@ -116,6 +116,10 @@ pub struct Window {
     /// The canvas last handed out in a `Scene`, and the window size it was laid out for.
     canvas: Option<(u64, Arc<Frame>)>,
     canvas_size: (u32, u32),
+    /// The window is its largest dmabuf layer at the buffer's own size, wherever the client put
+    /// and scaled it: projection video, which waylandsink fits to the 1920x720 configure and the
+    /// shell crops 1:1 as the core's touch mapping assumes.
+    native: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -563,6 +567,15 @@ impl CompositorHandler for State {
 }
 
 impl State {
+    /// See `Window::native`. Lays the window out again at once, so a still picture follows.
+    pub fn set_native(&mut self, id: u64, on: bool) {
+        let Some(i) = self.windows.iter().position(|w| w.id == id) else { return };
+        if self.windows[i].native != on {
+            self.windows[i].native = on;
+            self.recomposite(i, true);
+        }
+    }
+
     /// A subsurface of window `root` committed: keep its picture, then lay the window out again.
     fn commit_layer(&mut self, root: &WlSurface, surface: &WlSurface) {
         let Some(i) = self.windows.iter().position(|w| w.toplevel.wl_surface() == root) else {
@@ -653,6 +666,28 @@ impl State {
         }
         let base = self.windows[i].root_frame.clone();
         let real_base = base.as_ref().filter(|f| f.width > 1 || f.height > 1);
+        if self.windows[i].native && real_base.is_none() {
+            let largest = dma.iter().map(|(_, d)| *d).max_by_key(|d| {
+                let s = d.dmabuf.size();
+                s.w as i64 * s.h as i64
+            });
+            if let Some(d) = largest {
+                let buf = d.dmabuf.size();
+                let (_, _, src) = layer_geometry(d);
+                let w = ((src[2] - src[0]) * buf.w as f32).round().max(1.0) as i32;
+                let h = ((src[3] - src[1]) * buf.h as f32).round().max(1.0) as i32;
+                let layer = SceneLayer { key: d.key, dmabuf: d.dmabuf.clone(), x: 0, y: 0, w, h, src };
+                let win = &mut self.windows[i];
+                win.canvas = None;
+                win.canvas_size = (w as u32, h as u32);
+                win.frame = Some(Content::Scene(Scene { width: w as u32, height: h as u32, canvas: None, layers: vec![layer] }));
+                if !win.mapped {
+                    win.mapped = true;
+                    self.events.push(WindowEvent::Mapped(win.id));
+                }
+                return;
+            }
+        }
         let (mut w, mut h) = real_base.map_or((0, 0), |f| (f.width, f.height));
         for (id, loc) in &placed {
             if let Some(f) = self.layers.get(id) {
@@ -803,6 +838,7 @@ impl XdgShellHandler for State {
             root_frame: None,
             canvas: None,
             canvas_size: (0, 0),
+            native: false,
         });
     }
 
@@ -956,7 +992,7 @@ mod tests {
 
     /// Video as waylandsink sends it: a placeholder toplevel scaled to the panel, with the
     /// planar YUV dmabuf in a viewporter-scaled subsurface, reaches the embedder as a scene with
-    /// the layer where the client put it, whatever the plane layout.
+    /// the layer where the client put it, whatever the plane layout; or, native, as the buffer.
     #[test]
     fn a_planar_video_subsurface_becomes_a_scene_layer() {
         const NV12: u32 = 0x3231_564e;
@@ -984,6 +1020,12 @@ mod tests {
             let y = unsafe { std::slice::from_raw_parts(map as *const u8, len) };
             assert_eq!((y[offset], y[offset + 95]), (235, 16), "{format:?}");
             unsafe { libc::munmap(map, len.next_multiple_of(4096)) };
+            // Native: the window is the buffer at its own size, the client's scaling undone.
+            server.state.set_native(1, true);
+            let Some(Content::Scene(sc)) = &server.state.windows[0].frame else { panic!("{format:?}: native: not a scene") };
+            assert_eq!((sc.width, sc.height), (96, 64), "{format:?}");
+            let [l] = &sc.layers[..] else { panic!("{format:?}: native: {} layers", sc.layers.len()) };
+            assert_eq!((l.x, l.y, l.w, l.h, l.src), (0, 0, 96, 64, [0.0, 0.0, 1.0, 1.0]));
         }
     }
 

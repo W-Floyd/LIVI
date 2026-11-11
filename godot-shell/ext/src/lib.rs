@@ -83,6 +83,9 @@ impl CoreLink {
     fn changed(sections: PackedStringArray);
     #[signal]
     fn gone(reason: GString);
+    /// The core asks the UI to show a page, as a path (`/projection`, `/media/fm`).
+    #[signal]
+    fn open_page(path: GString);
 
     /// Connects to the running core; an empty path means its default socket.
     #[func]
@@ -140,6 +143,12 @@ impl CoreLink {
             Ok(value) => self.fake_call(|f| f.set(path, value)),
             Err(e) => gs(e),
         }
+    }
+
+    /// The fake asks the shell to show a page, as the core does from the car's telemetry.
+    #[func]
+    fn fake_open_page(&mut self, path: GString) -> GString {
+        self.fake_call(|f| f.open_page(path.to_string()))
     }
 
     /// Every message the shell has sent the fake, as wire JSON, oldest first.
@@ -270,7 +279,10 @@ impl CoreLink {
                 Event::Gone(reason) => {
                     self.signals().gone().emit(&GString::from(&reason));
                 }
-                Event::Spectrum(_) | Event::OpenPage(_) => {}
+                Event::OpenPage(path) => {
+                    self.signals().open_page().emit(&GString::from(&path));
+                }
+                Event::Spectrum(_) => {}
             }
         }
     }

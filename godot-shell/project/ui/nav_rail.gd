@@ -1,12 +1,13 @@
 class_name NavRail
 extends PanelContainer
 ## A short menu on the left edge, over whatever page is open, that jumps between pages: home, the
-## electric vehicle page, and the phone's window. Not part of any theme's layout; a unit turns
+## electric vehicle page, the phone's window, and the phone's picture alone on the panel, where
+## the rail hides (the page has its own way back). Not part of any theme's layout; a unit turns
 ## it on with LIVI_SHELL_NAV until the shell has its real navigation.
 
 signal selected(page: String)
 
-const ITEMS := [["home", "Home", "home"], ["ev", "EV", "bolt"], ["app", "Phone", "phone"]]
+const ITEMS := [["home", "Home", "home"], ["ev", "EV", "bolt"], ["app", "Phone", "phone"], ["projection", "Full", "expand"]]
 
 var _buttons := {}
 
@@ -39,6 +40,7 @@ func _ready() -> void:
 
 ## Marks the page that is open: `ev_live` and `ev_main` are both the EV item.
 func show_page(page: String) -> void:
+	visible = page != "projection"
 	var key := "ev" if page.begins_with("ev") else page if _buttons.has(page) else ""
 	if key != "":
 		(_buttons[key] as Button).set_pressed_no_signal(true)

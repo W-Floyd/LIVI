@@ -1,0 +1,95 @@
+name: home-video-native
+# Projection video as livi-gst-host sends it: Android Auto's 1920x1080 tier for a 1920x720 screen,
+# which waylandsink fits into its 1920x720 window. The projection page shows it at its own size,
+# cut to the area the phone fills (rows 180 to 900), so it is 1:1: the grid's 64 px checks land
+# on the panel's pixels. A tap reaches the core as the point over that area, which the core maps
+# into the stream as stock LIVI did. The page follows the core's main screen both ways.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: livi-video-main, pattern: grid, size: 1920x1080, buffer: nv12, video: true }
+steps:
+  - gdscript: |
+      if Wayland.dmabuf_status() != "":
+          return "dmabuf is off: %s" % Wayland.dmabuf_status()
+      var cases := [
+          [Vector2(1920, 1080), Vector2(1920, 720), Rect2(0, 180, 1920, 720)],
+          [Vector2(1280, 720), Vector2(1920, 720), Rect2(0, 120, 1280, 480)],
+          [Vector2(800, 480), Vector2(1920, 720), Rect2(0, 90, 800, 300)],
+          [Vector2(1920, 1080), Vector2(1280, 720), Rect2(0, 0, 1920, 1080)],
+          [Vector2(1920, 1080), Vector2(800, 1000), Rect2(528, 0, 864, 1080)],
+      ]
+      for c in cases:
+          var got := WindowView.projection_crop(c[0], c[1])
+          if got != c[2]:
+              return "crop of %s for %s: %s, want %s" % [c[0], c[1], got, c[2]]
+      var rail := NavRail.new()
+      rail.show_page("projection")
+      var hidden := not rail.visible
+      rail.show_page("home")
+      var back := rail.visible
+      rail.free()
+      if not hidden or not back:
+          return "the rail shows over the projection page, or not after it"
+  - set: { core: { config: { projectionWidth: 1920, projectionHeight: 720 } } }
+  - wait: { window: livi-video-main }
+  - page: projection
+  - expect_action: { Show: { screen: main, front: projection } }
+  - expect_node: { path: Projection/Window, to_core: true }
+  - gdscript: |
+      var img: Image = runner._vp.get_texture().get_image()
+      # Panel rows 203/204 are the stream's 383/384, and columns 1023/1024 the same: grid edges,
+      # so a picture off by a pixel, or scaled, fails here.
+      var dark := func(x, y): return img.get_pixel(x, y).get_luminance() < 0.4
+      for c in [[1000, 203, true], [1000, 204, false], [1023, 300, true], [1024, 300, false]]:
+          if dark.call(c[0], c[1]) != c[2]:
+              return "(%d, %d) is %s" % [c[0], c[1], img.get_pixel(c[0], c[1])]
+  - screenshot: { name: home-video-native, tolerance: 8 }
+  - tap: { x: 480, y: 540 }
+  - expect_input: { pointer: { x: 0.25, y: 0.75, phase: down } }
+  # Android Auto's exit gives up the main screen: back to the page before.
+  - set: { core: { front: { main: projection } } }
+  - wait: { frames: 2 }
+  - set: { core: { front: { main: livi } } }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if shell._page_name != "home":
+          return "after the phone gave up the screen: %s" % shell._page_name
+  - expect_action: { Show: { screen: main, front: livi } }
+  # The phone asks for it again (navigation, a call): the projection page.
+  - set: { core: { front: { main: projection } } }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if shell._page_name != "projection":
+          return "after the phone asked for the screen: %s" % shell._page_name
+  # The back button over the corner returns and gives the screen back.
+  - tap: { x: 20, y: 20 }
+  - gdscript: |
+      if shell._page_name != "home":
+          return "after back: %s" % shell._page_name
+  - expect_action: { Show: { screen: main, front: livi } }
+  # The car asks for the projection by path.
+  - gdscript: |
+      var e: String = Core.fake_open_page("/projection")
+      if e != "":
+          return e
+      await runner.frames(1)
+      if shell._page_name != "projection":
+          return "after OpenPage /projection: %s" % shell._page_name
+  # In the home page's slot the same area is fitted, and a tap maps through what is drawn.
+  - page: home
+  - gdscript: |
+      var w: WindowView = shell.get_node("Projection/Window")
+      var r := w.picture_rect()
+      if not is_equal_approx(r.size.x / r.size.y, 1920.0 / 720.0):
+          return "the slot shows %s, not the visible area" % r
+      Core.fake_clear()
+      await runner._tap(w.global_position + r.position + r.size * Vector2(0.25, 0.75))
+      for m in Core.fake_sent():
+          if m.get("type") == "input":
+              var p: Dictionary = m.input.points[0]
+              if not is_equal_approx(p.x, 0.25) or not is_equal_approx(p.y, 0.75):
+                  return "slot tap at 0.25, 0.75 reached the core as %s, %s" % [p.x, p.y]
+              return ""
+      return "no input sent from the slot"

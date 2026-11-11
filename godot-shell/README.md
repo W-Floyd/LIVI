@@ -37,7 +37,7 @@ grid|bars, size: WxH, animate: N, buffer: shm|dmabuf|nv12|i420, video: true, eve
 viewporter-scaled subsurface under a placeholder toplevel), `{ role: command, run: [...] }` any
 Wayland program.
 
-Steps: `page: home | ev | ev_live | <pack screen>` (see "Electric vehicle page"), `compare_reference` (below), `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`
+Steps: `page: home | ev | ev_live | app | projection | <pack screen>` (see "Electric vehicle page"), `compare_reference` (below), `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`
 for a finger), `key`, `expect_client: { app_id, lines: [...] }`,
 `theme: { theme_name, appearance, hand, near, text_scale, material, reduced_motion, quality, ev_page }`,
 `set: { core: {...} }`, `expect_action`, `expect_input`, `expect_node: { path, <property>:
@@ -209,6 +209,29 @@ export XDG_RUNTIME_DIR=/run/livi-shell WAYLAND_DISPLAY=livi-shell
 gst-launch-1.0 videotestsrc ! video/x-raw,format=NV12,width=1920,height=1080 ! waylandsink
 # the decoder's path: ... ! v4l2h264dec ! waylandsink
 ```
+
+## Projection
+
+livi-gst-host's windows (app_id `livi-video*`) are the phone's picture. `waylandsink` fits its
+video into the 1920x720 window it is given, but Android Auto sends a 16:9 tier (1920x1080 for a
+1920x720 screen) and draws its UI in the middle, in the projection screen's shape; the core maps
+touches over that area into the stream (`android_auto::to_stream`, with livi-media's `crop_for`).
+So the compositor shows such a window as its video at the buffer's own size (`Wayland.set_native`),
+and `WindowView` cuts that same centred area out (`projection_crop`, from the core's
+`/config/projectionWidth`/`Height`, else the panel) and fits it to the view: on the full panel it
+is 1:1, as stock LIVI placed it (1920x1080 at 0,-180). Touches go to the core normalised over that
+area. In the home page's narrower slot the same area is letterboxed; asking the phone for a
+layout that fits the slot is not done (stock sets `projectionViewArea*` per session).
+
+`page: projection` (the rail's "Full") shows the newest projection window alone on the panel: no
+status bar, side panel or rail. A back button shows in the top-left corner for 4 s when it opens,
+and again on a tap there; that corner is not the phone's. The shell follows the core's main screen
+as the stock UI does: opening the projection page (or `app` with a projection window) sends
+`Show { main, projection }`, any other page `Show { main, livi }`; `/front/main` turning to
+`projection` (the phone asks for the screen) opens the projection page, and turning to `livi`
+(Android Auto's own exit, or the end of the phone's ask) leaves it for the page before. A core
+`OpenPage` of `/projection` (or `/`) opens it too; other paths are logged, as the shell has no
+such pages.
 
 ## A car model
 

@@ -121,7 +121,7 @@ pub struct Opts {
     pub dmabuf: bool,
     /// What the dmabufs hold.
     pub format: Format,
-    /// Show the picture as waylandsink does: a subsurface scaled 1.5x by viewporter and centred
+    /// Show the picture as waylandsink does: a subsurface scaled by viewporter (1.5x, or fitted) and centred
     /// under a placeholder toplevel scaled to the 1920x720 panel.
     pub video: bool,
     /// Also append each input event, one line each, to this file as it arrives.
@@ -209,7 +209,13 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
         };
         let video = compositor.create_surface(&qh, ());
         let subsurface = sub.get_subsurface(&video, &surface, &qh, ());
-        let (dw, dh) = (w * 3 / 2, h * 3 / 2);
+        // 1.5x, or fitted to the panel as waylandsink does when that would overflow.
+        let (dw, dh) = if w * 3 / 2 <= PANEL.0 && h * 3 / 2 <= PANEL.1 {
+            (w * 3 / 2, h * 3 / 2)
+        } else {
+            let s = f64::min(PANEL.0 as f64 / w as f64, PANEL.1 as f64 / h as f64);
+            ((w as f64 * s).round() as u32, (h as f64 * s).round() as u32)
+        };
         subsurface.set_position((PANEL.0 as i32 - dw as i32) / 2, (PANEL.1 as i32 - dh as i32) / 2);
         subsurface.set_desync();
         let video_vp = vp.get_viewport(&video, &qh, ());

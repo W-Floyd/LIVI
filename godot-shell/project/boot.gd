@@ -1,8 +1,11 @@
 extends Node
 ## Runs the shell against livi-core, or the scenario runner with `-- --test <path>`, or the live tuning server with `-- --live`.
 
+const Startup := preload("res://startup.gd")
+
 
 func _ready() -> void:
+	set_process_input(false)
 	var args := OS.get_cmdline_user_args()
 	if args.has("--test"):
 		var runner := preload("res://test/runner.gd").new()
@@ -12,27 +15,51 @@ func _ready() -> void:
 	if args.has("--live"):
 		add_child(preload("res://live/live_server.gd").new())
 		return
+	Startup.mark("main")
 	# livi-core's video host is pointed at this socket (packaging/), so a unit names it.
 	var err: String = Wayland.listen(OS.get_environment("LIVI_SHELL_SOCKET"))
 	if err != "":
 		push_error("compositor: %s" % err)
+	Startup.mark("compositor")
 	_keep_core()
 	# The driver's look from last time; tests start from the default one and save nothing.
 	ThemeManager.load_look(ThemeManager.default_look_file())
+	Startup.mark("look")
 	var shell: Control = preload("res://shell.tscn").instantiate()
 	add_child(shell)
+	Startup.mark("shell")
+	_time_startup(shell)
 	# Once the home page is up: the live EV page's shaders, compiled while nobody waits.
 	get_tree().create_timer(2.0).timeout.connect(shell.warm_up)
 	if OS.get_environment("LIVI_SHELL_NAV") != "":
 		NavRail.attach(shell, func(page): _open(shell, page))
 	_restore_page(shell)
-	if OS.get_environment("LIVI_SHELL_TIMING") != "":
-		await RenderingServer.frame_post_draw
-		shell.launcher._log("[boot] first frame at %d ms" % Time.get_ticks_msec())
+
+
+## The first frame; the first with the core's state on home (summed up in shell.log); the first
+## touch, which the driver gives once the panel looks ready.
+func _time_startup(shell: Control) -> void:
+	Core.welcome.connect(_on_first_welcome.bind(shell), CONNECT_ONE_SHOT)
+	set_process_input(true)
+	await RenderingServer.frame_post_draw
+	Startup.mark("first_frame")
+
+
+func _on_first_welcome(_version: String, shell: Control) -> void:
+	Startup.mark("core")
+	await RenderingServer.frame_post_draw
+	Startup.mark("home")
+	shell.launcher._log(Startup.summary())
+
+
+func _input(event: InputEvent) -> void:
+	if (event is InputEventScreenTouch or event is InputEventMouseButton) and event.pressed:
+		Startup.mark("touch")
+		set_process_input(false)
 
 
 ## LIVI_SHELL_TIMING logs how long a page takes to open and to draw its first frames, and the
-## first frame and the EV page's warm-up (shell.log: under the kiosk, stdout is the console).
+## EV page's warm-up (shell.log: under the kiosk, stdout is the console).
 func _open(shell: Control, page: String) -> void:
 	var t0 := Time.get_ticks_msec()
 	shell.open_page(page)

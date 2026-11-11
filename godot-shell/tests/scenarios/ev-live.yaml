@@ -45,6 +45,22 @@ steps:
                   if on.visible and off.visible and on.get_global_rect().intersects(off.get_global_rect()):
                       return "%s, %s, %s: the ranges overlap: %s %s" % [ts, pos, hand, on.get_global_rect(), off.get_global_rect()]
       ThemeManager.set_look({text_scale = 1.4, status_position = "top", hand = "lhd"})
+  # Back to 1.0 on the page itself: the picture drops from the taller targets' lift to where a
+  # page opened at 1.0 has it.
+  - gdscript: |
+      await runner.frames(3)
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      var high: float = s._lift_px
+      ThemeManager.set_look({text_scale = 1.0})
+      await runner.frames(2)
+      var dropped: float = s._lift_px
+      shell.open_page("home")
+      shell.open_page("ev_live")
+      await runner.frames(3)
+      if not is_equal_approx(dropped, s._lift_px) or dropped >= high:
+          return "lift %s px at 1.4, %s after 1.0 on the page, %s opened at 1.0" % [high, dropped, s._lift_px]
+      ThemeManager.set_look({text_scale = 1.4})
+      await runner.frames(2)
   - theme: { text_scale: 1.0, quality: low }
   - screenshot: ev-live-instrument-night-low
   # Surfaces over the scene, and a scene theme, which keeps its own 3D layer for the home page.

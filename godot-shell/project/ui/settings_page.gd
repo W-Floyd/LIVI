@@ -9,6 +9,8 @@ extends Control
 signal back_pressed
 
 const LOOK := "look"
+## Look's row, and page, for the docked rail's order.
+const RAIL := "rail_order"
 ## Choices with up to this many options, all short, are set in place.
 const INLINE_OPTIONS := 4
 const INLINE_CHARS := 28
@@ -234,6 +236,8 @@ func _build() -> void:
 		if _look_pick == "":
 			for r in _look_rows():
 				_rows.list.add_child(_group_heading(r.label) if r.kind == "heading" else _row(r, r.key))
+		elif _look_pick == RAIL:
+			_build_rail()
 		else:
 			_add_picks(_look_row(_look_pick).options, func(i): _look_set(_look_pick, _look_row(_look_pick).options[i].value); _look_pick = ""; _refresh(true))
 	else:
@@ -796,6 +800,9 @@ func _note(text: String) -> Label:
 func _livi_or_look(id: Variant, what: String) -> void:
 	if id is String:
 		match what:
+			"press":
+				if id == "rail_reset":
+					ThemeManager.set_rail_order([])
 			"toggle":
 				_look_set(id, not bool(_look_row(id).get("checked", false)))
 			"open":
@@ -893,6 +900,8 @@ func _look_rows() -> Array:
 		{key = "home_phone", kind = "switch", label = "Phone on home", detail = "Android Auto or CarPlay beside the cards", checked = ThemeManager.home_phone, enabled = true},
 		_look_choice("status_position", "Status bar", [["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"], ["off", "Off"]]),
 	]
+	if _rail():
+		rows.append({key = RAIL, kind = "value", label = "Navigation rail", detail = "The order of its items; or hold one on the rail and drag it", opens = true, enabled = true})
 	rows.append_array(_driving_rows())
 	return rows
 
@@ -930,6 +939,57 @@ func _look_set(key: String, value: Variant) -> void:
 	look[key] = value
 	ThemeManager.set_look(look)
 	ThemeManager.save_look()
+
+
+## The docked rail, if there is one; its page here follows it.
+func _rail() -> NavRail:
+	var rail: NavRail = get_tree().get_first_node_in_group("nav_rail") as NavRail if is_inside_tree() else null
+	if rail and not rail.items_changed.is_connected(_on_rail):
+		rail.items_changed.connect(_on_rail)
+	return rail
+
+
+func _on_rail() -> void:
+	if section is String and section == LOOK and _look_pick == RAIL:
+		_refresh(true)
+
+
+## Every item, also those off the rail (dimmed, saying why), each with a move up and down.
+func _build_rail() -> void:
+	var rail := _rail()
+	if rail == null:
+		return
+	var order := rail.order()
+	for i in order.size():
+		var id: String = order[i]
+		var item := NavRail._item(id)
+		var shown := rail.item_shown(id)
+		var b := _row({kind = "info", label = item[1], detail = "" if shown else str(NavRail.HIDDEN_WHY.get(id, "")), enabled = true}, id)
+		b.name = id
+		var box: HBoxContainer = b.get_node("Box")
+		var icon := UI.icon(item[2])
+		box.add_child(icon)
+		box.move_child(icon, 0)
+		if not shown:
+			for c in box.get_children():
+				c.modulate.a = 0.5
+		for d in [[-1, "Up", "chevron_up"], [1, "Down", "chevron_down"]]:
+			var arrow := _flat_button(d[1], d[2])
+			_style_flat(arrow)
+			var to: int = i + d[0]
+			arrow.disabled = to < 0 or to >= order.size()
+			arrow.pressed.connect(func(): if not _rows.dragged: _rail_move(id, to))
+			box.add_child(arrow)
+		_rows.list.add_child(b)
+	var first := PackedStringArray(NavRail.ITEMS.map(func(it): return it[1]))
+	_rows.list.add_child(_row({kind = "button", label = "Reset order", detail = ", ".join(first), button = "Reset", enabled = true}, "rail_reset"))
+
+
+func _rail_move(id: String, to: int) -> void:
+	var o := _rail().order()
+	o.erase(id)
+	o.insert(to, id)
+	ThemeManager.set_rail_order(o)
 
 
 ## The lockout while driving (Drive), Look's last group. While the car is driven its choice can

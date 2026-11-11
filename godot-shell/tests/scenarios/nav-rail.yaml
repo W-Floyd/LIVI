@@ -71,3 +71,202 @@ steps:
   - wait: { frames: 2 }
   - gdscript: *clear
   - screenshot: nav-rail-home-rhd
+  # Reordering on the rail, each hand: a press held still (400 ms) lifts an item, the others make
+  # room as it is dragged, and the release drops it there, without opening its page. A finger
+  # arrives as the emulated mouse, then the touch. Rows: item, then the shown slot it is dropped
+  # in, or tap (opens its page), swipe (moves before the hold: nothing), cancel (dragged off the
+  # rail: back where it was), touch (no emulated mouse).
+  - gdscript: &gestures |
+      var rail: NavRail = runner._vp.get_node("NavRail")
+      var vp: SubViewport = runner._vp
+      var send := func(at: Vector2, kind: String, mouse: bool) -> void:
+          var t
+          var m
+          if kind == "move":
+              t = InputEventScreenDrag.new()
+              m = InputEventMouseMotion.new()
+              m.button_mask = MOUSE_BUTTON_MASK_LEFT
+          else:
+              t = InputEventScreenTouch.new()
+              t.pressed = kind == "down"
+              m = InputEventMouseButton.new()
+              m.button_index = MOUSE_BUTTON_LEFT
+              m.pressed = kind == "down"
+              m.button_mask = MOUSE_BUTTON_MASK_LEFT if kind == "down" else 0
+          t.position = at
+          m.device = InputEvent.DEVICE_ID_EMULATION
+          m.position = at
+          m.global_position = at
+          if mouse:
+              vp.push_input(m)
+          vp.push_input(t)
+      # The shown items, top to bottom, by where they are.
+      var shown := func() -> Array:
+          var ids: Array = rail.order().filter(func(id): return rail.item_shown(id))
+          ids.sort_custom(func(a, b): return rail.get_node("Items/" + a).get_global_rect().get_center().y < rail.get_node("Items/" + b).get_global_rect().get_center().y)
+          return ids
+      var picked := func() -> Array:
+          return rail.order().filter(func(id): return rail.get_node("Items/" + id).button_pressed)
+      var away: float = ThemeManager.px.touch * 2.0 + rail.size.x
+      if ThemeManager.hand == "rhd":
+          away = -away
+      for row in [["media", 0], ["media", 1], ["media", 2], ["media", 3], ["media", 4], ["home", 4], ["settings", 0], ["ev", "tap"], ["apps", "swipe"], ["media", "cancel"], ["media", "touch"]]:
+          ThemeManager.set_rail_order([])
+          shell.open_page("home")
+          await runner.frames(2)
+          var before: Array = shown.call()
+          var b: Button = rail.get_node("Items/" + row[0])
+          var at: Vector2 = b.get_global_rect().get_center()
+          var how := str(row[1])
+          var slot: int = row[1] if row[1] is int else 0
+          var to: Vector2 = rail.get_node("Items/" + before[slot]).get_global_rect().get_center()
+          var mouse: bool = how != "touch"
+          var drops: bool = row[1] is int or how == "touch"
+          var mid := before.duplicate()
+          mid.erase(row[0])
+          mid.insert(slot, row[0])
+          send.call(at, "down", mouse)
+          await runner.frames(1)
+          if how == "swipe":
+              for i in 8:
+                  send.call(at.lerp(to, (i + 1) / 8.0), "move", mouse)
+                  await runner.frames(1)
+          await runner.frames(1 if how == "tap" else 30)
+          var lifted: bool = b.scale.x > 1.0 and rail.get_node("Items/Shadow").visible
+          if lifted != (drops or how == "cancel"):
+              return "%s: lifted %s" % [row, lifted]
+          var end := at
+          if lifted:
+              for i in 8:
+                  send.call(at.lerp(to, (i + 1) / 8.0), "move", mouse)
+                  await runner.frames(1)
+              # The others made room: the slots read in the order it would drop in.
+              if shown.call() != mid:
+                  return "%s: mid-drag %s, not %s" % [row, shown.call(), mid]
+              # Lifted, not picked.
+              if row[0] != "home" and b.get_draw_mode() in [BaseButton.DRAW_PRESSED, BaseButton.DRAW_HOVER_PRESSED]:
+                  return "%s: drawn picked while lifted" % [row]
+              if row == ["media", 0] and ThemeManager.hand == "lhd":
+                  var e: String = await runner._screenshot({name = "nav-rail-lift"})
+                  if e != "":
+                      return e
+              end = to
+              if how == "cancel":
+                  end = to + Vector2(away, 0)
+                  for i in 4:
+                      send.call(to.lerp(end, (i + 1) / 4.0), "move", mouse)
+                      await runner.frames(1)
+                  if shown.call() != before or b.scale != Vector2.ONE:
+                      return "%s: off the rail %s at %s, not back as %s" % [row, shown.call(), b.scale, before]
+          send.call(end, "up", mouse)
+          await runner.frames(3)
+          var want: Array = mid if drops else before
+          if shown.call() != want or rail.order().filter(func(id): return rail.item_shown(id)) != want or NavRail.ordered(ThemeManager.rail_order) != rail.order():
+              return "%s: shown %s, order %s, saved %s; not %s" % [row, shown.call(), rail.order(), ThemeManager.rail_order, want]
+          if b.scale != Vector2.ONE or rail.get_node("Items/Shadow").visible:
+              return "%s: still lifted" % [row]
+          var page := ["ev"] if how == "tap" else ["home"]
+          if picked.call() != page:
+              return "%s: %s picked, not %s" % [row, picked.call(), page]
+      ThemeManager.set_rail_order([])
+      shell.open_page("home")
+      await runner.frames(2)
+  - gdscript: *clear
+  - theme: { hand: lhd }
+  - wait: { frames: 2 }
+  - gdscript: *gestures
+  - gdscript: *clear
+  # Settings, Look, Navigation rail: every item, one off the rail dimmed saying why and still
+  # movable, as the rail shows it; each moved by its arrows, then Reset.
+  - page: settings
+  - gdscript: |
+      var rail: NavRail = runner._vp.get_node("NavRail")
+      var s: SettingsPage = shell.get_node("Settings")
+      s.open_section("look")
+      await runner.frames(2)
+      var open: Control = s.get_node("Rows/List/Navigation rail")
+      s._rows.reveal(open)
+      await runner.frames(1)
+      await runner._tap(open.get_global_rect().get_center())
+      await runner.frames(2)
+      var tap := func(path: String) -> String:
+          var n: Control = s.get_node_or_null("Rows/List/" + path)
+          if n == null:
+              return "no %s" % path
+          s._rows.reveal(n)
+          await runner.frames(1)
+          await runner._tap(n.get_global_rect().get_center())
+          await runner.frames(2)
+          return ""
+      var listed := func() -> Array:
+          return s.get_node("Rows/List").get_children().map(func(c): return str(c.name)).filter(func(n): return NavRail._item(n).size() > 0)
+      var std: Array = NavRail.ordered([])
+      if listed.call() != std:
+          return "listed %s" % [listed.call()]
+      for on in [false, true, false]:
+          rail.set_item_visible("projection", on)
+          await runner.frames(1)
+          var dim := func(id: String) -> bool:
+              return s.get_node("Rows/List/%s/Box" % id).get_child(0).modulate.a < 1.0
+          var why: bool = s.get_node("Rows/List/projection").find_children("*", "Label", true, false).any(func(l): return l.text == NavRail.HIDDEN_WHY.projection)
+          if dim.call("projection") == on or why == on or dim.call("home") or s.get_node("Rows/List/projection/Box/Up").disabled:
+              return "phone shown %s: dimmed %s, says why %s" % [on, dim.call("projection"), why]
+      s._rows.offset = 0.0
+      await runner.frames(2)
+      var e: String = await runner._screenshot({name = "nav-rail-settings-order"})
+      if e != "":
+          return e
+      if not s.get_node("Rows/List/home/Box/Up").disabled or not s.get_node("Rows/List/settings/Box/Down").disabled:
+          return "the ends move off the list"
+      for row in [["home/Box/Down", ["ev", "home", "media", "apps", "projection", "settings"]],
+              ["settings/Box/Up", ["ev", "home", "media", "apps", "settings", "projection"]],
+              ["apps/Box/Up", ["ev", "home", "apps", "media", "settings", "projection"]],
+              ["Reset order/Box/Act", std]]:
+          e = await tap.call(row[0])
+          if e != "":
+              return e
+          var shown: Array = rail.order().filter(func(id): return rail.item_shown(id))
+          shown.sort_custom(func(a, b): return rail.get_node("Items/" + a).position.y < rail.get_node("Items/" + b).position.y)
+          var want: Array = row[1].filter(func(id): return rail.item_shown(id))
+          if listed.call() != row[1] or rail.order() != row[1] or NavRail.ordered(ThemeManager.rail_order) != row[1] or shown != want:
+              return "%s: listed %s, rail %s (shown %s), saved %s; not %s" % [row[0], listed.call(), rail.order(), shown, ThemeManager.rail_order, row[1]]
+  # The order is the look's: saved, read back at a start (defaults, then the file), unknown and
+  # repeated ids dropped, missing ones after it in their own order.
+  - gdscript: |
+      var rail: NavRail = runner._vp.get_node("NavRail")
+      var file: String = runner._out.path_join(runner._scenario).path_join("look.json")
+      DirAccess.make_dir_recursive_absolute(file.get_base_dir())
+      ThemeManager.look_file = file
+      ThemeManager.set_rail_order(["settings", "media", "home", "ev", "apps", "projection"])
+      var saved = JSON.parse_string(FileAccess.get_file_as_string(file))
+      var err := ""
+      if not saved is Dictionary or saved.get("rail_order") != ["settings", "media", "home", "ev", "apps", "projection"]:
+          err = "saved %s" % [saved]
+      for row in [[null, ["settings", "media", "home", "ev", "apps", "projection"]],
+              [["bogus", "media", 3, "media", "home"], ["media", "home", "ev", "apps", "projection", "settings"]],
+              [[], NavRail.ordered([])],
+              ["home", NavRail.ordered([])]]:
+          if err != "":
+              break
+          if row[0] != null:
+              var f := FileAccess.open(file, FileAccess.WRITE)
+              f.store_string(JSON.stringify({rail_order = row[0]}))
+              f.close()
+          ThemeManager.defaults()
+          await runner.frames(1)
+          if rail.order() != NavRail.ordered([]):
+              err = "%s: defaults left %s" % [row[0], rail.order()]
+              break
+          ThemeManager.load_look(file)
+          await runner.frames(2)
+          var ys: Array = rail.order().filter(func(id): return rail.item_shown(id)).map(func(id): return rail.get_node("Items/" + id).position.y)
+          var sorted := ys.duplicate()
+          sorted.sort()
+          if rail.order() != row[1] or ys != sorted:
+              err = "%s: read back %s at %s, not %s" % [row[0], rail.order(), ys, row[1]]
+      ThemeManager.look_file = ""
+      ThemeManager.tokens_file = ""
+      ThemeManager.set_rail_order([])
+      return err
+  - page: home
+  - gdscript: *clear

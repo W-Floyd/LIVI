@@ -414,6 +414,13 @@ first does nothing, and a drag off the rail puts it back. With the rail docked, 
 rail" lists every item, one the rail hides (Phone, with no phone) dimmed with why, each moved by
 its arrows, and "Reset order". Scenario `nav-rail`.
 
+The docked rail's order is the look's too (`rail_order`, item ids top first; unknown ids are
+dropped and missing ones follow in the default order). On the rail, a press held still for 400 ms
+lifts an item, the others make room as it is dragged, and the release drops it; a press that moves
+first does nothing, and a drag off the rail puts it back. With the rail docked, Look's "Navigation
+rail" lists every item, one the rail hides (Phone, with no phone) dimmed with why, each moved by
+its arrows, and "Reset order". Scenario `nav-rail`.
+
 The look resolved is also written, on every change, to `tokens.json` beside `look.json`: the
 contract for apps the shell hosts (godot-maps), so they need not read theme files. It holds
 `version` (1), the look's choices (`theme_name`, `appearance` resolved to day or night, `hand`,

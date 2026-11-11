@@ -4,6 +4,8 @@ extends Node
 ## Emits `changed` after any change; components restyle themselves then.
 
 signal changed
+## `rail_order` changed (`set_rail_order`), with no restyle.
+signal rail_order_changed
 
 ## The G5W's center panel. Sizes in a theme are physical; this turns them into pixels.
 const PANEL := {w = 1920, h = 720, diag_in = 12.3}
@@ -28,9 +30,10 @@ var ev_page := "auto"          # auto | image | live: which "Electric vehicle" p
 var app_scale := 0             # launched apps' scale in percent; 0: the panel's (Launcher.auto_scale)
 var app_scales := {}           # app id -> percent, over apps.yaml's `scale` and app_scale
 var app_window_modes := {}     # app id -> maximized | fullscreen, over apps.yaml's `window`; maximized by default
+var rail_order := []           # the rail's item ids, top first, as saved (NavRail.ordered reads it); []: its default
 
 ## The driver's choices that `save_look` keeps; `look_file` is where ("" keeps nothing: tests).
-const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "home_phone", "home_split", "status_position", "app_scale", "app_scales", "app_window_modes"]
+const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "home_phone", "home_split", "status_position", "app_scale", "app_scales", "app_window_modes", "rail_order"]
 var look_file := ""
 ## The resolved look for apps the shell hosts, rewritten on every change (`write_tokens`); "" writes
 ## none. Beside `look_file`.
@@ -102,7 +105,7 @@ func load_look(file: String) -> void:
 		return
 	var look := {}
 	for k in SAVED:
-		if saved.has(k) and not (k == "theme_name" and not has_theme(str(saved[k]))):
+		if saved.has(k) and not (k == "theme_name" and not has_theme(str(saved[k]))) and not (k == "rail_order" and not saved[k] is Array):
 			look[k] = saved[k]
 	set_look(look)
 
@@ -119,6 +122,13 @@ func save_look() -> void:
 		push_error("look: cannot write %s" % look_file)
 		return
 	f.store_string(JSON.stringify(look, "  "))
+
+
+## Reorders the rail and saves it; nothing else restyles.
+func set_rail_order(ids: Array) -> void:
+	rail_order = ids.duplicate()
+	save_look()
+	rail_order_changed.emit()
 
 
 ## Built-in themes, then the packs installed, by name.
@@ -162,7 +172,7 @@ func defaults() -> void:
 	# Scenarios and the live tuner get a fixed look: the core's night (a fake core's default) does
 	# not repaint them. A theme step with appearance_mode "auto" opts back in.
 	appearance_mode = "day"
-	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto", volume_style = "card", home_phone = true, home_split = 0.0, status_position = "top", app_scale = 0, app_scales = {}, app_window_modes = {}})
+	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto", volume_style = "card", home_phone = true, home_split = 0.0, status_position = "top", app_scale = 0, app_scales = {}, app_window_modes = {}, rail_order = []})
 
 
 ## The "Electric vehicle" page `ev` stands for: the look's choice, else the theme's own

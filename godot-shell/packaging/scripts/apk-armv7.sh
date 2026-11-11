@@ -19,7 +19,7 @@ adduser -D -G abuild b && echo "b ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 su -l b -c "abuild-keygen -a -n" >/dev/null 2>&1; cp /home/b/.config/abuild/*.pub /etc/apk/keys/
 for p in $PKGS; do
     w=/home/b/$p; mkdir -p $w
-    cp /out/aports/$p/APKBUILD /out/aports/$p/livi-shell* $w/ 2>/dev/null || cp /out/aports/$p/APKBUILD $w/
+    for f in /out/aports/$p/*; do case $f in *.tar.gz) ;; *) cp $f $w/ ;; esac; done
     chown -R b $w
     cat >> $w/APKBUILD <<EOT
 

@@ -21,7 +21,7 @@ func _init() -> void:
 func _ready() -> void:
 	ThemeManager.changed.connect(_build)
 	Core.welcome.connect(func(_v): _bind())
-	Core.changed.connect(func(_s): _bind())
+	Core.changed.connect(_on_core_changed)
 	_build()
 
 
@@ -158,6 +158,26 @@ func _text_view(v: Dictionary, mode: String) -> PackText:
 
 ## Battery, range and the next charger come from the core; a value the core lacks stays as
 ## the pack has it.
+## One bind a frame, and only for what it reads: a phone session changes the track and the route
+## many times a second.
+var _bind_queued := false
+
+
+func _on_core_changed(sections: PackedStringArray) -> void:
+	if _bind_queued:
+		return
+	for s in sections:
+		if s == "telemetry" or s == "navigation":
+			_bind_queued = true
+			_bind_now.call_deferred()
+			return
+
+
+func _bind_now() -> void:
+	_bind_queued = false
+	_bind()
+
+
 func _bind() -> void:
 	if _nodes.is_empty():
 		return

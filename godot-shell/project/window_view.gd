@@ -10,6 +10,9 @@ var window_id := -1:
 		texture = Wayland.texture(v) if v >= 0 else null
 
 var _pointer_inside := false
+## The window is projection video: touches go to the phone through the core, as points over the
+## view (the projection area) from 0 to 1, not to the window, which takes no input.
+var to_core := false
 
 
 func _init() -> void:
@@ -33,6 +36,9 @@ func to_surface(local: Vector2) -> Variant:
 
 func _gui_input(event: InputEvent) -> void:
 	if window_id < 0:
+		return
+	if to_core:
+		_core_input(event)
 		return
 	# Touch arrives twice when Godot emulates the mouse from it; the touch is what counts.
 	if event is InputEventMouse and event.device == InputEvent.DEVICE_ID_EMULATION:
@@ -62,6 +68,36 @@ func _gui_input(event: InputEvent) -> void:
 	else:
 		return
 	accept_event()
+
+
+## Touches when they reach the view; else the mouse, as one finger (a mouse in the VM, or touch
+## that only arrives as Godot's emulated mouse).
+var _touch_seen := false
+
+
+func _core_input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch:
+		_touch_seen = true
+		_to_core(event.index, event.position, "cancel" if event.canceled else "down" if event.pressed else "up")
+	elif event is InputEventScreenDrag:
+		_touch_seen = true
+		_to_core(event.index, event.position, "move")
+	elif _touch_seen:
+		return
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		_to_core(0, event.position, "down" if event.pressed else "up")
+	elif event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+		_to_core(0, event.position, "move")
+	else:
+		return
+	accept_event()
+
+
+func _to_core(index: int, at: Vector2, phase: String) -> void:
+	var p: Vector2 = (at / size).clamp(Vector2.ZERO, Vector2.ONE)
+	var err: String = Core.input({kind = "pointer", screen = "main", points = [{id = index, x = p.x, y = p.y, phase = phase}]})
+	if err != "":
+		push_warning("projection touch: %s" % err)
 
 
 func _move(local: Vector2) -> void:

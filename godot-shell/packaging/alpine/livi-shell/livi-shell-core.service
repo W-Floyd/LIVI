@@ -13,7 +13,7 @@ EnvironmentFile=-/etc/livi-shell.conf
 Environment=XDG_RUNTIME_DIR=/run/livi-shell LIVI_NO_UI=1 WAYLAND_DISPLAY=livi-shell
 Environment=LIVI_CORE_SOCKET=/run/livi-shell/livi/core.sock
 ExecStart=/usr/bin/livi-core
-Restart=on-failure
+Restart=always
 RestartSec=2
 
 [Install]

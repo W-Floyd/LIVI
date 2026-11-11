@@ -61,6 +61,8 @@ func _draw() -> void:
 	_tag.position.y = h - _tag.get_minimum_size().y - ThemeManager.px.gap * 2
 
 
-func show_window(id: int) -> void:
+## `projection`: the window is the phone's video, whose input goes to the phone through the core.
+func show_window(id: int, projection := false) -> void:
 	window.window_id = id
+	window.to_core = projection
 	_style()

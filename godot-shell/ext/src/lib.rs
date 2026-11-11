@@ -98,6 +98,16 @@ impl CoreLink {
         self.start(stream)
     }
 
+    /// One attempt at the core's default socket, without waiting: for retrying from the main
+    /// loop while the core is down or restarting.
+    #[func]
+    fn try_connect_core(&mut self) -> GString {
+        match std::os::unix::net::UnixStream::connect(livi_core_client::socket_path()) {
+            Ok(stream) => self.start(stream),
+            Err(e) => gs(e.to_string()),
+        }
+    }
+
     /// Starts an in-process fake core with `fixture` (a partial state) and waits for its welcome.
     #[func]
     fn start_fake(&mut self, fixture: Variant) -> GString {

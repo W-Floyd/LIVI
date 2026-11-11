@@ -16,9 +16,12 @@ extends Control
 ## A tap on the "Electric vehicle" page's targets (`next_departure`, `scheduled`, `v2l`,
 ## `settings`). The core has no action for any of them yet.
 signal ev_action(id: String)
+## The page now showing, as `open_page` resolved it (`ev` is `ev_live` or `ev_main`).
+signal page_changed(page: String)
 
 ## Mapped windows, oldest first; the newest is shown until the window layouts land.
 var _windows: Array[int] = []
+var _app_ids := {}
 
 ## Side panel items, most important first. When they don't all fit, the panel drops items
 ## from the end, whole: never smaller text, never a half-shown card.
@@ -79,12 +82,12 @@ func _ready() -> void:
 	theme = ThemeManager.godot_theme
 	ThemeManager.changed.connect(_style)
 	Core.welcome.connect(func(_v): _refresh())
-	Core.changed.connect(func(_s): _refresh())
+	Core.changed.connect(_on_core_changed)
 	_precondition.icon_name = "therm"
 	_precondition.pressed.connect(_on_precondition)
 	_player.control.connect(func(c): Core.act({kind = "media", control = c}))
-	Wayland.window_mapped.connect(func(id, _app_id, _title): _windows.append(id); _show_app())
-	Wayland.window_unmapped.connect(func(id): _windows.erase(id); _show_app())
+	Wayland.window_mapped.connect(func(id, app_id, title): print("window %d mapped: app_id \"%s\" title \"%s\"" % [id, app_id, title]); _windows.append(id); _app_ids[id] = app_id; _show_app())
+	Wayland.window_unmapped.connect(func(id): _windows.erase(id); _app_ids.erase(id); _show_app())
 	_style()
 	_refresh()
 
@@ -171,7 +174,22 @@ func open_page(page: String) -> String:
 		_page.screen_name = page
 		add_child(_page)
 	queue_redraw()
+	page_changed.emit(page)
 	return ""
+
+
+
+## Draws the live page's 3D scene once into a tiny viewport, so its shaders are compiled before
+## the first visit: on the unit's GPU that is seconds, and it would otherwise stall the first tap.
+func warm_up() -> void:
+	var vp := SubViewport.new()
+	vp.size = Vector2i(96, 54)
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	vp.add_child(EvScene.new())
+	add_child(vp)
+	for i in 3:
+		await RenderingServer.frame_post_draw
+	vp.queue_free()
 
 
 ## Whether the active pack draws the live page's title bar itself: it has the stock layout.
@@ -212,10 +230,33 @@ func _fit() -> void:
 
 
 func _show_app() -> void:
-	_projection.show_window(_windows[-1] if not _windows.is_empty() else -1)
+	var id: int = _windows[-1] if not _windows.is_empty() else -1
+	# livi-gst-host names its video windows livi-video; their touches are the phone's.
+	_projection.show_window(id, id >= 0 and str(_app_ids.get(id, "")).begins_with("livi-video"))
 
 
-func _refresh() -> void:
+## Sections changed since the last refresh. A phone session changes the track, with its artwork,
+## and the route several times a second; one refresh a frame, of what changed, keeps the unit's
+## CPU for drawing.
+var _dirty := {}
+
+
+func _on_core_changed(sections: PackedStringArray) -> void:
+	var first := _dirty.is_empty()
+	for s in sections:
+		_dirty[s] = true
+	if first:
+		_refresh_dirty.call_deferred()
+
+
+func _refresh_dirty() -> void:
+	var d := _dirty
+	_dirty = {}
+	_refresh(d)
+
+
+## `sections` are the changed ones; empty means all.
+func _refresh(sections := {}) -> void:
 	var t := func(p: String): return Core.get_value("/telemetry/" + p)
 	# fuelPct is the charge for an electric car and the tank otherwise.
 	var power := _powertrain()
@@ -249,7 +290,7 @@ func _refresh() -> void:
 			stop.arrivalPct = stop.arrivalWh / (cap * 10.0)
 		_stop.stop = stop
 
-	var np = Core.get_value("/nowPlaying")
+	var np = Core.get_value("/nowPlaying") if sections.is_empty() or sections.has("nowPlaying") else null
 	if np is Dictionary and np.get("title"):
 		_player.title = np.title
 		_player.subtitle = " · ".join([np.get("artist", ""), np.get("album", "")].filter(func(s): return s))

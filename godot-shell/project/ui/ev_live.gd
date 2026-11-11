@@ -121,7 +121,7 @@ func _ready() -> void:
 	add_child(_settings)
 	ThemeManager.changed.connect(_restyle)
 	Core.welcome.connect(func(_v): _bind())
-	Core.changed.connect(func(_s): _bind())
+	Core.changed.connect(_on_core_changed)
 	resized.connect(_layout)
 	_restyle()
 
@@ -362,6 +362,27 @@ func _badges() -> Array:
 
 
 # ---- data ----
+
+## The sections `_bind` reads. A phone session changes the others (track, route) many times a
+## second, and each bind is a layout pass: one per frame, only for these.
+const BOUND := ["telemetry", "navigation"]
+var _bind_queued := false
+
+
+func _on_core_changed(sections: PackedStringArray) -> void:
+	if _bind_queued:
+		return
+	for s in sections:
+		if s in BOUND:
+			_bind_queued = true
+			_bind_now.call_deferred()
+			return
+
+
+func _bind_now() -> void:
+	_bind_queued = false
+	_bind()
+
 
 func _bind() -> void:
 	if _scene == null or _title == null:

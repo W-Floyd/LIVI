@@ -3,6 +3,7 @@ class_name Icons
 ## stay sharp at any density. White; tint with `modulate` or a Button's icon colors.
 
 const PATHS := {
+	home = "M12 3 2 12h3v9h5v-6h4v6h5v-9h3z",
 	bolt = "M13 2 4 14h7l-1 8 9-12h-7z",
 	fuel = "M4 3h10v18H4zm2 2v5h6V5zM15 7l1.4-1.4 3.1 3.1V18a2 2 0 0 1-4 0v-4h-1v-2h1a2 2 0 0 1 2 2v4h0V9.5z",
 	play = "M8 5v14l11-7z",

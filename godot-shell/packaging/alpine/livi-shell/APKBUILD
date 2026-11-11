@@ -55,6 +55,7 @@ source="
 	livi-shell.conf
 	livi-shell.service
 	livi-shell-core.service
+	seatd.service
 	livi-shell.initd
 	livi-shell-core.initd
 	"
@@ -128,6 +129,9 @@ systemd() {
 		"$subpkgdir"/usr/lib/systemd/system/livi-shell.service
 	install -Dm644 "$srcdir"/livi-shell-core.service \
 		"$subpkgdir"/usr/lib/systemd/system/livi-shell-core.service
+	# Alpine's seatd ships the daemon and no unit.
+	install -Dm644 "$srcdir"/seatd.service \
+		"$subpkgdir"/usr/lib/systemd/system/seatd.service
 	# Not enabled by default: it takes the display from the desktop session, so
 	# `systemctl enable --now livi-shell` is the user's choice.
 }

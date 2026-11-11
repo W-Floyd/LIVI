@@ -111,8 +111,10 @@ package() {
 	install -Dm755 "$_r"/livi-helperd "$_d"/resources/driver/livi-helperd
 	install -Dm755 "$_r"/livi-gst-host "$_d"/resources/gst-host/livi-gst-host
 	install -Dm644 "$builddir"/../LICENSE "$builddir"/../NOTICE -t "$_d"/resources/
-	install -Dm644 "$builddir"/../assets/linux/99-LIVI.rules.template \
-		"$_d"/resources/99-LIVI.rules.template
+	# The core installs the udev rule, the wireless-projection AP unit and its sudoers from these.
+	for _t in 99-LIVI.rules.template 99-LIVI-wifi-ap.sudoers.template livi-wifi-ap.service.template; do
+		install -Dm644 "$builddir"/../assets/linux/$_t "$_d"/resources/$_t
+	done
 
 	# livi-core starts the helper with `sudo -n -E`; the helper's settings come in LIVI_*
 	# variables, and sudo-rs ignores -E: without env_keep the helper runs on its defaults.

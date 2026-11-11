@@ -1,7 +1,8 @@
 name: home-phone-toggle
-# With a phone connected, a button between home's slot and the cards hides the phone's picture
-# (Look → Phone on home) and, from the filled layout, shows it again; never over the slot, which
-# is the phone's. No phone, no button.
+# With a phone connected, a split handle in the gutter between home's slot and the cards (a slim
+# pill, no column of its own) hides the phone's picture (Look → Phone on home) on a tap or a swipe
+# toward the cards, and shows it again on a tap or a swipe toward the slot's side from a tab at
+# the content's edge. Its target is a full touch size laid over both. No phone, no handle.
 clock: 2026-11-09T08:30:00
 fixtures:
   core: fixtures/parked.json
@@ -13,40 +14,109 @@ steps:
   - wait: { window: livi-video-main }
   - wait: { frames: 2 }
   - gdscript: &clear |
-      var b: Button = shell.get_node("Page/Body/Handle/PhoneToggle")
+      var h: Control = shell.get_node("Page/PhoneHandle")
+      var p: Rect2 = shell.get_node("Page/PhoneHandle/Pill").get_global_rect()
+      var content: Rect2 = shell.get_node("Page/Body").get_global_rect()
       var slot: Rect2 = shell.get_node("Page/Body/Slot").get_global_rect()
+      var side: Rect2 = shell.get_node("Page/Body/Side").get_global_rect()
       var cards: Rect2 = shell.get_node("Page/Body/Side/Panel").get_global_rect()
-      var r := b.get_global_rect()
-      if not b.is_visible_in_tree() or minf(r.size.x, r.size.y) < ThemeManager.px.touch - 0.5:
-          return "the toggle at %s, visible %s" % [r, b.is_visible_in_tree()]
-      if r.intersects(slot) or r.intersects(cards) or r.end.x > shell.size.x or r.position.x < 0.0:
-          return "the toggle at %s meets the slot %s or the cards %s" % [r, slot, cards]
+      var r := h.get_global_rect()
+      if not h.is_visible_in_tree() or minf(r.size.x, r.size.y) < ThemeManager.px.touch - 0.5:
+          return "the handle's target at %s, visible %s" % [r, h.is_visible_in_tree()]
+      if not r.encloses(p) or not content.encloses(r):
+          return "the target %s, the pill %s, the content %s" % [r, p, content]
+      if absf(slot.size.x + side.size.x - content.size.x) > 0.5:
+          return "a column beside the slot %s and the side %s in %s" % [slot, side, content]
+      if p.size.x > 16.0 or p.size.y < ThemeManager.px.touch * 0.6 or absf(p.get_center().y - content.get_center().y) > 1.0:
+          return "the pill at %s in %s" % [p, content]
+      if p.intersects(cards) or p.intersects(slot):
+          return "the pill %s meets the slot %s or the cards %s" % [p, slot, cards]
+      if not ThemeManager.home_phone:
+          var off := content.end.x - p.end.x if ThemeManager.side_left() else p.position.x - content.position.x
+          if absf(off) > 0.5 or slot.size.x > 0.5:
+              return "hidden: the tab at %s, not at the edge of %s (slot %s)" % [p, content, slot]
+      elif slot.size.x < 600.0:
+          return "shown: the slot %s" % slot
   - expect_node: { path: Page/Body/Slot, visible: true }
-  - gdscript: |
-      if shell.get_node("Page/Body/Slot").size.x < 600.0 or not ThemeManager.home_phone:
-          return "no picture in the slot"
   - screenshot: { name: home-phone-toggle-shown, tolerance: 8 }
-  - tap: { node: Page/Body/Handle/PhoneToggle }
+  - tap: { node: Page/PhoneHandle }
   - wait: { frames: 2 }
   - gdscript: |
       if ThemeManager.home_phone or shell.get_node("Page/Body/Slot").size.x > 0.5 or shell._projection.visible:
           return "the picture is still on home (slot %s)" % shell.get_node("Page/Body/Slot").size
   - gdscript: *clear
   - screenshot: home-phone-toggle-hidden
-  - tap: { node: Page/Body/Handle/PhoneToggle }
+  - tap: { node: Page/PhoneHandle }
   - wait: { frames: 2 }
-  - gdscript: |
-      if not ThemeManager.home_phone or shell.get_node("Page/Body/Slot").size.x < 600.0:
-          return "the picture did not come back"
-  # The driver's side: the cards and the toggle move over, the toggle still beside the slot.
+  - gdscript: *clear
+  # Taps and swipes from each state: [gesture, shown before, shown after]. A swipe toward where
+  # the phone already is, or up the handle, changes nothing.
+  - gdscript: &gestures |
+      for row in [["tap", true, false], ["tap", false, true], ["cards", true, false], ["slot", false, true],
+              ["slot", true, true], ["cards", false, false], ["up", true, true], ["up", false, false]]:
+          ThemeManager.set_look({home_phone = row[1]})
+          await runner.frames(2)
+          var at: Vector2 = shell.get_node("Page/PhoneHandle/Pill").get_global_rect().get_center()
+          var x := -1.0 if ThemeManager.side_left() == (row[0] == "cards") else 1.0
+          var d: Vector2 = {tap = Vector2.ZERO, up = Vector2(0.0, -1.0)}.get(row[0], Vector2(x, 0.0)) * ThemeManager.px.touch * 1.5
+          for i in 6:
+              var m := InputEventMouseMotion.new()
+              m.position = at + d * (i / 5.0)
+              m.button_mask = MOUSE_BUTTON_MASK_LEFT if i > 0 else 0
+              runner._vp.push_input(m)
+              if i == 0 or i == 5:
+                  var b := InputEventMouseButton.new()
+                  b.position = m.position
+                  b.button_index = MOUSE_BUTTON_LEFT
+                  b.pressed = i == 0
+                  b.button_mask = MOUSE_BUTTON_MASK_LEFT if i == 0 else 0
+                  runner._vp.push_input(b)
+              await runner.frames(1)
+          await runner.frames(2)
+          if ThemeManager.home_phone != row[2]:
+              return "%s with the phone %s: shown %s (%s)" % [row[0], "shown" if row[1] else "hidden", ThemeManager.home_phone, ThemeManager.hand]
+      ThemeManager.set_look({home_phone = true})
+      await runner.frames(2)
+  # Every edge of the status bar, and none.
+  - theme: { status_position: left }
+  - gdscript: *clear
+  - theme: { status_position: right }
+  - gdscript: *clear
+  - theme: { status_position: bottom }
+  - gdscript: *clear
+  - theme: { status_position: off }
+  - gdscript: *clear
+  - theme: { home_phone: false }
+  - gdscript: *clear
+  - theme: { status_position: left }
+  - gdscript: *clear
+  - theme: { status_position: top, home_phone: true }
+  - gdscript: *clear
+  # The driver's side: the cards and the handle move over, the gestures mirrored.
   - theme: { hand: rhd }
   - wait: { frames: 2 }
   - gdscript: *clear
+  - gdscript: *gestures
   - theme: { home_phone: false }
   - wait: { frames: 2 }
   - gdscript: *clear
   - screenshot: home-phone-toggle-hidden-rhd
-  # The phone gone: no toggle.
+  - theme: { status_position: right }
+  - gdscript: *clear
+  - theme: { status_position: top }
+  # Night, glass, and a scene theme's slab behind the pill.
+  - theme: { home_phone: true, appearance: night }
+  - gdscript: *clear
+  - screenshot: home-phone-toggle-shown-night-rhd
+  - theme: { material: glass }
+  - gdscript: *clear
+  - theme: { material: solid, theme_name: studio }
+  - gdscript: *clear
+  - gdscript: |
+      var pill: Control = shell.get_node("Page/PhoneHandle/Pill")
+      if not shell._scene or not pill in shell._scene.surfaces:
+          return "no slab for the pill"
+  # The phone gone: no handle.
   - gdscript: |
       for pid in runner._clients:
           OS.kill(pid)
@@ -55,5 +125,5 @@ steps:
               break
           await runner.frames(1)
       await runner.frames(2)
-      if shell.get_node("Page/Body/Handle").visible:
-          return "the toggle shows with no phone"
+      if shell.get_node("Page/PhoneHandle").visible:
+          return "the handle shows with no phone"

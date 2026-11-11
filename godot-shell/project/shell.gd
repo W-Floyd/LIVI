@@ -8,8 +8,7 @@ extends Control
 @onready var _slot: Control = $Page/Body/Slot
 @onready var _projection: ProjectionView = $Projection
 @onready var _side: MarginContainer = $Page/Body/Side
-@onready var _handle: MarginContainer = $Page/Body/Handle
-@onready var _phone_toggle: Button = $Page/Body/Handle/PhoneToggle
+@onready var _handle: PhoneHandle = $Page/PhoneHandle
 @onready var _stat: StatTile = $Page/Body/Side/Panel/Stat
 @onready var _precondition: ToggleRow = $Page/Body/Side/Panel/Precondition
 @onready var _stop: StopCard = $Page/Body/Side/Panel/Stop
@@ -104,18 +103,6 @@ func _init() -> void:
 	slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	slot.resized.connect(_place_projection)
 	body.add_child(slot)
-	# Between the slot and the cards, while a phone is connected: hides or shows its picture.
-	var handle := MarginContainer.new()
-	handle.name = "Handle"
-	handle.visible = false
-	var toggle := Button.new()
-	toggle.name = "PhoneToggle"
-	toggle.focus_mode = Control.FOCUS_NONE
-	toggle.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	toggle.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	toggle.pressed.connect(func(): ThemeManager.set_look({home_phone = not ThemeManager.home_phone}))
-	handle.add_child(toggle)
-	body.add_child(handle)
 	var side := MarginContainer.new()
 	side.name = "Side"
 	side.clip_contents = true
@@ -128,6 +115,13 @@ func _init() -> void:
 	side.add_child(panel)
 	body.add_child(side)
 	page.add_child(body)
+	# In the gutter between the slot and the cards, over the body, while a phone is connected.
+	var handle := PhoneHandle.new()
+	handle.name = "PhoneHandle"
+	handle.visible = false
+	handle.chose.connect(func(show): if show != ThemeManager.home_phone: ThemeManager.set_look({home_phone = show}))
+	body.sort_children.connect(_place_handle)
+	page.add_child(handle)
 	add_child(page)
 	launcher = Launcher.new()
 	launcher.name = "Launcher"
@@ -191,7 +185,7 @@ func _style() -> void:
 	if ThemeManager.is_scene() and _scene == null:
 		_scene = SceneSkin.new()
 		_scene.name = "Scene"
-		_scene.surfaces = [_status, _stat, _precondition, _stop, _player, _phone_toggle]
+		_scene.surfaces = [_status, _stat, _precondition, _stop, _player, _handle.pill]
 		add_child(_scene)
 		move_child(_scene, 0)
 	elif not ThemeManager.is_scene() and _scene != null:
@@ -209,15 +203,11 @@ func _style() -> void:
 	cards.gap = roundi(g * 1.5)
 	cards.column = ThemeManager.px.side - roundi(g * 1.5) * 2
 	cards.column_left = ThemeManager.side_left()
-	_body.move_child(_side, 0 if ThemeManager.side_left() else 2)
-	_body.move_child(_handle, 1)
-	# Its gap to the slot is the cards' to it.
-	_handle.add_theme_constant_override("margin_top", roundi(g * 1.5))
-	_handle.add_theme_constant_override("margin_left", 0 if ThemeManager.side_left() else roundi(g * 1.5))
-	_handle.add_theme_constant_override("margin_right", roundi(g * 1.5) if ThemeManager.side_left() else 0)
-	_phone_toggle.custom_minimum_size = Vector2.ONE * ThemeManager.px.touch
-	_style_toggle()
+	_body.move_child(_side, 0 if ThemeManager.side_left() else 1)
+	_handle.cards_left = ThemeManager.side_left()
+	_handle.tooltip_text = "Hide the phone" if ThemeManager.home_phone else "Show the phone"
 	_set_split(_split)
+	_place_handle.call_deferred()
 	# The page passes input through where the projection shows.
 	$Page.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -581,6 +571,7 @@ func _update_split() -> void:
 		_phone_present = present
 		_handle.visible = present
 		_set_split(_split)
+		_place_handle.call_deferred()
 		phone_changed.emit(present)
 	# The driver can keep home to the cards while a phone is connected (Look → Phone on home).
 	var want := 0.0 if present and ThemeManager.home_phone else 1.0
@@ -604,9 +595,9 @@ func _update_split() -> void:
 
 func _set_split(v: float) -> void:
 	_split = v
-	var handle := _handle.get_combined_minimum_size().x if _handle.visible else 0.0
-	_side.custom_minimum_size.x = lerpf(ThemeManager.px.side, _rect_beside_status().size.x - handle, v)
+	_side.custom_minimum_size.x = lerpf(ThemeManager.px.side, _rect_beside_status().size.x, v)
 	(_side.get_node("Panel") as HomeCards).wide = v
+	_place_handle()
 
 
 func _split_settled() -> void:
@@ -619,11 +610,29 @@ func _split_settled() -> void:
 	_place_next_frame()
 
 
-## Hide while the picture is in the slot, show while it is not.
-func _style_toggle() -> void:
-	var shown := ThemeManager.home_phone
-	_phone_toggle.icon = Icons.texture("eye_off" if shown else "phone", ThemeManager.px.icon)
-	_phone_toggle.tooltip_text = "Hide the phone" if shown else "Show the phone"
+## The handle's pill centred in the side's margin toward the slot (the gutter, as wide as the
+## cards' own margin), becoming a tab against the content's edge as the slot closes. Its target
+## overlaps the slot and the cards rather than taking width from either.
+func _place_handle() -> void:
+	if _handle == null or not _handle.visible:
+		return
+	var touch: float = ThemeManager.px.touch
+	var left := ThemeManager.side_left()
+	var content := _body.get_global_rect()
+	var side := _side.get_global_rect()
+	var m := float(_side.get_theme_constant("margin_right" if left else "margin_left"))
+	var t := clampf(_split, 0.0, 1.0)
+	var pw := maxf(4.0, roundf(touch * 0.065))
+	var tw := maxf(pw, roundf(m * 0.45))
+	var w := roundf(lerpf(pw, tw, t))
+	var gutter := side.end.x - m if left else side.position.x
+	var edge := content.end.x - tw if left else content.position.x
+	var x := roundf(lerpf(gutter + (m - pw) / 2.0, edge + (tw - w if left else 0.0), t))
+	var h := roundf(touch * 0.8)
+	var pill := Rect2(x, roundf(content.get_center().y - h / 2.0), w, h)
+	_handle.pill.tab = t
+	_handle.pill.edge_left = not left
+	_handle.place(pill, touch, content)
 
 
 ## A projection video window (Android Auto or CarPlay streaming) is mapped.

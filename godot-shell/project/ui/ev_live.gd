@@ -6,7 +6,7 @@ extends Control
 ## `ev_main` screen it supplies the title bar, the strings, the type and the rectangles of the
 ## title and the tap targets, which the stock UI sets.
 ##
-## Nothing in the core backs the tap targets yet, so they only emit `tile_pressed`.
+## The tap targets emit `tile_pressed` and open the EV settings (EvSettings) at their section.
 
 signal tile_pressed(id: String)
 ## The bar's back button.
@@ -18,6 +18,8 @@ const RANGE_OFF_PATH := "/telemetry/rangeClimateOffKm"
 ## A climate LIVI filled in itself, not one a car or program reported.
 const CLIMATE_UNREPORTED := ["default", "saved"]
 const TILES := ["next_departure", "scheduled", "v2l"]
+## The EV settings' section each tap target opens.
+const SETTINGS_SECTIONS := {settings = "charging", next_departure = "schedule", scheduled = "schedule", v2l = "power"}
 
 ## English defaults; a pack's screen overrides them where it has the string.
 const STRINGS := {
@@ -77,6 +79,8 @@ var _settings: EvTile
 ## What is open, the 12 V battery, the climate and battery heater; and while plugged in, charging.
 var _car_status: CarStatus
 var _charge_card: ChargeCard
+## The EV settings, over the page: the gear opens them, the schedule's tiles at the schedule.
+var _ev_settings: EvSettings
 var _bound := false
 ## A look changed while the page was not showing.
 var _restyle_due := false
@@ -136,6 +140,10 @@ func _ready() -> void:
 	_settings.id = "settings"
 	_settings.activated.connect(func(i): tile_pressed.emit(i))
 	add_child(_settings)
+	for t in _tiles.values() + [_settings]:
+		(t as EvTile).activated.connect(_open_settings)
+	_ev_settings = EvSettings.new()
+	add_child(_ev_settings)
 	ThemeManager.changed.connect(_restyle)
 	Core.welcome.connect(func(_v): _bind())
 	Core.changed.connect(_on_core_changed)
@@ -157,6 +165,12 @@ func _notification(what: int) -> void:
 			_bind()
 	elif what == NOTIFICATION_EXIT_TREE:
 		_bound = false
+		if _ev_settings:
+			_ev_settings.close()
+
+
+func _open_settings(id: String) -> void:
+	_ev_settings.open(SETTINGS_SECTIONS.get(id, "charging"))
 
 
 ## Hides or shows the page's labels and tap targets, leaving the scene and the bar.
@@ -521,6 +535,7 @@ func _layout() -> void:
 	# would not place its buttons): the visit lays out once they are.
 	if _title == null or not _bar.is_inside_tree():
 		return
+	_ev_settings.offset_top = top_inset
 	var px := ThemeManager.px
 	var gap: float = px.gap
 	var w := size.x

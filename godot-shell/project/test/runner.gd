@@ -145,6 +145,8 @@ func _run_one(path: String) -> String:
 	# Each scenario starts from the default look, then its own `theme:`.
 	ThemeManager.defaults()
 	Drive.reset()
+	EvSettingsLink.fake = false
+	EvSettingsLink.written.clear()
 	var look: Dictionary = sc.get("theme", {})
 	if sc.has("appearance"):
 		look.appearance = sc.appearance

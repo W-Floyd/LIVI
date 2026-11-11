@@ -1,6 +1,6 @@
 name: ev-live-taps
-# Taps on the live page's targets say which was tapped. The core has no action behind any of
-# them yet, so the page only emits `ev_action`.
+# Taps on the live page's targets say which was tapped (`ev_action`) and open the EV settings
+# over the page at their section; its back button closes them.
 fixtures:
   core: fixtures/ev6-main.json
 theme: { theme_name: calm, appearance: day }
@@ -10,9 +10,18 @@ steps:
       shell.set_meta("taps", [])
       shell.ev_action.connect(func(id): shell.get_meta("taps").append(id))
   - tap: { node: EvLive/next_departure }
+  - expect_node: { path: EvLive/EvSettings, visible: "true", section: schedule }
+  - tap: { node: EvLive/EvSettings/Back }
+  - expect_node: { path: EvLive/EvSettings, visible: "false" }
   - tap: { node: EvLive/scheduled, with: touch }
+  - expect_node: { path: EvLive/EvSettings, visible: "true", section: schedule }
+  - tap: { node: EvLive/EvSettings/Back, with: touch }
   - tap: { node: EvLive/v2l }
+  - expect_node: { path: EvLive/EvSettings, visible: "true", section: power }
+  - tap: { node: EvLive/EvSettings/Back }
   - tap: { node: EvLive/Settings, with: touch }
+  - expect_node: { path: EvLive/EvSettings, visible: "true", section: charging }
+  - tap: { node: EvLive/EvSettings/Back }
   - gdscript: |
       var taps: Array = shell.get_meta("taps")
       if taps != ["next_departure", "scheduled", "v2l", "settings"]:
@@ -33,3 +42,83 @@ steps:
   - gdscript: |
       if shell.get_meta("taps").size() != 4:
           return "a tap on the scene was taken as a target"
+  # The EV settings show the car's values where the car link reports them, read only where LIVI
+  # has no path to set them, unavailable where it has neither (docs/ev-settings.md); LIVI's battery
+  # conditioning request and its route setting work.
+  - set: { core: { telemetry: { chargeLimitAcPct: 90, chargeLimitDcPct: 100 } } }
+  - tap: { node: EvLive/Settings }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Value, text: 90 % }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Plus, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Text/Detail, text: "Read only: LIVI cannot set this on the car yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_dc/Lines/Line/Stepper/Value, text: 100 % }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Text/Detail, text: "Not available: LIVI cannot read or set this yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/max, disabled: true }
+  - screenshot: ev-settings-charging
+  - tap: { node: EvLive/EvSettings/Sections/List/schedule }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Switch, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Days/Sat, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/Start/Hour/Plus, disabled: true }
+  - screenshot: ev-settings-schedule
+  - tap: { node: EvLive/EvSettings/Sections/List/battery }
+  - tap: { node: EvLive/EvSettings/Rows/List/battery_conditioning/Lines/Line/Switch }
+  - expect_action: { PreconditionBattery: { on: true } }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/battery_conditioning/Lines/Line/Switch, button_pressed: false }
+  - set: { core: { precondition: { manualUntil: 1794213000 }, telemetry: { batteryConditioningMode: "on" } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/battery_conditioning/Lines/Line/Switch, button_pressed: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/battery_conditioning/Lines/Line/Text/Detail, text: "The car's mode: on" }
+  - set: { core: { telemetry: { batteryConditioningError: 2 } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/battery_conditioning/Lines/Line/Text/Detail, text: "The car: battery already at temperature" }
+  - tap: { node: EvLive/EvSettings/Rows/List/route_precondition/Lines/Line/Switch, with: touch }
+  - expect_action: { SetConfig: { patch: { batteryPreconditioning: "off" } } }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/winter_mode/Lines/Line/Switch, disabled: true }
+  - screenshot: ev-settings-battery
+  - set: { core: { config: { batteryPreconditioning: "off" }, precondition: { manualUntil: null } } }
+  - wait: { frames: 2 }
+  # Off in LIVI is off for the request too.
+  - expect_node: { path: EvLive/EvSettings/Rows/List/battery_conditioning/Lines/Line/Switch, disabled: true }
+  - tap: { node: EvLive/EvSettings/Sections/List/power }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/utility_mode/Lines/Line/Act, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/v2l_limit/Lines/Line/Stepper/Value, text: – }
+  # Once the car link has a path (EvSettingsLink.fake stands in): what each control sends. A set
+  # goes leaf by leaf: the objects first.
+  - set: { core: { telemetry: { departure1: {}, offPeak: {} } } }
+  - set: { core: { telemetry: { acChargingCurrent: max, v2lDischargeLimitPct: 30, utilityMode: false, offPeakMode: priority, scheduledClimateC: 21.5,
+      departure1: { "on": true, hour: 23, minute: 50, days: [true, true, true, true, true, false, false] },
+      offPeak: { start_hour: 22, start_minute: 0, end_hour: 6, end_minute: 0 } } } }
+  - gdscript: |
+      EvSettingsLink.fake = true
+      shell.get_node("EvLive/EvSettings")._refresh(true)
+      await runner.frames(2)
+  - tap: { node: EvLive/EvSettings/Rows/List/v2l_limit/Lines/Line/Stepper/Minus }
+  - tap: { node: EvLive/EvSettings/Rows/List/utility_mode/Lines/Line/Act }
+  - tap: { node: EvLive/EvSettings/Sections/List/charging }
+  - tap: { node: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Plus }
+  - tap: { node: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/min, with: touch }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/min, button_pressed: false }
+  - tap: { node: EvLive/EvSettings/Sections/List/schedule }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Text/Detail, text: "23:50, Mon, Tue, Wed, Thu, Fri" }
+  - tap: { node: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Time/Minute/Plus }
+  - tap: { node: EvLive/EvSettings/Rows/List/departure_1/Lines/Days/Sat }
+  # The rows below drag up into view.
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("EvLive/EvSettings/Rows")
+      rows.offset = rows.list.get_node("off_peak").position.y
+      await runner.frames(2)
+  - tap: { node: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/End/Hour/Minus }
+  - tap: { node: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Choice/only }
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("EvLive/EvSettings/Rows")
+      rows.offset = rows.list.get_node("climate_temp").position.y
+      await runner.frames(2)
+  - tap: { node: EvLive/EvSettings/Rows/List/climate_temp/Lines/Line/Stepper/Plus }
+  - screenshot: { name: ev-settings-schedule-wired, compare: false }
+  - gdscript: |
+      var want := [["v2l_limit", 20.0], ["utility_mode", true], ["charge_limit_ac", 100.0], ["ac_current", "min"],
+          ["departure_1", {on = true, hour = 23, minute = 0, days = [true, true, true, true, true, false, false]}],
+          ["departure_1", {on = true, hour = 23, minute = 50, days = [true, true, true, true, true, true, false]}],
+          ["off_peak", {start_hour = 22, start_minute = 0, end_hour = 5, end_minute = 0}],
+          ["off_peak_mode", "only"], ["climate_temp", 22.0]]
+      if str(EvSettingsLink.written) != str(want):
+          return "sent %s" % [EvSettingsLink.written]

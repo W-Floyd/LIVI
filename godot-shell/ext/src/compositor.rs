@@ -992,7 +992,9 @@ impl State {
         }
         let base = self.windows[i].root_frame.clone();
         let real_base = base.as_ref().filter(|f| f.width > 1 || f.height > 1);
-        if self.windows[i].native && real_base.is_none() {
+        // Only video's placeholder toplevel: an app's own picture is the window, with its popups,
+        // even if the projection view set it native when it took the window over.
+        if self.windows[i].native && real_base.is_none() && self.windows[i].root_dma.is_none() {
             let largest = dma.iter().map(|(_, d)| *d).max_by_key(|d| {
                 let s = d.dmabuf.size();
                 s.w as i64 * s.h as i64
@@ -1490,10 +1492,32 @@ mod tests {
         }
     }
 
-    /// A frame's pixels whichever way they came; a dmabuf is read through a CPU mapping.
+    /// A frame's pixels whichever way they came; a dmabuf is read through a CPU mapping, and a
+    /// scene's RGB layers are laid over its canvas as the GPU would (nearest pixel).
     fn pixels(content: &Content) -> Frame {
         match content {
-            Content::Scene(_) => panic!("a scene has no single picture"),
+            Content::Scene(sc) => {
+                let (w, h) = (sc.width, sc.height);
+                let mut out = sc.canvas.as_ref().map_or_else(|| Frame { width: w, height: h, rgba: vec![0; (w * h * 4) as usize] }, |(_, f)| (**f).clone());
+                for l in &sc.layers {
+                    let src = pixels(&Content::Dmabuf { key: l.key, dmabuf: l.dmabuf.clone() });
+                    for y in 0..l.h {
+                        for x in 0..l.w {
+                            let (dx, dy) = (l.x + x, l.y + y);
+                            if dx < 0 || dy < 0 || dx >= w as i32 || dy >= h as i32 {
+                                continue;
+                            }
+                            let u = l.src[0] + (l.src[2] - l.src[0]) * (x as f32 + 0.5) / l.w as f32;
+                            let v = l.src[1] + (l.src[3] - l.src[1]) * (y as f32 + 0.5) / l.h as f32;
+                            let (sx, sy) = ((u * src.width as f32) as u32, (v * src.height as f32) as u32);
+                            let s = ((sy.min(src.height - 1) * src.width + sx.min(src.width - 1)) * 4) as usize;
+                            let d = ((dy as u32 * w + dx as u32) * 4) as usize;
+                            out.rgba[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
+                        }
+                    }
+                }
+                out
+            }
             Content::Pixels(f) => f.clone(),
             Content::Dmabuf { dmabuf, .. } => {
                 use std::os::fd::AsRawFd;
@@ -1792,20 +1816,32 @@ mod tests {
 
     /// A tap opens the client's grabbing menu below and right of it, slid to stay in the window,
     /// drawn over the window at its scale. A tap on the menu reaches it; one outside dismisses it
-    /// and goes no further, as does the shell dismissing it.
+    /// and goes no further, as does the shell dismissing it. `native` (the projection view's,
+    /// which may land on an app's window) leaves an app window as it is.
     #[test]
     fn popups_show_over_their_window_and_take_input() {
         let area = (1200, 600);
-        for (honour, s) in [(Honour::None, 1.0), (Honour::Fractional, 1.5), (Honour::Integer, 2.0)] {
-            let case = format!("{honour:?} {s}");
-            let k = honoured(honour, s);
-            let lw = logical_size(area, s).0;
+        for (dmabuf, honour, s, native) in [
+            (false, Honour::None, 1.0, false),
+            (false, Honour::Fractional, 1.5, false),
+            (false, Honour::Integer, 2.0, false),
+            (true, Honour::None, 1.0, false),
+            (true, Honour::Fractional, 1.75, false),
+            (false, Honour::None, 1.0, true),
+            (true, Honour::Fractional, 1.75, true),
+        ] {
+            let case = format!("dmabuf={dmabuf} {honour:?} {s} native={native}");
+            let (lw, lh) = logical_size(area, s);
             let mut server = scaled(s);
             server.state.set_app_area(area.0, area.1);
-            let mut o = opts(Pattern::Grid, None, false);
+            let mut o = opts(Pattern::Grid, None, dmabuf);
             (o.width, o.height, o.honour, o.popup) = (0, 0, honour, true);
             let client = client(&mut server, o);
             assert!(pump(&mut server, |st| st.events.contains(&WindowEvent::Mapped(1))), "{case}");
+            server.state.set_native(1, native);
+            // As drawn: 686 units at 1.75 are 1201 px.
+            let k = server.state.windows[0].buffer_scale;
+            assert!((k - honoured(honour, s)).abs() < 0.01, "{case}: buffer scale {k}");
             // 50 units from the right edge: the 160-unit menu slides left to fit.
             let tap = (lw as f64 - 50.0, 100.0);
             let menu = (lw - 160, 101);
@@ -1824,7 +1860,12 @@ mod tests {
                 pump(server, |st| at(st, mid.0, mid.1) == magenta)
             };
             assert!(open(&mut server), "{case}: no menu");
-            assert_eq!(at(&server.state, menu.0 - 2, mid.1), grid(menu.0 - 2, mid.1), "{case}: left of the menu");
+            // The window is all there under it, at its own size.
+            let f = pixels(server.state.windows[0].frame.as_ref().unwrap());
+            assert_eq!(f.width, (lw as f64 * k).round() as u32, "{case}: frame width");
+            for (x, y) in [(menu.0 - 2, mid.1), (10, 10), (lw - 10, lh - 10)] {
+                assert_eq!(at(&server.state, x, y), grid(x, y), "{case}: window at ({x}, {y})");
+            }
             server.touch_down(1, 0, mid.0 as f64 * k, mid.1 as f64 * k);
             server.touch_up(0);
             server.touch_down(1, 0, 10.0 * k, 10.0 * k);

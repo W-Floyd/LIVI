@@ -166,8 +166,8 @@ pub struct Opts {
     pub text_input: Option<u32>,
     /// Asks to be maximized before the first commit, as Firefox does.
     pub maximize: bool,
-    /// A tap on the window opens a grabbing popup menu there, 160x96 units of bars, below and
-    /// right of the tap and slid to fit. Events: `popup configure X Y W H`, `popup done`, and
+    /// A tap on the window opens a grabbing popup menu there, 160x96 units of bars (a dmabuf with
+    /// `dmabuf`), below and right of the tap and slid to fit. Events: `popup configure X Y W H`, `popup done`, and
     /// input on it as `popup touch down 0 X Y`.
     pub popup: bool,
 }
@@ -227,6 +227,8 @@ struct App {
     menu: Option<Menu>,
     /// The menu's latest configure.
     menu_size: (i32, i32),
+    /// The menu is a dmabuf, as the window is.
+    menu_dmabuf: bool,
     pointer_on_menu: bool,
 }
 
@@ -236,7 +238,7 @@ struct Menu {
     popup: XdgPopup,
     viewport: Option<WpViewport>,
     /// The picture, once configured.
-    buffer: Option<(WlShmPool, WlBuffer, File)>,
+    buffer: Option<(Option<WlShmPool>, WlBuffer, File)>,
 }
 
 /// User data telling the popup's xdg_surface from the toplevel's.
@@ -313,23 +315,37 @@ impl App {
             Honour::Integer => self.buffer_scale.max(1) as f64,
         };
         let (Some(menu), Some(shm)) = (&mut self.menu, &self.shm) else { return Ok(()) };
+        let dmabuf = self.dmabuf.as_ref().filter(|_| self.menu_dmabuf);
         let (bw, bh) = ((w as f64 * k).round() as i32, (h as f64 * k).round() as i32);
-        let bytes = (bw * bh * 4) as usize;
-        let file = memfd(bytes, false)?;
+        let bytes = ((bw * bh * 4) as usize).next_multiple_of(4096);
+        let file = memfd(bytes, dmabuf.is_some())?;
         // SAFETY: a fresh memfd of `bytes` bytes, unmapped below.
         let map = unsafe { libc::mmap(std::ptr::null_mut(), bytes, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, file.as_raw_fd(), 0) };
         if map == libc::MAP_FAILED {
             return Err(io::Error::last_os_error());
         }
         let px = unsafe { std::slice::from_raw_parts_mut(map as *mut u8, bytes) };
-        for (i, out) in px.chunks_exact_mut(4).enumerate() {
+        for (i, out) in px[..(bw * bh * 4) as usize].chunks_exact_mut(4).enumerate() {
             let x = ((i as i32 % bw) as f64 / k) as u32;
             let [r, g, b, _] = Pattern::Bars.pixel(x, 0, w as u32);
             out.copy_from_slice(&[b, g, r, 0xff]);
         }
         unsafe { libc::munmap(map, bytes) };
-        let pool = shm.create_pool(file.as_fd(), bytes as i32, qh, ());
-        let buffer = pool.create_buffer(0, bw, bh, bw * 4, wl_shm::Format::Xrgb8888, qh, usize::MAX);
+        let (pool, buffer) = match dmabuf {
+            Some(d) => {
+                let fd = udmabuf(&file, bytes)?;
+                let params = d.create_params(qh, ());
+                params.add(fd.as_fd(), 0, 0, bw as u32 * 4, 0, 0);
+                let buffer = params.create_immed(bw, bh, XRGB8888, zwp_linux_buffer_params_v1::Flags::empty(), qh, usize::MAX);
+                params.destroy();
+                (None, buffer)
+            }
+            None => {
+                let pool = shm.create_pool(file.as_fd(), bytes as i32, qh, ());
+                let buffer = pool.create_buffer(0, bw, bh, bw * 4, wl_shm::Format::Xrgb8888, qh, usize::MAX);
+                (Some(pool), buffer)
+            }
+        };
         match (&menu.viewport, self.honour) {
             (Some(vp), _) => vp.set_destination(w, h),
             (None, Honour::Integer) => menu.surface.set_buffer_scale(k as i32),
@@ -340,7 +356,9 @@ impl App {
         menu.surface.commit();
         if let Some((p, b, _)) = menu.buffer.replace((pool, buffer, file)) {
             b.destroy();
-            p.destroy();
+            if let Some(p) = p {
+                p.destroy();
+            }
         }
         Ok(())
     }
@@ -355,7 +373,9 @@ impl App {
         m.surface.destroy();
         if let Some((p, b, _)) = m.buffer {
             b.destroy();
-            p.destroy();
+            if let Some(p) = p {
+                p.destroy();
+            }
         }
         self.pointer_on_menu = false;
     }
@@ -408,6 +428,7 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     }
     if opts.popup {
         app.menu_parent = Some(xdg.clone());
+        app.menu_dmabuf = opts.dmabuf;
     }
     // Before the first commit, so the first buffer can be the right size.
     let mut scaled = None;

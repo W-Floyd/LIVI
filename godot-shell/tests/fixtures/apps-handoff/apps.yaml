@@ -1,0 +1,18 @@
+# Launches that are not one process showing one window at once (scenario apps-handoff).
+waydroid: false
+order: [org.livi.test.handoff, org.livi.test.slow, org.livi.test.late]
+apps:
+  # Exits 0 at once, as a GApplication does when another instance owns its D-Bus name; the
+  # window comes a second later from a process in a session of its own.
+  org.livi.test.handoff:
+    name: Hand-off
+    exec: sh -c "(sleep 1; exec setsid livi-shell-test-client --app-id org.livi.test.handoff --size 640x360) & exit 0"
+  # Past the launcher's still-starting mark (10 s), well inside its timeout.
+  org.livi.test.slow:
+    name: Slow start
+    exec: sh -c "sleep 11; exec livi-shell-test-client --app-id org.livi.test.slow --size 640x360"
+  # Given up on after 2 s; its window comes at 4.
+  org.livi.test.late:
+    name: Late
+    exec: sh -c "sleep 4; exec livi-shell-test-client --app-id org.livi.test.late --size 640x360"
+    timeout_s: 2

@@ -6,6 +6,7 @@ extends Node
 ##   LIVI_SHELL_APPS_DIRS  data dirs to list (':'-separated), instead of the XDG ones
 ##   LIVI_SHELL_APPS       the apps file, instead of $XDG_CONFIG_HOME/livi-shell/apps.yaml
 ##   LIVI_SHELL_APP_LOGS   where each app's output goes, instead of $XDG_STATE_HOME/livi-shell/apps
+##   LIVI_SHELL_PORTAL     "off": no settings portal (another one serves the look)
 
 ## The list, the running windows or a launch's state changed.
 signal changed
@@ -23,7 +24,9 @@ var apps: Array = []
 var windows := {}
 ## Window ids, most recently shown last.
 var recent: Array[int] = []
-## App id -> `{pid, until}` (ticks ms) while its window has not mapped.
+## App id -> `{pid, started, timeout_s, exit, slow}` while its window has not mapped: `started`
+## in ticks ms, `exit` its status once the process has gone (-1 before), `slow` once it has
+## taken long enough to say so (`AppCatalog.launch_state`).
 var launching := {}
 ## App id -> why its last launch failed.
 var failed := {}
@@ -32,12 +35,25 @@ var _catalog := AppCatalog.new()
 ## App id -> the PID this launcher started it as; its process group is the same number.
 var _pids := {}
 var _poll_at := 0
+## Why the shell's settings portal is not served ("" when it is): apps then get the look in
+## their environment at launch instead, and do not follow it live.
+var _portal_error := ""
 
 
 func _ready() -> void:
 	Wayland.window_mapped.connect(_on_mapped)
 	Wayland.window_unmapped.connect(_on_unmapped)
 	ThemeManager.changed.connect(_rescale)
+	ThemeManager.changed.connect(_send_look)
+	var t0 := Time.get_ticks_usec()
+	if OS.get_environment("LIVI_SHELL_PORTAL") == "off":
+		_portal_error = "LIVI_SHELL_PORTAL is off"
+	else:
+		_portal_error = AppearancePortal.start(ThemeManager.appearance == "night", ThemeManager.c.accent, ThemeManager.reduced_motion)
+	if _portal_error == "":
+		print("launcher: settings portal served (%d ms)" % ((Time.get_ticks_usec() - t0) / 1000))
+	else:
+		print("launcher: no settings portal: %s" % _portal_error)
 
 
 func _exit_tree() -> void:
@@ -106,6 +122,11 @@ func state(id: String) -> String:
 	return "failed" if failed.has(id) else ""
 
 
+## Launching for long enough to say it is still starting.
+func slow(id: String) -> bool:
+	return launching.has(id) and launching[id].slow
+
+
 ## Shows the app's window when it runs; otherwise starts it, unless it is starting already.
 func open(id: String) -> void:
 	var mine := windows_of(id)
@@ -125,6 +146,9 @@ func open(id: String) -> void:
 		DISPLAY = null, WAYLAND_SOCKET = null, XDG_CURRENT_DESKTOP = "LIVI",
 		GDK_BACKEND = "wayland", QT_QPA_PLATFORM = "wayland", SDL_VIDEODRIVER = "wayland",
 		CLUTTER_BACKEND = "wayland", MOZ_ENABLE_WAYLAND = "1"}
+	if _portal_error != "":
+		# libadwaita's override of the portal; fixed for the app's life.
+		env.ADW_DEBUG_COLOR_SCHEME = "prefer-dark" if ThemeManager.appearance == "night" else "prefer-light"
 	var pid: int = _catalog.launch(a.argv, a.cwd, env, _log_path(id))
 	if pid < 0:
 		failed[id] = "could not start %s" % a.argv[0]
@@ -133,7 +157,7 @@ func open(id: String) -> void:
 		# Before the compositor next dispatches, which is when the client can connect.
 		Wayland.set_process_scale(pid, scale_of(id) / 100.0)
 		_pids[id] = pid
-		launching[id] = {pid = pid, until = Time.get_ticks_msec() + int(a.timeout_s) * 1000}
+		launching[id] = {pid = pid, started = Time.get_ticks_msec(), timeout_s = int(a.timeout_s), exit = -1, slow = false}
 	changed.emit()
 
 
@@ -180,23 +204,29 @@ func _process(_delta: float) -> void:
 	_poll_at = now + 250
 	var dirty := false
 	for id in _pids.keys():
-		# Reaps it. One that hands off and exits 0 (waydroid app launch) may still show a window,
-		# and its group may live on; one that fails is done.
+		# Reaps it. One that hands off and exits 0 (waydroid app launch, a GApplication whose
+		# D-Bus name another instance owns) may still show a window, and its group may live on;
+		# one that fails is done.
 		var code: int = _catalog.poll(_pids[id])
-		if code <= 0:
+		if code < 0:
 			continue
-		Wayland.set_process_scale(_pids[id], 0)
-		_pids.erase(id)
 		if launching.has(id):
+			launching[id].exit = code
+			if code == 0:
+				print("launcher: %s's process %d exited 0 before its window: waiting for one from another" % [id, _pids[id]])
+		if code > 0:
+			Wayland.set_process_scale(_pids[id], 0)
+			_pids.erase(id)
+	for id in launching.keys():
+		var l: Dictionary = launching[id]
+		var st: Dictionary = AppCatalog.launch_state(now - l.started, l.timeout_s, l.exit)
+		if st.state == "failed":
 			launching.erase(id)
-			failed[id] = "exited with status %d" % code
+			failed[id] = st.reason
 			print("launcher: %s %s" % [id, failed[id]])
 			dirty = true
-	for id in launching.keys():
-		if now > launching[id].until:
-			launching.erase(id)
-			failed[id] = "no window in %d s" % int(app(id).get("timeout_s", 0))
-			print("launcher: %s %s" % [id, failed[id]])
+		elif st.state == "slow" and not l.slow:
+			l.slow = true
 			dirty = true
 	if dirty:
 		changed.emit()
@@ -209,10 +239,17 @@ func _on_mapped(id: int, app_id: String, title: String) -> void:
 	var owner := _owner_of(app_id, id, true)
 	windows[id] = {app_id = app_id, title = title, app = owner}
 	recent.append(id)
+	var pid := Wayland.window_pid(id)
 	if launching.has(owner):
+		var l: Dictionary = launching[owner]
+		var from := "" if pid == l.pid else ", from process %d" % pid
+		print("launcher: launched %s in %d ms%s" % [owner, Time.get_ticks_msec() - l.started, from])
 		launching.erase(owner)
 		# After the shell has the window too: it connected to the same signal later.
 		show_window.emit.call_deferred(id)
+	elif failed.erase(owner):
+		# Given up on, then up after all: running now, but not pulled forward this late.
+		print("launcher: %s's window came after its launch was given up (process %d)" % [owner, pid])
 	changed.emit()
 
 
@@ -222,25 +259,10 @@ func _on_unmapped(id: int) -> void:
 		changed.emit()
 
 
-## Which app a window is: a launch waiting for this app_id, or whose process group the client is
-## in; then any app by app_id; then, when exactly one launch waits and nothing else claims the
-## window, that one (apps whose app_id is none of their names).
+## Which app a window is (`AppCatalog.window_owner`); `fresh` as it maps.
 func _owner_of(app_id: String, window: int, fresh: bool) -> String:
-	var by_id := func(a: Dictionary) -> bool: return Array(a.get("app_ids", [])).has(app_id)
-	for id in launching:
-		if by_id.call(app(id)):
-			return id
 	var group: int = _catalog.group_of(Wayland.window_pid(window))
-	if group > 0:
-		for id in _pids:
-			if _pids[id] == group:
-				return id
-	for a in apps:
-		if by_id.call(a):
-			return a.id
-	if fresh and launching.size() == 1:
-		return launching.keys()[0]
-	return ""
+	return _catalog.window_owner(app_id, group, PackedStringArray(launching.keys()), _pids, fresh)
 
 
 ## The scale, in percent, at which a logical pixel looks from the driver's seat as a desktop's
@@ -283,6 +305,12 @@ func _rescale() -> void:
 		var s := scale_of(id) / 100.0
 		if not is_equal_approx(Wayland.window_scale(w), s):
 			Wayland.set_window_scale(w, s)
+
+
+## Launched apps follow the shell's look through the portal.
+func _send_look() -> void:
+	if _portal_error == "":
+		AppearancePortal.set_look(ThemeManager.appearance == "night", ThemeManager.c.accent, ThemeManager.reduced_motion)
 
 
 ## Running windows for the switcher, most recent first: `{window, app, name, icon}`.

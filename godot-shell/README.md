@@ -259,10 +259,21 @@ rather than starting another. Projection video (`livi-video*`) is not listed.
 Apps start in Rust (`AppCatalog`), each in its own process group, with `WAYLAND_DISPLAY` set to
 the shell's socket, `DISPLAY` unset and the toolkits told to use Wayland; output goes to
 `~/.local/state/livi-shell/apps/<id>.log` (`LIVI_SHELL_APP_LOGS`). A window is the launch's when
-its app_id is the entry's ID, `StartupWMClass` or apps.yaml `app_id`, or its client is in the
-launch's process group; failing that, the only launch waiting takes it. A launch that exits
-non-zero or shows no window in 20 s (Waydroid: 90 s) is marked on its tile. XWayland is not served,
-so X11-only apps don't show.
+its app_id is the entry's ID, `StartupWMClass` or apps.yaml `app_id` (whichever process shows it:
+a single-instance app hands off to the instance owning its D-Bus name and exits 0), or its client
+is in the launch's process group; failing that, the only launch waiting takes it. A launch that
+exits non-zero, or shows no window in 60 s (Waydroid: 90 s; GTK4 apps' first start on the unit
+compiles shaders and reads everything cold), is marked on its tile; after 10 s it says it is still
+starting. The log says `launched <id> in <ms>` when the window maps. XWayland is not served, so
+X11-only apps don't show.
+
+The shell serves `org.freedesktop.portal.Settings` itself on the session bus (`portal.rs`;
+`LIVI_SHELL_PORTAL=off` stops it): `org.freedesktop.appearance` `color-scheme` from the
+appearance, `accent-color` from the theme's accent, `reduced-motion`, with `SettingChanged` when
+they change, so GTK4/libadwaita apps (and Qt 6's portal-aware themes) follow day and night live;
+`org.gnome.desktop.interface` `gtk-theme` does the same for GTK3. The real xdg-desktop-portal
+cannot start for the kiosk (its user unit requires `graphical-session.target`). When another
+portal owns the name, apps get `ADW_DEBUG_COLOR_SCHEME` at launch instead, fixed for their life.
 
 ## Settings
 

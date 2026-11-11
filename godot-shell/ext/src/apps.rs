@@ -9,10 +9,53 @@ use serde_json::Value;
 
 /// The desktop name the shell claims for `OnlyShowIn` and `NotShowIn`.
 pub const DESKTOP: &str = "LIVI";
-/// Seconds a launch may take to show a window. Waydroid's first frame takes most of a minute
+/// Seconds a launch may take to show a window: a GTK4 app's first start on the unit, with cold
+/// page and shader caches, takes tens of seconds. Waydroid's first frame takes most of a minute
 /// under QEMU.
-pub const TIMEOUT_S: u32 = 20;
+pub const TIMEOUT_S: u32 = 60;
 pub const WAYDROID_TIMEOUT_S: u32 = 90;
+/// Seconds after which a launch with no window yet is shown as still starting.
+pub const SLOW_S: u32 = 10;
+
+/// Where a launch with no window yet stands.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Launch {
+    Starting,
+    Slow,
+    Failed(String),
+}
+
+/// A launch `elapsed_ms` in with no window: `exit` is its process's status once it has gone
+/// (128 + signal when killed). Exiting 0 is not failing: a single-instance app (GApplication)
+/// hands its activation to the instance that owns its D-Bus name, maybe one D-Bus started, and
+/// exits; the window then comes from that process. So only a non-zero status or the timeout fails.
+pub fn launch_state(elapsed_ms: u64, timeout_s: u32, exit: Option<i32>) -> Launch {
+    match exit {
+        Some(c) if c != 0 => Launch::Failed(format!("exited with status {c}")),
+        _ if elapsed_ms >= timeout_s as u64 * 1000 => Launch::Failed(format!("no window in {timeout_s} s")),
+        _ if elapsed_ms >= SLOW_S as u64 * 1000 => Launch::Slow,
+        _ => Launch::Starting,
+    }
+}
+
+/// Which app a new window is. A window's client need not be the process the launcher started (a
+/// D-Bus-activated instance, a launcher script's grandchild in a session of its own), so the
+/// app_id decides first: a waiting launch that claims it, then the launch whose process group
+/// the client is in (`group`), then any app that claims it. Last, with `fresh` (the window has
+/// just mapped) and exactly one launch waiting, that one: apps whose app_id is none of their names.
+pub fn window_owner(app_id: &str, group: Option<i32>, launching: &[&str], pids: &[(&str, i32)], apps: &[App], fresh: bool) -> Option<String> {
+    let claims = |id: &str| apps.iter().any(|a| a.id == id && a.app_ids.iter().any(|w| w == app_id));
+    if let Some(id) = launching.iter().find(|id| claims(id)) {
+        return Some(id.to_string());
+    }
+    if let Some((id, _)) = group.and_then(|g| pids.iter().find(|(_, p)| *p == g)) {
+        return Some(id.to_string());
+    }
+    if let Some(a) = apps.iter().find(|a| a.app_ids.iter().any(|w| w == app_id)) {
+        return Some(a.id.clone());
+    }
+    (fresh && launching.len() == 1).then(|| launching[0].to_string())
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct App {
@@ -693,6 +736,52 @@ mod tests {
         }
         assert!(parse_config("").unwrap().waydroid);
         assert!(parse_config("order: [a]\n").unwrap().waydroid);
+    }
+
+    #[test]
+    fn launch_states() {
+        let failed = |r: &str| Launch::Failed(r.into());
+        for (elapsed_s, timeout_s, exit, want) in [
+            (0, 60, None, Launch::Starting),
+            (9, 60, None, Launch::Starting),
+            (10, 60, None, Launch::Slow),
+            (59, 60, None, Launch::Slow),
+            (60, 60, None, failed("no window in 60 s")),
+            // Handed off to the instance that owns its name, which shows the window later.
+            (0, 60, Some(0), Launch::Starting),
+            (30, 60, Some(0), Launch::Slow),
+            (60, 60, Some(0), failed("no window in 60 s")),
+            (0, 60, Some(1), failed("exited with status 1")),
+            (30, 60, Some(139), failed("exited with status 139")),
+            (5, 3, None, failed("no window in 3 s")),
+        ] {
+            assert_eq!(launch_state(elapsed_s * 1000, timeout_s, exit), want, "{elapsed_s} s of {timeout_s}, exit {exit:?}");
+        }
+    }
+
+    #[test]
+    fn window_owners() {
+        let mut calendar = app("org.gnome.Calendar", "Calendar");
+        calendar.app_ids.push("gnome-calendar".into());
+        let apps = vec![calendar, app("org.gnome.Console", "Console"), app("wrapped", "Wrapped"), app("odd", "Odd")];
+        for (app_id, group, launching, pids, fresh, want) in [
+            // A D-Bus-activated instance: another process, another group, the app's own app_id.
+            ("org.gnome.Calendar", Some(900), &["org.gnome.Calendar"][..], &[("org.gnome.Calendar", 100)][..], true, Some("org.gnome.Calendar")),
+            ("gnome-calendar", None, &["org.gnome.Calendar"][..], &[][..], true, Some("org.gnome.Calendar")),
+            // The app_id of a waiting launch wins over the group of another.
+            ("org.gnome.Console", Some(100), &["org.gnome.Console", "wrapped"][..], &[("wrapped", 100)][..], true, Some("org.gnome.Console")),
+            // A wrapper's window under an app_id no app claims: by its process group.
+            ("something", Some(100), &["wrapped", "odd"][..], &[("wrapped", 100), ("odd", 200)][..], true, Some("wrapped")),
+            // A running app's second window, its launch long done.
+            ("org.gnome.Console", None, &[][..], &[][..], true, Some("org.gnome.Console")),
+            // Unclaimed, one launch waiting: that one, but only as the window maps.
+            ("something", None, &["odd"][..], &[][..], true, Some("odd")),
+            ("something", None, &["odd"][..], &[][..], false, None),
+            ("something", None, &["odd", "wrapped"][..], &[][..], true, None),
+            ("something", Some(300), &[][..], &[("odd", 200)][..], true, None),
+        ] {
+            assert_eq!(window_owner(app_id, group, launching, pids, &apps, fresh).as_deref(), want, "{app_id} {group:?} {launching:?}");
+        }
     }
 
     #[test]

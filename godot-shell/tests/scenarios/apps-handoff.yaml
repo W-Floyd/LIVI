@@ -1,0 +1,71 @@
+name: apps-handoff
+# Launches the launcher must not call failed: one that exits 0 at once and shows its window from
+# another process group (a GApplication handing off to a D-Bus-activated instance), one that takes
+# longer than the still-starting mark, and one whose window comes after it was given up on.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  apps: fixtures/apps-handoff
+steps:
+  - page: apps
+  - tap: { node: Apps/Scroll/List/Grid/org_livi_test_handoff }
+  - wait: { frames: 2 }
+  - gdscript: |
+      var until = Time.get_ticks_msec() + 5000
+      while Wayland.find_window("org.livi.test.handoff") < 0 and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+          if shell.launcher.state("org.livi.test.handoff") == "failed":
+              return "hand-off failed: %s" % shell.launcher.failed["org.livi.test.handoff"]
+      var w = Wayland.find_window("org.livi.test.handoff")
+      if w < 0:
+          return "no hand-off window"
+      await runner.frames(2)
+      if shell.launcher.state("org.livi.test.handoff") != "running":
+          return "hand-off is %s" % shell.launcher.state("org.livi.test.handoff")
+      var started = shell.launcher._pids["org.livi.test.handoff"]
+      if shell.launcher._catalog.group_of(Wayland.window_pid(w)) == started:
+          return "the window's client is in the launched group: no hand-off"
+      if shell._page_name != "app" or shell._projection.window.window_id != w:
+          return "page %s, want app showing %d" % [shell._page_name, w]
+  - page: apps
+  - tap: { node: Apps/Scroll/List/Grid/org_livi_test_slow }
+  - tap: { node: Apps/Scroll/List/Grid/org_livi_test_late }
+  - gdscript: |
+      var until = Time.get_ticks_msec() + 3500
+      while shell.launcher.state("org.livi.test.late") != "failed" and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+      if shell.launcher.failed.get("org.livi.test.late", "") != "no window in 2 s":
+          return "late is %s %s" % [shell.launcher.state("org.livi.test.late"), shell.launcher.failed]
+      await runner.frames(2)
+  - expect_node: { path: Apps/Scroll/List/Grid/org_livi_test_late/Name, text: "Couldn't start" }
+  - expect_node: { path: Apps/Scroll/List/Grid/org_livi_test_slow/Name, text: "Starting…" }
+  # Its window after all: running, no longer failed.
+  - gdscript: |
+      var until = Time.get_ticks_msec() + 5000
+      while shell.launcher.state("org.livi.test.late") != "running" and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+      if shell.launcher.state("org.livi.test.late") != "running" or shell.launcher.failed.has("org.livi.test.late"):
+          return "late is %s %s" % [shell.launcher.state("org.livi.test.late"), shell.launcher.failed]
+      if shell._page_name != "apps":
+          return "a given-up window took the page: %s" % shell._page_name
+      until = Time.get_ticks_msec() + 8000
+      while not shell.launcher.slow("org.livi.test.slow") and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+      if not shell.launcher.slow("org.livi.test.slow"):
+          return "slow is %s, not slow" % shell.launcher.state("org.livi.test.slow")
+      await runner.frames(2)
+  - expect_node: { path: Apps/Scroll/List/Grid/org_livi_test_slow/Name, text: "Still starting…" }
+  - wait: { window: org.livi.test.slow }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if shell.launcher.state("org.livi.test.slow") != "running":
+          return "slow is %s" % shell.launcher.state("org.livi.test.slow")
+  # The hand-off's process is in no group the launcher started, so its teardown would miss it.
+  - gdscript: |
+      var w = Wayland.find_window("org.livi.test.handoff")
+      shell.launcher.close(w)
+      var until = Time.get_ticks_msec() + 5000
+      while Wayland.find_window("org.livi.test.handoff") >= 0 and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+      if Wayland.find_window("org.livi.test.handoff") >= 0:
+          return "hand-off did not close"

@@ -11,6 +11,8 @@ mod gl_import;
 mod gl_scene;
 pub mod golden;
 pub mod keys;
+#[cfg(target_os = "linux")]
+pub mod portal;
 pub mod scenario;
 pub mod settings;
 #[cfg(target_os = "linux")]

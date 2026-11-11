@@ -110,6 +110,7 @@ func _update() -> void:
 			_tiles[a.id] = t
 		t.app_name = a.name
 		t.icon_path = a.icon
+		t.slow = launcher.slow(a.id)
 		t.state = launcher.state(a.id)
 		_grid.move_child(t, i)
 		i += 1

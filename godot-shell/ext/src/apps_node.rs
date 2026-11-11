@@ -23,6 +23,8 @@ pub struct AppCatalog {
     /// Set by the Waydroid thread; taken by `poll_scan`.
     waydroid_scan: Option<Arc<Mutex<Option<Vec<App>>>>>,
     children: HashMap<i32, Child>,
+    /// The last list `scan` or `poll_scan` gave.
+    listed: Vec<App>,
     base: Base<RefCounted>,
 }
 
@@ -153,6 +155,34 @@ impl AppCatalog {
         }
     }
 
+    /// A launch with no window yet, `elapsed_ms` in: `{state: "starting" | "slow" | "failed",
+    /// reason}`. `exit` is its status once it has gone (`poll`), else -1.
+    #[func]
+    fn launch_state(elapsed_ms: i64, timeout_s: i64, exit: i64) -> VarDictionary {
+        let st = apps::launch_state(elapsed_ms.max(0) as u64, timeout_s.max(0) as u32, (exit >= 0).then_some(exit as i32));
+        let (state, reason) = match st {
+            apps::Launch::Starting => ("starting", String::new()),
+            apps::Launch::Slow => ("slow", String::new()),
+            apps::Launch::Failed(r) => ("failed", r),
+        };
+        let mut d = VarDictionary::new();
+        d.set("state", &gs(state));
+        d.set("reason", &gs(reason));
+        d
+    }
+
+    /// The listed app a window is, or "" (`apps::window_owner`): `group` is its client's process
+    /// group (-1 unknown), `launching` the apps waiting for a window, `pids` app id -> PID started.
+    #[func]
+    fn window_owner(&self, app_id: GString, group: i64, launching: PackedStringArray, pids: VarDictionary, fresh: bool) -> GString {
+        let launching: Vec<String> = launching.as_slice().iter().map(|s| s.to_string()).collect();
+        let launching: Vec<&str> = launching.iter().map(String::as_str).collect();
+        let pids: Vec<(String, i32)> = pids.iter_shared().map(|(k, v)| (k.to_string(), v.try_to::<i64>().unwrap_or(-1) as i32)).collect();
+        let pids: Vec<(&str, i32)> = pids.iter().map(|(k, v)| (k.as_str(), *v)).collect();
+        let group = (group > 0).then_some(group as i32);
+        gs(apps::window_owner(&app_id.to_string(), group, &launching, &pids, &self.listed, fresh).unwrap_or_default())
+    }
+
     /// SIGTERM, or SIGKILL with `kill`, to the child's whole process group.
     #[func]
     fn stop(&mut self, pid: i64, kill: bool) {
@@ -184,11 +214,12 @@ impl AppCatalog {
 }
 
 impl AppCatalog {
-    fn merged(&self) -> VarArray {
+    fn merged(&mut self) -> VarArray {
         let empty = Config::default();
         let cfg = self.config.as_ref().unwrap_or(&empty);
         let all: Vec<App> = self.found.iter().chain(&self.waydroid).cloned().collect();
-        apps::merge(all, cfg, &self.dirs).iter().map(|a| to_dict(a).to_variant()).collect()
+        self.listed = apps::merge(all, cfg, &self.dirs);
+        self.listed.iter().map(|a| to_dict(a).to_variant()).collect()
     }
 }
 
@@ -217,4 +248,49 @@ fn waydroid_list() -> Option<String> {
         return None;
     }
     run(&["app", "list"])
+}
+
+/// The settings portal launched apps read the shell's look from (`portal`): one per process.
+#[derive(GodotClass)]
+#[class(base = Object, init)]
+pub struct AppearancePortal {
+    base: Base<Object>,
+}
+
+#[godot_api]
+impl AppearancePortal {
+    /// Serves the portal on the session bus, unless it already is, with this look: "" when it is
+    /// served, else why not (no bus, or another portal owns the name).
+    #[func]
+    fn start(dark: bool, accent: Color, reduced_motion: bool) -> GString {
+        #[cfg(target_os = "linux")]
+        return gs(crate::portal::start(look(dark, accent, reduced_motion)));
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (dark, accent, reduced_motion);
+            gs("no portal off Linux")
+        }
+    }
+
+    /// The new look, announced to apps setting by setting.
+    #[func]
+    fn set_look(dark: bool, accent: Color, reduced_motion: bool) {
+        #[cfg(target_os = "linux")]
+        crate::portal::set_look(look(dark, accent, reduced_motion));
+        #[cfg(not(target_os = "linux"))]
+        let _ = (dark, accent, reduced_motion);
+    }
+
+    #[func]
+    fn serving() -> bool {
+        #[cfg(target_os = "linux")]
+        return crate::portal::serving();
+        #[cfg(not(target_os = "linux"))]
+        false
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn look(dark: bool, accent: Color, reduced_motion: bool) -> crate::portal::Look {
+    crate::portal::Look { dark, accent: [accent.r as f64, accent.g as f64, accent.b as f64], reduced_motion }
 }

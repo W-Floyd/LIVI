@@ -22,6 +22,11 @@ var state := "":
 	set(v):
 		state = v
 		_refresh()
+## Launching for a while: says it is still starting.
+var slow := false:
+	set(v):
+		slow = v
+		_refresh()
 var chip := false
 ## A hold fired since the last press, so its release is no tap.
 var held := false
@@ -126,7 +131,7 @@ func _refresh() -> void:
 	_icon.modulate.a = 0.45 if state == "launching" else 1.0
 	match state:
 		"launching":
-			_name.text = "Starting…"
+			_name.text = "Still starting…" if slow else "Starting…"
 		"failed":
 			_name.text = "Couldn't start"
 		_:

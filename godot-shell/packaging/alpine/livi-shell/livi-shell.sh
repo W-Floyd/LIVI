@@ -8,9 +8,18 @@ set -eu
 : "${LIVI_SHELL_SOCKET:=livi-shell}"
 export LIVI_SHELL_SOCKET
 godot="${LIVI_SHELL_GODOT:-/usr/bin/godot}"
+# Apps started from the shell need a session bus: the user's, or a private one for the shell.
+dbus=
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    if [ -S "/run/user/$(id -u)/bus" ]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+    elif command -v dbus-run-session >/dev/null; then
+        dbus=dbus-run-session
+    fi
+fi
 # The compatibility renderer on GLES3 through Wayland's EGL; no Vulkan (Mali-G51 has no
 # usable driver); the arm32 feature tag selects the `unit` quality profile.
-set -- "$godot" --path /usr/lib/livi-shell/project --display-driver wayland \
+set -- "$godot" --path "${LIVI_SHELL_PROJECT:-/usr/lib/livi-shell/project}" --display-driver wayland \
     --rendering-method gl_compatibility --rendering-driver opengl3 --fullscreen \
     --resolution "${LIVI_SHELL_RESOLUTION:-1920x720}" --audio-driver "${LIVI_SHELL_AUDIO:-PulseAudio}" \
     ${LIVI_SHELL_GODOT_ARGS:-}
@@ -18,4 +27,4 @@ if [ -n "${WAYLAND_DISPLAY:-}" ]; then
     exec "$@"
 fi
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/livi-shell}"
-exec cage -d -s -- "$@"
+exec ${dbus:+$dbus --} cage -d -s -- "$@"

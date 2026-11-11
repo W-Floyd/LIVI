@@ -20,6 +20,12 @@ dest=shellproj
 rsync -rtv $dry --exclude .godot --exclude test --exclude live --exclude '*.uid' \
     --exclude 'bin/linux-arm32/*.so' project/ "$host:$dest/"
 
+# New class_names need the class registry an import makes; generated here from the scripts.
+cache=$(mktemp)
+python3 scripts/class-cache.py project > "$cache"
+rsync -tv $dry --checksum "$cache" "$host:$dest/.godot/global_script_class_cache.cfg"
+rm -f "$cache"
+
 so=packaging/out/armv7/liblivi_godot_shell.so
 if [ -f "$so" ]; then
     rsync -tv $dry --update "$so" "$host:$dest/bin/linux-arm32/liblivi_godot_shell.so"

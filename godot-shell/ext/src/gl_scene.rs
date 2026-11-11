@@ -47,6 +47,12 @@ const GL_FRAGMENT_SHADER: u32 = 0x8B30;
 const GL_COMPILE_STATUS: u32 = 0x8B81;
 const GL_LINK_STATUS: u32 = 0x8B82;
 const GL_VERSION: u32 = 0x1F02;
+const GL_BLEND: u32 = 0x0BE2;
+const GL_ONE: u32 = 1;
+const GL_ONE_MINUS_SRC_ALPHA: u32 = 0x0303;
+const GL_FUNC_ADD: u32 = 0x8006;
+/// Blend state saved and restored: src RGB, dst RGB, src alpha, dst alpha, equation RGB, alpha.
+const BLEND_STATE: [u32; 6] = [0x80C9, 0x80C8, 0x80CB, 0x80CA, 0x8009, 0x883D];
 /// Capabilities the pass switches off, and with them restores: blend, scissor, depth, cull,
 /// stencil, dither, alpha-to-coverage, rasterizer discard.
 const CAPS: [u32; 8] = [0x0BE2, 0x0C11, 0x0B71, 0x0B44, 0x0B90, 0x0BD0, 0x809E, 0x8C89];
@@ -76,6 +82,8 @@ struct Fns {
     glClearColor: unsafe extern "C" fn(f32, f32, f32, f32),
     glClear: unsafe extern "C" fn(u32),
     glColorMask: unsafe extern "C" fn(u8, u8, u8, u8),
+    glBlendFuncSeparate: unsafe extern "C" fn(u32, u32, u32, u32),
+    glBlendEquationSeparate: unsafe extern "C" fn(u32, u32),
     glCreateShader: unsafe extern "C" fn(u32) -> u32,
     glShaderSource: unsafe extern "C" fn(u32, i32, *const *const c_char, *const i32),
     glCompileShader: unsafe extern "C" fn(u32),
@@ -202,6 +210,7 @@ struct Saved {
     row_len: i32,
     align: i32,
     pbo: i32,
+    blend: [i32; BLEND_STATE.len()],
 }
 
 impl Scene {
@@ -221,7 +230,8 @@ impl Scene {
             glGetString, glGetIntegerv, glGetFloatv, glGetBooleanv, glIsEnabled, glEnable, glDisable,
             glGenTextures, glDeleteTextures, glBindTexture, glTexParameteri, glTexImage2D, glActiveTexture,
             glGenFramebuffers, glDeleteFramebuffers, glBindFramebuffer, glFramebufferTexture2D,
-            glCheckFramebufferStatus, glViewport, glClearColor, glClear, glColorMask, glCreateShader,
+            glCheckFramebufferStatus, glViewport, glClearColor, glClear, glColorMask, glBlendFuncSeparate,
+            glBlendEquationSeparate, glCreateShader,
             glShaderSource, glCompileShader, glGetShaderiv, glGetShaderInfoLog, glDeleteShader,
             glCreateProgram, glAttachShader, glLinkProgram, glGetProgramiv, glGetProgramInfoLog, glUseProgram,
             glGetUniformLocation, glUniform1i, glUniform3f, glUniform4f, glUniformMatrix3fv,
@@ -324,7 +334,7 @@ impl Scene {
     }
 
     /// Redraws the target: the canvas (RGBA, `w`x`h`, uploaded when `generation` is new), then `layers`
-    /// in order, each replacing what is under it.
+    /// in order: opaque ones replace what is under them, the rest are blended over it.
     pub fn render(&self, t: &mut Target, canvas: Option<(u64, &[u8])>, layers: &[Layer]) {
         let f = &self.f;
         // SAFETY: GL calls in the current context; every texture is ours or an imported plane.
@@ -383,6 +393,14 @@ impl Scene {
                     Kind::Nv12 => (1, true),
                     Kind::I420 => (2, true),
                 };
+                // Wayland's alpha is premultiplied: a popup's shadow lets its window show through.
+                if opaque {
+                    (f.glDisable)(GL_BLEND);
+                } else {
+                    (f.glEnable)(GL_BLEND);
+                    (f.glBlendFuncSeparate)(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+                    (f.glBlendEquationSeparate)(GL_FUNC_ADD, GL_FUNC_ADD);
+                }
                 (f.glUniform1i)(self.loc.mode, mode);
                 (f.glUniform1i)(self.loc.opaque, opaque as i32);
                 (f.glUniform4f)(self.loc.src, l.src[0], l.src[1], l.src[2], l.src[3]);
@@ -442,6 +460,7 @@ impl Saved {
                 row_len: geti(GL_UNPACK_ROW_LENGTH),
                 align: geti(GL_UNPACK_ALIGNMENT),
                 pbo: geti(GL_PIXEL_UNPACK_BUFFER_BINDING),
+                blend: BLEND_STATE.map(geti),
             };
             (f.glGetIntegerv)(GL_VIEWPORT, s.viewport.as_mut_ptr());
             (f.glGetBooleanv)(GL_COLOR_WRITEMASK, s.mask.as_mut_ptr());
@@ -485,6 +504,9 @@ impl Saved {
             (f.glPixelStorei)(GL_UNPACK_ROW_LENGTH, self.row_len);
             (f.glPixelStorei)(GL_UNPACK_ALIGNMENT, self.align);
             (f.glBindBuffer)(GL_PIXEL_UNPACK_BUFFER, self.pbo as u32);
+            let b = self.blend.map(|v| v as u32);
+            (f.glBlendFuncSeparate)(b[0], b[1], b[2], b[3]);
+            (f.glBlendEquationSeparate)(b[4], b[5]);
         }
     }
 }

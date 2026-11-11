@@ -627,11 +627,12 @@ fn scene_layer(gl: &GlImporter, images: &mut HashMap<u64, Imported>, l: &composi
     }
     let imp = images.get_mut(&l.key).ok_or("no import")?;
     if imp.texs.is_empty() {
-        imp.texs = imp.images.iter().map(|&i| {
-            let t = gl.new_texture();
-            gl.attach(t, i);
-            t
-        }).collect();
+        imp.texs = imp.images.iter().map(|_| gl.new_texture()).collect();
+    }
+    // Every frame, as `show_image` does: attached once, a GTK window's layer on the unit showed
+    // stale content (a terminal without its text) while direct frames were current.
+    for (&t, &i) in imp.texs.iter().zip(&imp.images) {
+        gl.attach(t, i);
     }
     let kind = match code {
         DRM_FORMAT_NV12 => gl_scene::Kind::Nv12,

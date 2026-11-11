@@ -1051,6 +1051,12 @@ impl State {
                 h = h.max(px(d.h as f64).max(0) as u32);
             }
         }
+        // A toplevel with its own picture is the window's size: a popup's shadow past its edge
+        // is cut, not a reason to grow (and shrink the window in the view).
+        let own = real_base.map(|f| (f.width, f.height)).or(self.windows[i].root_dma.as_ref().map(|(_, d)| (d.size().w as u32, d.size().h as u32)));
+        if let Some(size) = own {
+            (w, h) = size;
+        }
         if w == 0 || h == 0 {
             return;
         }
@@ -1447,11 +1453,12 @@ mod tests {
     }
 
     const XRGB8888: u32 = 0x3432_5258;
+    const ARGB8888: u32 = 0x3432_5241;
     const LINEAR: u64 = 0;
 
     fn server() -> Server {
         let mut server = Server::new().unwrap();
-        server.enable_dmabuf(&[(XRGB8888, LINEAR)], None).unwrap();
+        server.enable_dmabuf(&[(XRGB8888, LINEAR), (ARGB8888, LINEAR)], None).unwrap();
         server
     }
 
@@ -1516,7 +1523,11 @@ mod tests {
                             let (sx, sy) = ((u * src.width as f32) as u32, (v * src.height as f32) as u32);
                             let s = ((sy.min(src.height - 1) * src.width + sx.min(src.width - 1)) * 4) as usize;
                             let d = ((dy as u32 * w + dx as u32) * 4) as usize;
-                            out.rgba[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
+                            // Premultiplied over, as the GPU blends.
+                            let a = src.rgba[s + 3] as u32;
+                            for c in 0..4 {
+                                out.rgba[d + c] = (src.rgba[s + c] as u32 + out.rgba[d + c] as u32 * (255 - a) / 255).min(255) as u8;
+                            }
                         }
                     }
                 }
@@ -1533,7 +1544,8 @@ mod tests {
                 let map = unsafe { libc::mmap(std::ptr::null_mut(), len, libc::PROT_READ, libc::MAP_SHARED, fd, 0) };
                 assert_ne!(map, libc::MAP_FAILED, "mmap of the dmabuf");
                 let src = unsafe { std::slice::from_raw_parts(map as *const u8, len) };
-                let rgba = to_rgba(src, size.w as u32, size.h as u32, stride, Format::Xrgb8888).unwrap();
+                let format = if dmabuf.format().code as u32 == ARGB8888 { Format::Argb8888 } else { Format::Xrgb8888 };
+                let rgba = to_rgba(src, size.w as u32, size.h as u32, stride, format).unwrap();
                 unsafe { libc::munmap(map, len) };
                 Frame { width: size.w as u32, height: size.h as u32, rgba }
             }
@@ -1894,7 +1906,9 @@ mod tests {
             let got = client.join().unwrap().events;
             let down = format!("touch down 0 {:.1} {:.1}", tap.0, tap.1);
             let configure = format!("popup configure {} {} 160 96", menu.0, menu.1);
-            let want = [&down, &configure, "popup touch down 0 80.0 48.0", "popup done", &down, &configure, "popup done"];
+            // Surface-local: the shadow is part of the surface.
+            let on_menu = format!("popup touch down 0 {0}.0 {1}.0", 80 + test_client::MENU_SHADOW, 48 + test_client::MENU_SHADOW);
+            let want = [&down, &configure, &on_menu, "popup done", &down, &configure, "popup done"];
             let mut rest = got.iter();
             for w in want {
                 assert!(rest.any(|g| g == w), "{case}: no {w:?} in order in {got:?}");

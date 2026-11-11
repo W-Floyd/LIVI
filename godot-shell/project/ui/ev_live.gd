@@ -15,8 +15,6 @@ signal back_pressed
 
 ## The car's range were the climate off; `rangeKm` is the range as it runs.
 const RANGE_OFF_PATH := "/telemetry/rangeClimateOffKm"
-## A climate LIVI filled in itself, not one a car or program reported.
-const CLIMATE_UNREPORTED := ["default", "saved"]
 const TILES := ["next_departure", "scheduled", "v2l"]
 ## The EV settings' section each tap target opens.
 const SETTINGS_SECTIONS := {settings = "charging", next_departure = "schedule", scheduled = "schedule", v2l = "power"}
@@ -454,7 +452,7 @@ func _bind() -> void:
 	var stop = Core.get_value("/navigation/chargingStop")
 	# As stock: the climate-on range only while the blower runs, else the climate-off one alone.
 	# Lacking that, the car's range alone, under no climate name.
-	var blower := blower_running()
+	var blower := CarStatus.blower_running()
 	var shown = km if blower or off == null else off
 	var range_name := ""
 	if blower:
@@ -515,17 +513,6 @@ func _bind() -> void:
 	_place()
 	if ui_hidden:
 		_apply_hidden()
-
-
-## Whether the car's blower runs (stock: its level 1 to 14). False when nothing reported it.
-static func blower_running() -> bool:
-	var c = Core.get_value("/telemetry/climate")
-	if not c is Dictionary or str(c.get("source", "")) in CLIMATE_UNREPORTED:
-		return false
-	var level = c.get("fanLevel")
-	if level != null:
-		return float(level) > 0.0
-	return c.get("on") == true
 
 
 # ---- layout ----

@@ -2,18 +2,21 @@ extends Node
 ## Runs the shell against livi-core, or the scenario runner with `-- --test <path>`, or the live tuning server with `-- --live`.
 
 const Startup := preload("res://startup.gd")
+## Short at first: home waits for the core's state, and the core starts beside the shell.
+var _core_retry_s := 0.25
 
 
 func _ready() -> void:
 	set_process_input(false)
 	var args := OS.get_cmdline_user_args()
+	# load, not preload: a preload compiles the runner and the tuning server on every start.
 	if args.has("--test"):
-		var runner := preload("res://test/runner.gd").new()
+		var runner: Node = load("res://test/runner.gd").new()
 		add_child(runner)
 		runner.run(args)
 		return
 	if args.has("--live"):
-		add_child(preload("res://live/live_server.gd").new())
+		add_child(load("res://live/live_server.gd").new())
 		return
 	Startup.mark("main")
 	# livi-core's video host is pointed at this socket (packaging/), so a unit names it.
@@ -83,8 +86,10 @@ func _retry_core() -> void:
 	var err: String = Core.try_connect_core()
 	if err == "":
 		print("core: connected")
+		_core_retry_s = 0.25
 		return
-	get_tree().create_timer(2.0).timeout.connect(_retry_core)
+	get_tree().create_timer(_core_retry_s).timeout.connect(_retry_core)
+	_core_retry_s = minf(_core_retry_s * 2.0, 2.0)
 
 
 ## The page open when the shell last stopped, so a restart lands where the driver was. A hosted

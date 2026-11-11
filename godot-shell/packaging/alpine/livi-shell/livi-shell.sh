@@ -17,6 +17,9 @@ if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
         dbus=dbus-run-session
     fi
 fi
+# Unset, Godot probes each DRM device for a discrete GPU in forked children before its window
+# (~150 ms in the VM); the unit has one GPU, so 0, the default device, is what it would find.
+export DRI_PRIME="${DRI_PRIME:-0}"
 # The compatibility renderer on GLES3 through Wayland's EGL; no Vulkan (Mali-G51 has no
 # usable driver); the arm32 feature tag selects the `unit` quality profile.
 set -- "$godot" --path "${LIVI_SHELL_PROJECT:-/usr/lib/livi-shell/project}" --display-driver wayland \

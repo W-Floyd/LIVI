@@ -39,8 +39,11 @@ var _scene: SceneSkin
 
 ## A pack's page standing in for the home page, while one is open.
 var _page: Control
-## The live EV page, kept while another page shows (`_live_page`).
-var _ev_live: EvLive
+## The pages off home, loaded at their first use (`_page_script`): naming their classes here would
+## compile them with the shell, before the first frame (docs/startup.md).
+const PAGE_SCRIPTS := {ev_live = "res://ui/ev_live.gd", settings = "res://ui/settings_page.gd", media = "res://ui/media_page.gd", apps = "res://ui/apps_page.gd", pack = "res://ui/pack_screen.gd"}
+## The live EV page, kept while another page shows (`_live_page`). A Control: see PAGE_SCRIPTS.
+var _ev_live: Control
 ## Started by each look change while the live page is away (`warm_up`).
 var _rewarm: Timer
 const REWARM_S := 1.5
@@ -110,8 +113,8 @@ var rail_width := 0.0:
 			# The rail is the way home: the EV page's and Settings' back buttons only without it.
 			if _ev_live:
 				_ev_live.back_button = v <= 0.0
-			if _page is SettingsPage:
-				(_page as SettingsPage).back_button = v <= 0.0
+			if _is_page(_page, "settings"):
+				_page.back_button = v <= 0.0
 			_inset()
 			_tell_app_area()
 
@@ -247,7 +250,7 @@ func _process(_delta: float) -> void:
 
 func _draw() -> void:
 	# A scene theme's 3D world shows through instead.
-	if not ThemeManager.is_scene() and not _page is EvLive:
+	if not ThemeManager.is_scene() and not _is_page(_page, "ev_live"):
 		draw_rect(Rect2(Vector2.ZERO, size), ThemeManager.c.bg)
 
 
@@ -265,7 +268,7 @@ func _style() -> void:
 	if _scene:
 		_scene.visible = _page == null
 	# A pack that comes or goes changes who draws the live page's title bar.
-	if _page is EvLive and _live_bar != _own_bar():
+	if _is_page(_page, "ev_live") and _live_bar != _own_bar():
 		open_page("ev_live")
 	var g: float = ThemeManager.px.gap
 	for k in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
@@ -409,7 +412,7 @@ func _fit_page(page: Control) -> void:
 			if page.has_method("_layout"):
 				page.call_deferred("_layout")
 			page.queue_redraw()
-		if page is SettingsPage:
+		if _is_page(page, "settings"):
 			page.offset_top = top
 	else:
 		page.offset_top = r.position.y
@@ -474,7 +477,7 @@ func open_page(page: String) -> String:
 		_page = ev
 		add_child(_page)
 	elif page == "settings":
-		var settings := SettingsPage.new()
+		var settings: Control = _page_script("settings").new()
 		settings.back_pressed.connect(func(): open_page.call_deferred(_settings_from))
 		settings.back_button = rail_width <= 0.0
 		$Page.visible = true
@@ -482,19 +485,19 @@ func open_page(page: String) -> String:
 		_page = settings
 		add_child(_page)
 	elif page == "media":
-		var media := MediaPage.new()
+		var media: Control = _page_script("media").new()
 		media.now_playing = now_playing
 		_fit_page(media)
 		_page = media
 		add_child(_page)
 	elif page == "apps":
-		var apps := AppsPage.new()
+		var apps: Control = _page_script("apps").new()
 		apps.launcher = launcher
 		_fit_page(apps)
 		_page = apps
 		add_child(_page)
 	elif not home and not _app_page:
-		_page = PackScreen.new()
+		_page = _page_script("pack").new()
 		_page.screen_name = page
 		add_child(_page)
 	_layout_status()
@@ -580,17 +583,17 @@ func _on_core_page(path: String) -> void:
 		if _page_name != "media":
 			open_page("media")
 		var tab: String = {phone = "phone", dabplus = "dab", fm = "fm"}.get(path.trim_prefix("/").get_slice("/", 1), "")
-		if tab != "" and _page is MediaPage and now_playing.receiver:
-			(_page as MediaPage).show_view(tab)
+		if tab != "" and _is_page(_page, "media") and now_playing.receiver:
+			_page.show_view(tab)
 	else:
 		print("core asks for %s: the shell has no such page" % path)
 
 
 ## The live EV page, built once and kept: building it is half a second on the unit, and a new
 ## one's materials would compile their shaders again on its first frame.
-func _live_page() -> EvLive:
+func _live_page() -> Control:
 	if _ev_live == null:
-		_ev_live = EvLive.new()
+		_ev_live = _page_script("ev_live").new()
 		_ev_live.tile_pressed.connect(func(id): ev_action.emit(id))
 		_ev_live.back_pressed.connect(func(): open_page.call_deferred("home"))
 		_ev_live.back_button = rail_width <= 0.0
@@ -635,7 +638,16 @@ func warm_up() -> void:
 
 ## Whether the active pack draws the live page's title bar itself: it has the stock layout.
 func _own_bar() -> bool:
-	return not EvLive.pack_layout().is_empty()
+	return not _page_script("ev_live").pack_layout().is_empty()
+
+
+static func _page_script(id: String) -> GDScript:
+	return load(PAGE_SCRIPTS[id])
+
+
+## `page is <id's class>`, without loading the class.
+static func _is_page(page: Object, id: String) -> bool:
+	return page != null and page.get_script() != null and page.get_script().resource_path == PAGE_SCRIPTS[id]
 
 
 func _place_projection(ask := true) -> void:

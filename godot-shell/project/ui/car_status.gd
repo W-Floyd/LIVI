@@ -8,6 +8,8 @@ extends VBoxContainer
 
 ## The 12 V battery's charge under which it reads in the warning color.
 const AUX_LOW_PCT := 30
+## A climate LIVI filled in itself, not one a car or program reported.
+const CLIMATE_UNREPORTED := ["default", "saved"]
 const PARTS := [
 	["doorDriverOpen", "Driver's door"], ["doorPassengerOpen", "Passenger's door"],
 	["doorRearLeftOpen", "Rear left door"], ["doorRearRightOpen", "Rear right door"],
@@ -104,7 +106,7 @@ func show_for(t: Dictionary) -> bool:
 	var w = t.get("climatePowerW")
 	var drawing: bool = w != null and float(w) > 0.0
 	# Its draw only: the range's name already says the climate is on.
-	_set_chip(_climate, "" if not (drawing and EvLive.blower_running()) else "Climate %s" % Units.power_text(float(w)))
+	_set_chip(_climate, "" if not (drawing and blower_running()) else "Climate %s" % Units.power_text(float(w)))
 	var hw = t.get("batteryHeaterW")
 	_set_chip(_heater, "" if hw == null or float(hw) <= 0.0 else "Battery heater %s" % Units.power_text(float(hw)))
 	var err := conditioning_error(t.get("batteryConditioningError"))
@@ -119,6 +121,17 @@ func show_for(t: Dictionary) -> bool:
 	_set_chip(_cond, cond, "warn" if err != "" else "text")
 	_wanted = [_body, _aux, _cond, _heater, _climate].filter(func(c): return c.visible)
 	return keep(_wanted.size())
+
+
+## Whether the car's blower runs (stock: its level 1 to 14). False when nothing reported it.
+static func blower_running() -> bool:
+	var c = Core.get_value("/telemetry/climate")
+	if not c is Dictionary or str(c.get("source", "")) in CLIMATE_UNREPORTED:
+		return false
+	var level = c.get("fanLevel")
+	if level != null:
+		return float(level) > 0.0
+	return c.get("on") == true
 
 
 ## Why the car would not condition its battery, its batteryConditioningError in words; "" for

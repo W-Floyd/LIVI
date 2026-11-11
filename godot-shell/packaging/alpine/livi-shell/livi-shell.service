@@ -1,7 +1,9 @@
 [Unit]
 Description=LIVI Godot shell (kiosk)
 Requires=livi-shell-core.service seatd.service
-After=livi-shell-core.service seatd.service systemd-user-sessions.service
+# Not after livi-shell-core: that waits for bluetooth.service and network.target, which the
+# shell's start need not; it connects to the core whenever its socket appears.
+After=seatd.service systemd-user-sessions.service
 # The kiosk owns the display: the desktop session and the console are off while it runs.
 Conflicts=getty@tty1.service gdm.service
 

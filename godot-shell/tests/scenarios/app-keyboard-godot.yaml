@@ -1,0 +1,45 @@
+name: app-keyboard-godot
+# A Godot app's LineEdit (as godot-maps' search field): Godot enables zwp_text_input_v3 while it
+# edits (no content type), takes commits as typed characters and backspace and Done as keys.
+clock: 2026-11-09T08:30:00
+nav: true
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - wait: { frames: 2 }
+  - gdscript: |
+      var log: String = runner._client_events("org.livi.test.godot")
+      DirAccess.make_dir_recursive_absolute(log.get_base_dir())
+      runner.set_meta("log", log)
+      return runner._spawn({role = "command", run = ["godot", "--path", ProjectSettings.globalize_path("res://../tests/fixtures/clients/godot-entry"), "--display-driver", "wayland", "--rendering-driver", "opengl3", "--audio-driver", "Dummy", "--", log]})
+  - wait: { window: org.livi.test.godot }
+  - page: app
+  - wait: { frames: 30 }
+  # The field is the window's top-left corner.
+  - gdscript: |
+      await runner._touch(Vector2(shell.get_global_rect().position.x + 100.0, 20.0))
+      for i in 180:
+          if shell.app_keyboard != null:
+              break
+          await runner.frames(1)
+      if shell.app_keyboard == null:
+          return "no keyboard for Godot's LineEdit"
+      await runner.frames(30)
+  - tap: { node: AppKeyboard/Keyboard/Keys/Shift }
+  - tap: { node: AppKeyboard/Keyboard/Keys/h }
+  - tap: { node: AppKeyboard/Keyboard/Keys/i }
+  - tap: { node: AppKeyboard/Keyboard/Keys/Space }
+  - tap: { node: AppKeyboard/Keyboard/Keys/Backspace }
+  - tap: { node: AppKeyboard/Keyboard/Keys/Done }
+  - gdscript: |
+      for i in 180:
+          var got := FileAccess.get_file_as_string(runner.get_meta("log"))
+          if got.contains("activate Hi\n"):
+              return ""
+          await runner.frames(1)
+      return "Godot got %s" % JSON.stringify(FileAccess.get_file_as_string(runner.get_meta("log")).split("\n", false))
+  # Submitted, the LineEdit stops editing and disables its text input: nothing comes back.
+  - wait: { frames: 30 }
+  - gdscript: |
+      if shell.app_keyboard != null:
+          return "the keyboard came back"

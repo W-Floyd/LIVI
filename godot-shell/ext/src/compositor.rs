@@ -56,6 +56,9 @@ use smithay::wayland::dmabuf::{
     DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier, get_dmabuf,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState, with_buffer_contents};
+use smithay::reexports::wayland_protocols::wp::text_input::zv3::server::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
+
+use crate::text_input::{Field, TextInputs};
 
 /// A client's newest picture, as straight RGBA8 rows with no padding.
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +142,8 @@ pub enum WindowEvent {
     /// The first buffer arrived; app_id and title are known by then.
     Mapped(u64),
     Unmapped(u64),
+    /// The window's client wants text typed (true), or no longer does.
+    TextInput(u64, bool),
 }
 
 pub struct State {
@@ -182,6 +187,7 @@ pub struct State {
     /// Released at the next frame_done, then the one after: one drawn frame later.
     release_next: Vec<WlBuffer>,
     release_now: Vec<WlBuffer>,
+    pub text_input: TextInputs,
 }
 
 pub struct Server {
@@ -296,7 +302,9 @@ impl Server {
             gone_buffers: Vec::new(),
             release_next: Vec::new(),
             release_now: Vec::new(),
+            text_input: TextInputs::default(),
         };
+        dh.create_global::<State, ZwpTextInputManagerV3, _>(1, ());
         Ok(Server {
             display,
             socket: None,
@@ -359,6 +367,7 @@ impl Server {
             self.insert_client(stream)?;
         }
         self.display.dispatch_clients(&mut self.state)?;
+        self.state.text_input_events();
         self.display.flush_clients()?;
         Ok(())
     }
@@ -441,6 +450,7 @@ impl Server {
     /// `button` is an evdev code: BTN_LEFT is 0x110.
     pub fn pointer_button(&mut self, button: u32, pressed: bool) {
         let state = if pressed { ButtonState::Pressed } else { ButtonState::Released };
+        self.state.text_input.rearm |= pressed;
         let event = ButtonEvent { button, state, serial: SERIAL_COUNTER.next_serial(), time: self.time() };
         let pointer = self.state.pointer.clone();
         pointer.button(&mut self.state, &event);
@@ -455,6 +465,7 @@ impl Server {
             serial: SERIAL_COUNTER.next_serial(),
             time: self.time(),
         };
+        self.state.text_input.rearm = true;
         let touch = self.state.touch.clone();
         touch.down(&mut self.state, Some(focus), &event);
         touch.frame(&mut self.state);
@@ -482,7 +493,9 @@ impl Server {
     pub fn keyboard_focus(&mut self, window: Option<u64>) {
         let focus = window.and_then(|w| self.focus(w, 0.0, 0.0)).map(|((s, _), _)| s);
         let keyboard = self.state.keyboard.clone();
-        keyboard.set_focus(&mut self.state, focus, SERIAL_COUNTER.next_serial());
+        keyboard.set_focus(&mut self.state, focus.clone(), SERIAL_COUNTER.next_serial());
+        self.state.text_input.set_focus(focus);
+        self.state.text_input_events();
     }
 
     /// `code` is an evdev key code (KEY_A is 30), sent to the focused window.
@@ -494,6 +507,41 @@ impl Server {
         keyboard.input::<(), _>(&mut self.state, Keycode::new(code + 8), state, serial, time, |_, _, _| {
             FilterResult::Forward
         });
+    }
+
+    /// The field the window wants text for, while it does.
+    pub fn text_field(&self, window: u64) -> Option<Field> {
+        let w = self.state.windows.iter().find(|w| w.id == window)?;
+        self.state.text_input.field(w.toplevel.wl_surface()).cloned()
+    }
+
+    /// Whether the window's client has bound zwp_text_input_v3: if not, only keys reach it.
+    pub fn has_text_input(&self, window: u64) -> bool {
+        let w = self.state.windows.iter().find(|w| w.id == window);
+        w.and_then(|w| w.toplevel.wl_surface().client()).is_some_and(|c| self.state.text_input.bound(&c))
+    }
+
+    /// Types `text` into the focused window: through its enabled text input, else as key presses
+    /// on a US layout. False when neither could take all of it (nothing is sent then).
+    pub fn type_text(&mut self, text: &str) -> bool {
+        if self.state.text_input.commit_string(text) {
+            return true;
+        }
+        let Some(keys) = text.chars().map(crate::keys::us_key).collect::<Option<Vec<_>>>() else {
+            return false;
+        };
+        const SHIFT: u32 = 42;
+        for (code, shift) in keys {
+            if shift {
+                self.key(SHIFT, true);
+            }
+            self.key(code, true);
+            self.key(code, false);
+            if shift {
+                self.key(SHIFT, false);
+            }
+        }
+        true
     }
 }
 
@@ -676,6 +724,20 @@ impl CompositorHandler for State {
 }
 
 impl State {
+    /// Text-input changes as window events, the last per window: Godot's LineEdit enables,
+    /// disables and enables again in one go when tapped.
+    fn text_input_events(&mut self) {
+        let changes = std::mem::take(&mut self.text_input.changes);
+        for (n, (surface, on)) in changes.iter().enumerate() {
+            if changes[n + 1..].iter().any(|(s, _)| s == surface) {
+                continue;
+            }
+            if let Some(w) = self.windows.iter().find(|w| w.toplevel.wl_surface() == surface) {
+                self.events.push(WindowEvent::TextInput(w.id, *on));
+            }
+        }
+    }
+
     /// The client's scale: by its PID, else its process group, in `launch_scales`; else 1.
     pub fn client_scale(&self, client: &Client) -> f64 {
         let Some(data) = client.get_data::<ClientState>() else { return 1.0 };
@@ -1047,17 +1109,37 @@ impl XdgShellHandler for State {
         let Some(i) = self.windows.iter().position(|w| w.toplevel == toplevel) else {
             return;
         };
+        if self.text_input.focus() == Some(toplevel.wl_surface()) {
+            self.text_input.set_focus(None);
+            self.text_input_events();
+        }
         let w = self.windows.remove(i);
         if w.mapped {
             self.events.push(WindowEvent::Unmapped(w.id));
         }
     }
 
-    fn new_popup(&mut self, _: PopupSurface, _: PositionerState) {}
+    /// Configured where the client asks, though not drawn: GTK 4 blocks until a popup's first
+    /// configure (a touch in an entry opens its text handles as popups).
+    fn new_popup(&mut self, popup: PopupSurface, positioner: PositionerState) {
+        popup.with_pending_state(|s| {
+            s.geometry = positioner.get_geometry();
+            s.positioner = positioner;
+        });
+        let _ = popup.send_configure();
+    }
 
     fn grab(&mut self, _: PopupSurface, _: WlSeat, _: Serial) {}
 
-    fn reposition_request(&mut self, _: PopupSurface, _: PositionerState, _: u32) {}
+    /// As placed: GTK 4 blocks until a reposition is answered.
+    fn reposition_request(&mut self, popup: PopupSurface, positioner: PositionerState, token: u32) {
+        popup.with_pending_state(|s| {
+            s.geometry = positioner.get_geometry();
+            s.positioner = positioner;
+        });
+        // With its configure.
+        popup.send_repositioned(token);
+    }
 }
 
 impl ShmHandler for State {
@@ -1178,6 +1260,7 @@ mod tests {
             video: false,
             events: None,
             honour: Honour::None,
+            text_input: None,
         }
     }
 
@@ -1404,6 +1487,91 @@ mod tests {
             let got: Vec<String> = client.join().unwrap().events.into_iter().filter(|e| !e.starts_with("buffer ")).collect();
             let want: Vec<&str> = steps.iter().flat_map(|(_, w)| w.iter().copied()).collect();
             assert_eq!(got, want, "{honour:?} {scale}");
+        }
+    }
+
+    /// Typing reaches the window through zwp_text_input_v3 while its field is enabled, else as
+    /// keys on a US layout; the shell hears when the field wants text and when it stops (disable,
+    /// focus gone). Each step waits until the server sees `until`, then the client gets `lines`.
+    #[test]
+    fn text_reaches_the_field_or_falls_back_to_keys() {
+        type Step = (fn(&mut Server) -> bool, fn(&State) -> bool, &'static [&'static str]);
+        let any: fn(&State) -> bool = |_| true;
+        let wanted: fn(&State) -> bool = |s| s.events.contains(&WindowEvent::TextInput(1, true));
+        let released: fn(&State) -> bool = |s| s.events.contains(&WindowEvent::TextInput(1, false));
+        let tap_field: fn(&mut Server) -> bool = |s| {
+            s.state.events.clear();
+            s.touch_down(1, 0, 10.0, 10.0);
+            s.touch_up(0);
+            true
+        };
+        let tap_outside: fn(&mut Server) -> bool = |s| {
+            s.state.events.clear();
+            s.touch_down(1, 0, 10.0, 60.0);
+            s.touch_up(0);
+            true
+        };
+        let with_v3: &[Step] = &[
+            (|s| { s.keyboard_focus(Some(1)); true }, any, &["keyboard enter", "text enter"]),
+            (tap_field, wanted, &["touch down 0 10.0 10.0", "text enabled"]),
+            (
+                |s| s.text_field(1) == Some(Field { hint: 0x80 | 0x40, purpose: 8, rect: Some([10, 20, 2, 16]), surrounding: None }) && s.has_text_input(1),
+                any,
+                &[],
+            ),
+            // Changes in one dispatch come as the last: Godot enables, disables and enables on a tap.
+            (
+                |s| {
+                    let surface = s.state.windows[0].toplevel.wl_surface().clone();
+                    s.state.events.clear();
+                    s.state.text_input.changes = [true, false, true].map(|on| (surface.clone(), on)).to_vec();
+                    s.state.text_input_events();
+                    s.state.events == [WindowEvent::TextInput(1, true)]
+                },
+                any,
+                &[],
+            ),
+            (|s| s.type_text("hé!"), any, &["text commit hé!"]),
+            (|s| s.state.text_input.delete_surrounding(1, 0), any, &["text delete 1 0"]),
+            (|s| s.state.text_input.preedit("ab", 2, 2), any, &["text preedit ab"]),
+            // Enabled again by a tap while enabled: asked again, for a keyboard put away.
+            (tap_field, wanted, &["touch down 0 10.0 10.0"]),
+            (tap_outside, released, &["touch down 0 10.0 60.0", "text disabled"]),
+            // Disabled: keys, and nothing for what a US layout cannot type.
+            (|s| s.text_field(1).is_none() && s.type_text("a"), any, &["key 30 pressed", "key 30 released"]),
+            (|s| !s.type_text("é"), any, &[]),
+            (tap_field, wanted, &["text enabled"]),
+            (|s| { s.state.events.clear(); s.keyboard_focus(None); true }, released, &["keyboard leave", "text leave"]),
+            (|s| !s.state.text_input.commit_string("x"), any, &[]),
+        ];
+        let without: &[Step] = &[
+            (|s| { s.keyboard_focus(Some(1)); !s.has_text_input(1) }, any, &["keyboard enter"]),
+            (tap_field, any, &["touch down 0 10.0 10.0"]),
+            (|s| s.text_field(1).is_none() && s.type_text("Hi"), any, &["key 42 pressed", "key 35 pressed", "key 35 released", "key 42 released", "key 23 pressed"]),
+        ];
+        for (text_input, steps) in [(Some(8), with_v3), (None, without)] {
+            let mut server = server();
+            let mut o = opts(Pattern::Grid, None, false);
+            o.text_input = text_input;
+            let client = client(&mut server, o);
+            assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))));
+            for (n, (send, until, _)) in steps.iter().enumerate() {
+                assert!(send(&mut server), "{text_input:?} step {n}");
+                assert!(pump(&mut server, until), "{text_input:?} step {n}: not seen");
+                // The client's answer, before the next step.
+                for _ in 0..20 {
+                    server.dispatch().unwrap();
+                    thread::sleep(Duration::from_millis(2));
+                }
+            }
+            server.close(1);
+            assert!(pump(&mut server, |s| s.windows.is_empty()));
+            let got: Vec<String> = client.join().unwrap().events;
+            let want: Vec<&str> = steps.iter().flat_map(|(_, _, w)| w.iter().copied()).collect();
+            let mut rest = got.iter();
+            for w in &want {
+                assert!(rest.any(|g| g == w), "{text_input:?}: no {w:?} in order in {got:?}");
+            }
         }
     }
 

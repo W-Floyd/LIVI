@@ -196,6 +196,12 @@ impl WaylandCompositor {
     fn window_mapped(id: i64, app_id: GString, title: GString);
     #[signal]
     fn window_unmapped(id: i64);
+    /// The window's client wants text typed: `text_field(id)` says what kind.
+    #[signal]
+    fn text_input_wanted(id: i64);
+    /// It no longer does: it disabled its text input, lost keyboard focus, or closed.
+    #[signal]
+    fn text_input_released(id: i64);
 
     /// Listens on `name` in XDG_RUNTIME_DIR, or the first free `wayland-N` when empty, and
     /// offers dmabuf when Godot's GL context can import it. Returns an error.
@@ -353,6 +359,55 @@ impl WaylandCompositor {
             }
             _ => false,
         }
+    }
+
+    /// The field the window wants text for, while it does, else empty: `hint` and `purpose`
+    /// (zwp_text_input_v3's content hint bits and purpose), `cursor` (a Rect2 in the window's
+    /// frame pixels, when the client gave one), and `text`, `caret` and `anchor` (bytes) when it
+    /// told the text around the cursor.
+    #[func]
+    fn text_field(&self, id: i64) -> VarDictionary {
+        let mut out = VarDictionary::new();
+        let Some(s) = self.server.as_ref() else { return out };
+        let Some(f) = s.text_field(id as u64) else { return out };
+        let k = s.state.windows.iter().find(|w| w.id == id as u64).map_or(1.0, |w| w.buffer_scale) as f32;
+        out.set("hint", f.hint as i64);
+        out.set("purpose", f.purpose as i64);
+        if let Some([x, y, w, h]) = f.rect {
+            out.set("cursor", Rect2::new(Vector2::new(x as f32 * k, y as f32 * k), Vector2::new(w as f32 * k, h as f32 * k)));
+        }
+        if let Some((text, caret, anchor)) = f.surrounding {
+            out.set("text", &gs(text));
+            out.set("caret", caret as i64);
+            out.set("anchor", anchor as i64);
+        }
+        out
+    }
+
+    /// Whether the window's client has bound zwp_text_input_v3; without it only keys reach it.
+    #[func]
+    fn has_text_input(&self, id: i64) -> bool {
+        self.server.as_ref().is_some_and(|s| s.has_text_input(id as u64))
+    }
+
+    /// Types into the focused window: its enabled text input's commit_string, else key presses
+    /// on a US layout. False when neither takes it all.
+    #[func]
+    fn type_text(&mut self, text: GString) -> bool {
+        self.server.as_mut().is_some_and(|s| s.type_text(&text.to_string()))
+    }
+
+    /// Deletes `before` and `after` bytes around the cursor of the enabled field. False with none.
+    #[func]
+    fn text_delete(&mut self, before: i64, after: i64) -> bool {
+        self.server.as_ref().is_some_and(|s| s.state.text_input.delete_surrounding(before.max(0) as u32, after.max(0) as u32))
+    }
+
+    /// Text being composed at the cursor of the enabled field, replaced by the next commit; empty
+    /// clears it. `caret_begin`, `caret_end`: bytes into it.
+    #[func]
+    fn text_preedit(&mut self, text: GString, caret_begin: i64, caret_end: i64) -> bool {
+        self.server.as_ref().is_some_and(|s| s.state.text_input.preedit(&text.to_string(), caret_begin as i32, caret_end as i32))
     }
 
     #[func]
@@ -539,6 +594,8 @@ impl WaylandCompositor {
                     }
                     self.signals().window_unmapped().emit(id as i64);
                 }
+                WindowEvent::TextInput(id, true) => self.signals().text_input_wanted().emit(id as i64),
+                WindowEvent::TextInput(id, false) => self.signals().text_input_released().emit(id as i64),
             }
         }
     }

@@ -33,10 +33,12 @@ Goldens are lossless WebP, a third of PNG's size. Captures are compared in memor
 
 Scenario fixtures: `core` (a partial state) and `clients`: `{ role: app, app_id, pattern:
 grid|bars, size: WxH, animate: N, buffer: shm|dmabuf|nv12|i420, video: true, events: true,
-honour: none|fractional|integer, scale: percent }` runs the test client
+honour: none|fractional|integer, scale: percent, text_input: <content purpose> }` runs the test client
 (`events` logs the input it gets, for `expect_client`; `video` sends the picture as waylandsink does, a
 viewporter-scaled subsurface under a placeholder toplevel; `scale` is what the compositor asks of it,
-`honour` which protocol it draws by, `size` then in surface units), `{ role: command, run: [...] }` any
+`honour` which protocol it draws by, `size` then in surface units; `size: 0x0` draws at each configure's size;
+`text_input` binds zwp_text_input_v3 with that purpose, a tap in the window's top half enabling it and one in the bottom half
+disabling it, and logs what is typed as `text commit …`), `{ role: command, run: [...] }` any
 Wayland program. `apps: <dir under tests/>` is the launcher's only data dir, with its `apps.yaml`
 (see "App launcher"). A scenario's `nav: true` docks the rail LIVI_SHELL_NAV turns on (`NavRail`),
 which every page but the phone's lays out beside.
@@ -277,6 +279,26 @@ it served: no bus yet, a lost connection or a name another portal owns are retri
 Until it is served, apps get `ADW_DEBUG_COLOR_SCHEME` at launch instead, fixed for their life.
 The launcher's lines, the portal's status among them, also go to
 `~/.local/state/livi-shell/shell.log`: the kiosk service's stdout is the console, not the journal.
+
+### Typing into apps
+
+The compositor serves `zwp_text_input_v3` with the shell as the input method (`text_input.rs`;
+smithay's own relays only to an input-method client). When the focused app enables its text
+input (scenarios `app-keyboard-gtk` and `-godot` check GTK 4 and Godot's LineEdit; GTK 3,
+Firefox and Qt 6 speak the same protocol), `AppKeyboard` slides in over
+the driver's side of the app page, 55 % of its width, beside the rail, and the app is configured
+to the rest (`Wayland.set_app_area`), so it lays its field and results out beside the keys: a
+keyboard along the bottom would leave a 720 px panel's app a strip too short for a result list.
+Letters go as `commit_string`; backspace and Done as keys (Backspace, Enter), which every client
+takes. The content purpose picks the keys: digits, number, phone, PIN the keypad; email `_ - @`,
+URL `/ : -`; a password (or the hidden or sensitive hint) shows no preview and no key pop. The
+text the app reports around its cursor (GTK does, Godot does not) shows above the keys.
+
+It goes on Done (after Enter), cancel, the app disabling its text input, its window losing focus
+or closing, or another page. A tap on the field while the app still wants text brings it back.
+An app with no text input (`Wayland.has_text_input`) gets a keyboard button in its driver-side
+corner instead, and typing reaches it as key presses on a US layout. Projection windows never get
+it: the phone draws its own.
 
 ## Settings
 

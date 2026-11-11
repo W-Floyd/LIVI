@@ -1,6 +1,7 @@
 //! livi-shell-test-client [--app-id ID] [--title T] [--size WxH] [--pattern grid|bars]
 //!     [--animate FRAMES] [--buffer shm|dmabuf|nv12|i420] [--video] [--events FILE]
 //!     [--honour none|fractional|integer]
+//!     [--text-input normal|number|email|url|password|...]
 //! Connects to WAYLAND_DISPLAY and shows a known picture; see test_client.rs.
 
 #[cfg(target_os = "linux")]
@@ -18,10 +19,11 @@ fn main() {
         video: false,
         events: None,
         honour: Honour::None,
+        text_input: None,
     };
     let mut args = std::env::args().skip(1);
     let usage = || -> ! {
-        eprintln!("usage: livi-shell-test-client [--app-id ID] [--title T] [--size WxH] [--pattern grid|bars] [--animate N] [--buffer shm|dmabuf|nv12|i420] [--video] [--events FILE] [--honour none|fractional|integer]");
+        eprintln!("usage: livi-shell-test-client [--app-id ID] [--title T] [--size WxH] [--pattern grid|bars] [--animate N] [--buffer shm|dmabuf|nv12|i420] [--video] [--events FILE] [--honour none|fractional|integer] [--text-input PURPOSE]");
         std::process::exit(2)
     };
     while let Some(a) = args.next() {
@@ -42,6 +44,7 @@ fn main() {
             "--animate" => opts.animate = Some(v.parse().unwrap_or_else(|_| usage())),
             "--events" => opts.events = Some(v.into()),
             "--honour" => opts.honour = Honour::parse(&v).unwrap_or_else(|| usage()),
+            "--text-input" => opts.text_input = Some(livi_godot_shell::test_client::purpose(&v).unwrap_or_else(|| usage())),
             "--buffer" => {
                 (opts.dmabuf, opts.format) = match v.as_str() {
                     "shm" => (false, Format::Xrgb8888),

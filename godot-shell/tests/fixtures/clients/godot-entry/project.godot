@@ -1,0 +1,12 @@
+; A Godot window with a LineEdit at the top, for the on-screen keyboard's scenario: each change
+; of its text, and Enter, is a line appended to the path given after "--".
+config_version=5
+
+[application]
+
+config/name="org.livi.test.godot"
+run/main_scene="res://main.tscn"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"

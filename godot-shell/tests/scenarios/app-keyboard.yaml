@@ -1,0 +1,128 @@
+name: app-keyboard
+# A hosted app's field (zwp_text_input_v3) brings the keyboard up on the driver's side of the app
+# page, beside the rail, and the app is configured to the rest of the width, drawn there 1:1.
+# Letters reach it as text-input commits, backspace and Done as keys. Done puts the keyboard away
+# and gives the width back; a tap on the field brings it back; the app leaving its field puts it
+# away. A number field gets the keypad (RHD: on the right). An app without text input gets a
+# button that brings the keyboard up, typing as keys.
+clock: 2026-11-09T08:30:00
+nav: true
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - wait: { frames: 2 }
+  - gdscript: |
+      return runner._spawn({role = "app", app_id = "org.livi.test.field", pattern = "grid", size = "0x0", events = true, text_input = "normal"})
+  - wait: { window: org.livi.test.field }
+  - page: app
+  - wait: { frames: 2 }
+  - gdscript: |
+      if shell.get_node("KeysButton").visible:
+          return "the keys button shows for an app with text input"
+  # The field is the window's top half.
+  - tap: { x: 1500, y: 100, with: touch }
+  - wait: { frames: 30 }
+  - gdscript: |
+      var kb: AppKeyboard = shell.app_keyboard
+      if kb == null:
+          return "no keyboard"
+      var s: Rect2 = shell.get_global_rect()
+      var r := kb.get_global_rect()
+      if absf(r.position.x - s.position.x) > 1.0 or absf(r.size.x - roundf(s.size.x * 0.55)) > 1.0 or r.size.y != s.size.y:
+          return "keyboard at %s in %s" % [r, s]
+      var w: WindowView = shell.get_node("Projection/Window")
+      var want := Vector2(s.size.x - r.size.x, s.size.y)
+      if w.texture == null or w.texture.get_size() != want or w.get_global_rect() != Rect2(Vector2(r.end.x, 0), want):
+          return "the window is %s at %s; want %s beside the keyboard" % [w.texture.get_size() if w.texture else null, w.get_global_rect(), want]
+      runner.set_meta("beside", r.end.x)
+  - expect_client: { app_id: org.livi.test.field, lines: ["text enter", "text enabled"] }
+  # The rail is not this scenario's: masked.
+  - screenshot: { name: app-keyboard, mask: [[0, 0, 100, 720]] }
+  - tap: { node: AppKeyboard/Keyboard/Keys/Shift }
+  - tap: { node: AppKeyboard/Keyboard/Keys/h }
+  - tap: { node: AppKeyboard/Keyboard/Keys/i }
+  - tap: { node: AppKeyboard/Keyboard/Keys/Backspace }
+  - tap: { node: AppKeyboard/Keyboard/Keys/Symbols }
+  - tap: { node: AppKeyboard/Keyboard/Keys/7 }
+  - expect_client:
+      app_id: org.livi.test.field
+      lines: ["text commit H", "text commit i", "key 14 pressed", "key 14 released", "text commit 7"]
+  # Done: Enter, and the app has the width back.
+  - tap: { node: AppKeyboard/Keyboard/Keys/Done }
+  - expect_client: { app_id: org.livi.test.field, lines: ["key 28 pressed", "key 28 released"] }
+  - wait: { frames: 30 }
+  - gdscript: |
+      if shell.app_keyboard != null or shell.has_node("AppKeyboard"):
+          return "the keyboard is still there"
+      var w: WindowView = shell.get_node("Projection/Window")
+      if w.texture.get_size() != shell.size:
+          return "the window is %s, not the whole page" % w.texture.get_size()
+  # The field tapped again (still enabled): back. A tap off the field (it disables): away.
+  - tap: { x: 1500, y: 100, with: touch }
+  - wait: { frames: 30 }
+  - gdscript: |
+      if shell.app_keyboard == null:
+          return "no keyboard after a tap on the field"
+      await runner._touch(Vector2(runner.get_meta("beside") + 100.0, 600.0))
+      await runner.frames(30)
+      if shell.app_keyboard != null or shell.has_node("AppKeyboard"):
+          return "the keyboard stayed after the app left its field"
+  - expect_client: { app_id: org.livi.test.field, lines: ["text disabled"] }
+  # A number field, RHD: the keypad on the right; cancel sends nothing.
+  - theme: { hand: rhd }
+  - gdscript: |
+      var e: String = runner._spawn({role = "app", app_id = "org.livi.test.number", pattern = "bars", size = "0x0", events = true, text_input = "number"})
+      if e != "":
+          return e
+      for i in 300:
+          if Wayland.find_window("org.livi.test.number") >= 0:
+              break
+          await runner.frames(1)
+      shell.bring_forward(Wayland.find_window("org.livi.test.number"))
+      await runner.frames(2)
+  - tap: { x: 300, y: 100, with: touch }
+  - wait: { frames: 30 }
+  - gdscript: |
+      var kb: AppKeyboard = shell.app_keyboard
+      if kb == null or kb.keyboard.mode != "number":
+          return "keyboard %s" % (kb.keyboard.mode if kb else "none")
+      var s: Rect2 = shell.get_global_rect()
+      if absf(kb.get_global_rect().end.x - s.end.x) > 1.0:
+          return "keypad at %s in %s" % [kb.get_global_rect(), s]
+      if shell.get_node("Projection/Window").get_global_rect().end.x > kb.get_global_rect().position.x + 1.0:
+          return "the window reaches under the keypad"
+  - screenshot: { name: app-keyboard-keypad-rhd, mask: [[1820, 0, 100, 720]] }
+  - tap: { node: AppKeyboard/Keyboard/Keys/4 }
+  - tap: { node: AppKeyboard/Keyboard/Keys/2 }
+  - tap: { node: AppKeyboard/Keyboard/Keys/Cancel }
+  - expect_client: { app_id: org.livi.test.number, lines: ["text enabled", "text commit 4", "text commit 2"] }
+  - wait: { frames: 30 }
+  - gdscript: |
+      if shell.app_keyboard != null:
+          return "cancel left the keyboard"
+      var got := FileAccess.get_file_as_string(runner._client_events("org.livi.test.number"))
+      if got.contains("key 28"):
+          return "cancel sent Enter"
+  # No text input: a button brings the keyboard up, and typing is keys.
+  - theme: { hand: lhd }
+  - gdscript: |
+      var e: String = runner._spawn({role = "app", app_id = "org.livi.test.keys", pattern = "grid", size = "0x0", events = true})
+      if e != "":
+          return e
+      for i in 300:
+          if Wayland.find_window("org.livi.test.keys") >= 0:
+              break
+          await runner.frames(1)
+      shell.bring_forward(Wayland.find_window("org.livi.test.keys"))
+      await runner.frames(2)
+  - expect_node: { path: KeysButton, visible: true }
+  - tap: { node: KeysButton }
+  - wait: { frames: 30 }
+  - tap: { node: AppKeyboard/Keyboard/Keys/Shift }
+  - tap: { node: AppKeyboard/Keyboard/Keys/a }
+  - tap: { node: AppKeyboard/Keyboard/Keys/Done }
+  - expect_client:
+      app_id: org.livi.test.keys
+      lines: ["keyboard enter", "key 42 pressed", "key 30 pressed", "key 30 released", "key 42 released", "key 28 pressed"]
+  - wait: { frames: 30 }
+  - expect_node: { path: KeysButton, visible: true }

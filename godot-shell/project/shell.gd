@@ -60,6 +60,14 @@ var _split_to := 1.0
 var _split_tween: Tween
 var _phone_present := false
 const SPLIT_S := 0.35
+## The keyboard for a hosted app's field (AppKeyboard), over the driver's side of the app page
+## while the app wants text; the app is configured to the rest of the width meanwhile, so it lays
+## its field and results out beside the keys rather than under them.
+var app_keyboard: AppKeyboard
+## Of the shell's width: about a phone's width (at the default app scale) left for the app.
+const APP_KEYBOARD_SHARE := 0.55
+## Brings the keyboard up for an app with no text input, to type to it as keys.
+var _keys_button: Button
 ## Panel pixels a docked rail (NavRail) takes on the driver's side: every page lays out in the
 ## rest, the phone's area included, except the phone's own page, which keeps the whole panel.
 var rail_width := 0.0:
@@ -122,6 +130,14 @@ func _init() -> void:
 	launcher = Launcher.new()
 	launcher.name = "Launcher"
 	add_child(launcher)
+	_keys_button = Button.new()
+	_keys_button.name = "KeysButton"
+	_keys_button.tooltip_text = "Keyboard"
+	_keys_button.focus_mode = Control.FOCUS_NONE
+	_keys_button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_keys_button.visible = false
+	_keys_button.pressed.connect(_on_keys_button)
+	add_child(_keys_button)
 
 
 func _ready() -> void:
@@ -139,6 +155,8 @@ func _ready() -> void:
 	_player.control.connect(func(c): Core.act({kind = "media", control = c}))
 	Wayland.window_mapped.connect(func(id, app_id, title): print("window %d mapped: app_id \"%s\" title \"%s\"" % [id, app_id, title]); _windows.append(id); _app_ids[id] = app_id; _show_app())
 	Wayland.window_unmapped.connect(_on_window_unmapped)
+	Wayland.text_input_wanted.connect(_on_text_wanted)
+	Wayland.text_input_released.connect(func(id): if app_keyboard and app_keyboard.window_id == id: app_keyboard.close())
 	launcher.show_window.connect(bring_forward)
 	_style()
 	_refresh()
@@ -197,13 +215,16 @@ func _style() -> void:
 	# The driver's side may have changed.
 	if rail_width > 0.0:
 		_inset()
+	_keys_button.custom_minimum_size = Vector2.ONE * ThemeManager.px.touch * 1.2
+	_keys_button.icon = Icons.texture("keyboard", ThemeManager.px.icon)
+	_place_keyboard.call_deferred()
 
 
 ## Hosted apps are configured to the app page's rect (the panel less the rail), whichever page
 ## shows, so a page change does not resize them.
 func _tell_app_area() -> void:
 	var vp := get_viewport_rect().size
-	Wayland.set_app_area(roundi(vp.x - rail_width), roundi(vp.y))
+	Wayland.set_app_area(roundi(vp.x - rail_width - _keyboard_width()), roundi(vp.y))
 
 
 func _inset() -> void:
@@ -387,6 +408,10 @@ func _place_projection(ask := true) -> void:
 	var r := Rect2(_slot.global_position - global_position, _slot.size)
 	if _app_page:
 		r = Rect2(Vector2.ZERO, size)
+		var kw := 0.0 if _projection_page else _keyboard_width()
+		r.size.x -= kw
+		if _driver_left():
+			r.position.x += kw
 	elif ThemeManager.floating():
 		# Under the floating panel: the whole projection screen, 1:1 with the panel, under a docked
 		# rail too; the shell's own rect would scale it into the rest.
@@ -407,6 +432,7 @@ func _place_next_frame() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED and _side:
 		_set_split(_split)
+		_place_keyboard()
 
 
 ## Opens home's slot while there is a phone's picture, else gives the cards the whole width:
@@ -537,6 +563,85 @@ func _show_app() -> void:
 	var shown: Array = _windows.filter(_is_projection) if phone else _windows.filter(func(w): return not _is_projection(w)) if _page_name == "app" else Array(_windows)
 	var id: int = shown[-1] if not shown.is_empty() else -1
 	_projection.show_window(id, id >= 0 and _is_projection(id))
+	# The keyboard types into the app showing, on its page only.
+	if app_keyboard and (_page_name != "app" or app_keyboard.window_id != id):
+		app_keyboard.close()
+	_update_keys_button()
+
+
+func _driver_left() -> bool:
+	return ThemeManager.hand != "rhd"
+
+
+func _keyboard_width() -> float:
+	return roundf(size.x * APP_KEYBOARD_SHARE) if app_keyboard and not app_keyboard.closing() else 0.0
+
+
+## A hosted app showing on the app page wants text: the keyboard comes up for it. Never for the
+## phone's picture, whose own keyboard is on the phone's UI.
+func _on_text_wanted(id: int) -> void:
+	if _page_name != "app" or _projection.window.window_id != id or _is_projection(id):
+		return
+	open_keyboard(id, Wayland.text_field(id))
+
+
+## The keyboard for window `id`'s `field` (as `Wayland.text_field` gives it; empty: keys only).
+func open_keyboard(id: int, field: Dictionary) -> void:
+	if app_keyboard and app_keyboard.window_id == id and not app_keyboard.closing():
+		return
+	var k := AppKeyboard.new()
+	k.closed.connect(_on_keyboard_closed.bind(k))
+	add_child(k)
+	app_keyboard = k
+	k.configure(id, field)
+	_place_keyboard()
+	k.slide_in(k.position.x, _driver_left())
+	_tell_app_area()
+	_place_projection(false)
+	_update_keys_button()
+
+
+func _on_keyboard_closed(_submitted: bool, k: AppKeyboard) -> void:
+	# Its name is the next one's, while it slides out.
+	k.name = "ClosingKeyboard"
+	if app_keyboard == k:
+		app_keyboard = null
+	_tell_app_area()
+	_place_projection(false)
+	_update_keys_button()
+
+
+## Full height on the driver's side of the shell's rect, beside a docked rail.
+func _place_keyboard() -> void:
+	if app_keyboard == null or app_keyboard.closing():
+		return
+	var kw := _keyboard_width()
+	app_keyboard.size = Vector2(kw, size.y)
+	if not app_keyboard.moving():
+		app_keyboard.position = Vector2(0.0 if _driver_left() else size.x - kw, 0.0)
+	_place_projection(false)
+	_update_keys_button()
+
+
+## In the app's bottom corner on the driver's side, for an app that has no text input to ask with.
+func _update_keys_button() -> void:
+	var id := _projection.window.window_id
+	var on := _page_name == "app" and id >= 0 and not _is_projection(id) and app_keyboard == null and not Wayland.has_text_input(id)
+	_keys_button.visible = on
+	if not on:
+		return
+	var g: float = ThemeManager.px.gap * 2.0
+	var b := _keys_button.get_combined_minimum_size()
+	_keys_button.size = b
+	_keys_button.position = Vector2(g if _driver_left() else size.x - b.x - g, size.y - b.y - g)
+
+
+func _on_keys_button() -> void:
+	var id := _projection.window.window_id
+	if id < 0:
+		return
+	_projection.window.focus_app()
+	open_keyboard(id, {})
 
 
 ## livi-gst-host names its video windows livi-video; their touches are the phone's.

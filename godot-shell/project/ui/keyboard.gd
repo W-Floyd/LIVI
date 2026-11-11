@@ -60,6 +60,11 @@ var negative := false
 ## Off: the next letter is lower case. 1: that one is upper case. 2: caps lock.
 var shift := 0
 var layer := "letters"
+## Three keys in place of the letters' last three ("'", "-", "@"): a field's own, such as "/"
+## and ":" for a web address. Set before `mode`.
+var extras: Array = []
+## No pop as a key goes down: nothing that shows a password's characters from across the car.
+var quiet := false
 ## Done dimmed while what is typed would not be taken.
 var done_ready := true:
 	set(v):
@@ -115,7 +120,7 @@ func _build() -> void:
 		_keys.remove_child(k)
 		k.queue_free()
 	_held = null
-	for row in LAYERS[layer]:
+	for row in _rows():
 		for k in row:
 			var id: String = k[0] if k is Array else k
 			if _keys.has_node(NodePath(_node_name(id))):
@@ -149,8 +154,19 @@ static func _node_name(id: String) -> String:
 	return "U%04X" % id.unicode_at(0)
 
 
-func _place() -> void:
+## The layer's rows, with `extras` in the letters' last row.
+func _rows() -> Array:
 	var rows: Array = LAYERS[layer]
+	if layer != "letters" or extras.size() != 3:
+		return rows
+	rows = rows.duplicate(true)
+	var last: Array = rows[-1]
+	rows[-1] = last.slice(0, last.size() - 3) + extras
+	return rows
+
+
+func _place() -> void:
+	var rows: Array = _rows()
 	var g: float = ThemeManager.px.gap
 	var pad := g * 1.5
 	var units := 0.0
@@ -302,7 +318,7 @@ func _feedback(b: Button) -> void:
 	b.add_theme_stylebox_override("normal", b.get_meta("lit"))
 	# By id: a layer change frees the key before the timer ends.
 	get_tree().create_timer(LIT_S).timeout.connect(_unlight.bind(b.get_instance_id()))
-	if ThemeManager.reduced_motion:
+	if ThemeManager.reduced_motion or quiet:
 		return
 	b.scale = Vector2.ONE
 	var t := b.create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)

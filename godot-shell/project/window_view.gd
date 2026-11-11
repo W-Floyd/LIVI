@@ -213,6 +213,12 @@ func _focus() -> void:
 	Wayland.keyboard_focus(window_id)
 
 
+## Keyboard focus to the window, as a tap on it gives.
+func focus_app() -> void:
+	if window_id >= 0:
+		_focus()
+
+
 func _notification(what: int) -> void:
 	match what:
 		NOTIFICATION_TRANSFORM_CHANGED:

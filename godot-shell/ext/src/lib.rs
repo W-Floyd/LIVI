@@ -18,6 +18,8 @@ pub mod settings;
 #[cfg(target_os = "linux")]
 pub mod test_client;
 #[cfg(target_os = "linux")]
+pub mod text_input;
+#[cfg(target_os = "linux")]
 mod wayland_node;
 pub mod yuv;
 

@@ -189,6 +189,8 @@ func _spawn(c: Dictionary) -> String:
 				args.append("--video")
 			if c.has("honour"):
 				args.append_array(["--honour", c.honour])
+			if c.has("text_input"):
+				args.append_array(["--text-input", c.text_input])
 			if c.get("events", false):
 				DirAccess.make_dir_recursive_absolute(_out.path_join(_scenario))
 				args.append_array(["--events", _client_events(c.get("app_id", "org.livi.test"))])

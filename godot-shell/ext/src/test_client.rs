@@ -29,6 +29,8 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLi
 use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
 use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
+use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3;
+use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{self, ContentHint, ContentPurpose, ZwpTextInputV3};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Pattern {
@@ -156,6 +158,17 @@ pub struct Opts {
     pub events: Option<std::path::PathBuf>,
     /// Not with `video`. Unless `None`, each new buffer size is an event, `buffer 960x540`.
     pub honour: Honour,
+    /// Binds zwp_text_input_v3 with this content purpose: a tap in the window's top half enables
+    /// it (the field), one in the bottom half disables it. What arrives is an event: `text
+    /// commit hi`, `text delete 1 0`, `text preedit ab`.
+    pub text_input: Option<u32>,
+}
+
+/// zwp_text_input_v3's content purposes by name.
+pub fn purpose(name: &str) -> Option<u32> {
+    const NAMES: [&str; 14] =
+        ["normal", "alpha", "digits", "number", "phone", "url", "email", "name", "password", "pin", "date", "time", "datetime", "terminal"];
+    NAMES.iter().position(|n| *n == name).map(|i| i as u32)
 }
 
 /// What a run saw: frames drawn, and every input event in the order it came, such as
@@ -192,6 +205,52 @@ struct App {
     has_input: bool,
     events: Vec<String>,
     log: Option<File>,
+    text_manager: Option<ZwpTextInputManagerV3>,
+    text: Option<TextField>,
+    /// The window's height in surface units: taps above half of it are on the field.
+    height: f64,
+    pointer_at: (f64, f64),
+    /// Draws at each configure's size.
+    follow: bool,
+}
+
+/// The client's one text field, on zwp_text_input_v3.
+struct TextField {
+    input: ZwpTextInputV3,
+    purpose: u32,
+    entered: bool,
+    enabled: bool,
+    /// Since the last done.
+    commit: Option<String>,
+    delete: Option<(u32, u32)>,
+    preedit: Option<String>,
+}
+
+impl App {
+    /// A tap at height `y`: the top half is the field, which takes text; the bottom half not.
+    fn tap(&mut self, y: f64) {
+        let Some(t) = &mut self.text else { return };
+        if !t.entered {
+            return;
+        }
+        let on = y < self.height / 2.0;
+        if on {
+            t.input.enable();
+            let hint = if matches!(t.purpose, 8 | 9) { ContentHint::SensitiveData | ContentHint::HiddenText } else { ContentHint::None };
+            t.input.set_content_type(hint, ContentPurpose::try_from(t.purpose).unwrap_or(ContentPurpose::Normal));
+            t.input.set_cursor_rectangle(10, 20, 2, 16);
+        } else if t.enabled {
+            t.input.disable();
+        } else {
+            return;
+        }
+        t.input.commit();
+        let changed = on != t.enabled;
+        t.enabled = on;
+        if changed {
+            self.note(format!("text {}", if on { "enabled" } else { "disabled" }));
+        }
+    }
 }
 
 impl App {
@@ -210,7 +269,7 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
     conn.display().get_registry(&qh, ());
-    let mut app = App { honour: opts.honour, ..App::default() };
+    let mut app = App { honour: opts.honour, height: opts.height as f64, ..App::default() };
     if let Some(path) = &opts.events {
         app.log = Some(File::create(path)?);
     }
@@ -220,6 +279,14 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     else {
         return Err(io::Error::other("compositor lacks wl_compositor, wl_shm or xdg_wm_base"));
     };
+
+    if let Some(purpose) = opts.text_input {
+        let (Some(m), Some(seat)) = (app.text_manager.clone(), app.seat.clone()) else {
+            return Err(io::Error::other("compositor lacks zwp_text_input_manager_v3 or wl_seat"));
+        };
+        let input = m.get_text_input(&seat, &qh, ());
+        app.text = Some(TextField { input, purpose, entered: false, enabled: false, commit: None, delete: None, preedit: None });
+    }
 
     let surface = compositor.create_surface(&qh, ());
     let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
@@ -239,10 +306,13 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
         queue.blocking_dispatch(&mut app).map_err(|e| err(&e))?;
     }
     let mut sized = opts.clone();
+    // Sized by the compositor: each new configure size is drawn at, and is an event.
+    app.follow = (opts.width == 0 || opts.height == 0) && !opts.video;
     if opts.width == 0 || opts.height == 0 {
         (sized.width, sized.height) = app.configure_size;
     }
     let opts = &sized;
+    app.height = opts.height as f64;
 
     let dmabuf = match (opts.dmabuf, app.dmabuf.clone()) {
         (false, _) => None,
@@ -287,6 +357,14 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     let mut size = Size::default();
     let mut drawn = 0;
     loop {
+        let (cw, ch) = app.configure_size;
+        if app.follow && cw > 0 && ch > 0 && (cw, ch) != (sized.width, sized.height) {
+            (sized.width, sized.height) = (cw, ch);
+            app.height = ch as f64;
+            app.rescale = true;
+            app.note(format!("configure {cw}x{ch}"));
+        }
+        let opts = &sized;
         if slots.is_empty() || app.rescale {
             app.rescale = false;
             size = Size::of(opts, &app);
@@ -347,7 +425,7 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
         root_vp.destroy();
         subsurface.destroy();
     }
-    if opts.video {
+    if sized.video {
         target.destroy();
     }
     if let Some((fs, vp)) = scaled {
@@ -558,6 +636,7 @@ impl Dispatch<WlRegistry, ()> for App {
             "xdg_wm_base" => app.wm_base = Some(registry.bind(name, 1, qh, ())),
             "zwp_linux_dmabuf_v1" => app.dmabuf = Some(registry.bind(name, version.min(3), qh, ())),
             "wl_seat" => app.seat = Some(registry.bind(name, version.min(7), qh, ())),
+            "zwp_text_input_manager_v3" => app.text_manager = Some(registry.bind(name, 1, qh, ())),
             _ => {}
         }
     }
@@ -584,7 +663,11 @@ impl Dispatch<XdgToplevel, ()> for App {
     fn event(app: &mut Self, _: &XdgToplevel, event: xdg_toplevel::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         match event {
             xdg_toplevel::Event::Close => app.closed = true,
-            xdg_toplevel::Event::Configure { width, height, .. } => app.configure_size = (width.max(0) as u32, height.max(0) as u32),
+            xdg_toplevel::Event::Configure { width, height, .. } => {
+                let size = (width.max(0) as u32, height.max(0) as u32);
+                app.rescale |= app.follow && size != app.configure_size && size.0 > 0 && size.1 > 0;
+                app.configure_size = size;
+            }
             _ => {}
         }
     }
@@ -669,12 +752,21 @@ fn pressed(down: bool) -> &'static str {
 impl Dispatch<WlPointer, ()> for App {
     fn event(app: &mut Self, _: &WlPointer, event: wl_pointer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         match event {
-            wl_pointer::Event::Enter { surface_x, surface_y, .. } => app.note(format!("pointer enter {surface_x:.1} {surface_y:.1}")),
-            wl_pointer::Event::Motion { surface_x, surface_y, .. } => app.note(format!("pointer motion {surface_x:.1} {surface_y:.1}")),
+            wl_pointer::Event::Enter { surface_x, surface_y, .. } => {
+                app.pointer_at = (surface_x, surface_y);
+                app.note(format!("pointer enter {surface_x:.1} {surface_y:.1}"))
+            }
+            wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
+                app.pointer_at = (surface_x, surface_y);
+                app.note(format!("pointer motion {surface_x:.1} {surface_y:.1}"))
+            }
             wl_pointer::Event::Leave { .. } => app.note("pointer leave".into()),
             wl_pointer::Event::Button { button, state, .. } => {
                 let down = state == WEnum::Value(wl_pointer::ButtonState::Pressed);
                 app.note(format!("pointer button {button} {}", pressed(down)));
+                if down {
+                    app.tap(app.pointer_at.1);
+                }
             }
             _ => {}
         }
@@ -684,7 +776,10 @@ impl Dispatch<WlPointer, ()> for App {
 impl Dispatch<WlTouch, ()> for App {
     fn event(app: &mut Self, _: &WlTouch, event: wl_touch::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         match event {
-            wl_touch::Event::Down { id, x, y, .. } => app.note(format!("touch down {id} {x:.1} {y:.1}")),
+            wl_touch::Event::Down { id, x, y, .. } => {
+                app.note(format!("touch down {id} {x:.1} {y:.1}"));
+                app.tap(y);
+            }
             wl_touch::Event::Motion { id, x, y, .. } => app.note(format!("touch motion {id} {x:.1} {y:.1}")),
             wl_touch::Event::Up { id, .. } => app.note(format!("touch up {id}")),
             _ => {}
@@ -700,6 +795,45 @@ impl Dispatch<WlKeyboard, ()> for App {
             wl_keyboard::Event::Key { key, state, .. } => {
                 let down = state == WEnum::Value(wl_keyboard::KeyState::Pressed);
                 app.note(format!("key {key} {}", pressed(down)));
+            }
+            _ => {}
+        }
+    }
+}
+
+delegate_noop!(App: ZwpTextInputManagerV3);
+
+impl Dispatch<ZwpTextInputV3, ()> for App {
+    fn event(app: &mut Self, _: &ZwpTextInputV3, event: zwp_text_input_v3::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        use zwp_text_input_v3::Event;
+        let Some(t) = &mut app.text else { return };
+        match event {
+            Event::Enter { .. } => {
+                t.entered = true;
+                app.note("text enter".into());
+            }
+            Event::Leave { .. } => {
+                // Leaving disables the field, as clients do.
+                t.entered = false;
+                t.enabled = false;
+                app.note("text leave".into());
+            }
+            Event::CommitString { text } => t.commit = Some(text.unwrap_or_default()),
+            Event::DeleteSurroundingText { before_length, after_length } => t.delete = Some((before_length, after_length)),
+            Event::PreeditString { text, .. } => t.preedit = Some(text.unwrap_or_default()),
+            Event::Done { .. } => {
+                // In the protocol's order: delete, then commit, then preedit.
+                let lines: Vec<String> = [
+                    t.delete.take().map(|(b, a)| format!("text delete {b} {a}")),
+                    t.commit.take().map(|s| format!("text commit {s}")),
+                    t.preedit.take().map(|s| format!("text preedit {s}")),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                for l in lines {
+                    app.note(l);
+                }
             }
             _ => {}
         }

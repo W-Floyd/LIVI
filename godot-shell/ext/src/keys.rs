@@ -55,6 +55,33 @@ pub fn evdev(godot: i64) -> Option<u32> {
     })
 }
 
+/// The evdev key that types `c` on a US layout, and whether with shift.
+pub fn us_key(c: char) -> Option<(u32, bool)> {
+    const ROW: &str = "`1234567890-=";
+    const SHIFTED_ROW: &str = "~!@#$%^&*()_+";
+    // Each with its evdev code, unshifted then shifted.
+    const PUNCT: [(char, char, u32); 8] =
+        [('[', '{', 26), (']', '}', 27), (';', ':', 39), ('\'', '"', 40), ('\\', '|', 43), (',', '<', 51), ('.', '>', 52), ('/', '?', 53)];
+    let row_code = |i: usize| if i == 0 { 41 } else { i as u32 + 1 };
+    Some(match c {
+        'a'..='z' => (evdev(c.to_ascii_uppercase() as i64)?, false),
+        'A'..='Z' => (evdev(c as i64)?, true),
+        ' ' => (57, false),
+        '\n' => (28, false),
+        '\t' => (15, false),
+        _ => {
+            if let Some(i) = ROW.find(c) {
+                (row_code(i), false)
+            } else if let Some(i) = SHIFTED_ROW.find(c) {
+                (row_code(i), true)
+            } else {
+                let &(plain, _, code) = PUNCT.iter().find(|p| p.0 == c || p.1 == c)?;
+                (code, c != plain)
+            }
+        }
+    })
+}
+
 /// Godot's mouse button index to the evdev button code.
 pub fn evdev_button(index: i64) -> Option<u32> {
     Some(match index {
@@ -91,6 +118,32 @@ mod tests {
         ];
         for (godot, want) in cases {
             assert_eq!(evdev(godot), want, "godot key {godot:#x}");
+        }
+    }
+
+    #[test]
+    fn characters_map_to_us_keys() {
+        let cases = [
+            ('a', Some((30, false))),
+            ('Q', Some((16, true))),
+            ('1', Some((2, false))),
+            ('0', Some((11, false))),
+            ('!', Some((2, true))),
+            (')', Some((11, true))),
+            ('`', Some((41, false))),
+            ('~', Some((41, true))),
+            ('-', Some((12, false))),
+            ('_', Some((12, true))),
+            ('@', Some((3, true))),
+            ('.', Some((52, false))),
+            ('?', Some((53, true))),
+            ('"', Some((40, true))),
+            (' ', Some((57, false))),
+            ('\n', Some((28, false))),
+            ('é', None),
+        ];
+        for (c, want) in cases {
+            assert_eq!(us_key(c), want, "{c:?}");
         }
     }
 

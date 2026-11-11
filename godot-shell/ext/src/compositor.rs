@@ -16,6 +16,9 @@ use smithay::delegate_compositor;
 use smithay::delegate_dmabuf;
 use smithay::delegate_output;
 use smithay::delegate_viewporter;
+use smithay::delegate_data_device;
+use smithay::wayland::selection::SelectionHandler;
+use smithay::wayland::selection::data_device::{ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::wayland::output::{OutputHandler, OutputManagerState};
 use smithay::wayland::viewporter::{ViewportCachedState, ViewporterState};
@@ -144,6 +147,8 @@ pub struct State {
     _output: Output,
     _output_manager: OutputManagerState,
     _viewporter: ViewporterState,
+    // GTK 4 will not use a compositor without wl_data_device_manager.
+    data_device: DataDeviceState,
     pub windows: Vec<Window>,
     pub events: Vec<WindowEvent>,
     next_id: u64,
@@ -203,6 +208,7 @@ impl Server {
             _output: output,
             _output_manager: OutputManagerState::new_with_xdg_output::<State>(&dh),
             _viewporter: ViewporterState::new::<State>(&dh),
+            data_device: DataDeviceState::new::<State>(&dh),
             pointer,
             keyboard,
             touch,
@@ -897,6 +903,18 @@ delegate_seat!(State);
 delegate_dmabuf!(State);
 delegate_output!(State);
 delegate_viewporter!(State);
+
+impl ClientDndGrabHandler for State {}
+impl ServerDndGrabHandler for State {}
+impl SelectionHandler for State {
+    type SelectionUserData = ();
+}
+impl DataDeviceHandler for State {
+    fn data_device_state(&self) -> &DataDeviceState {
+        &self.data_device
+    }
+}
+delegate_data_device!(State);
 
 impl OutputHandler for State {}
 

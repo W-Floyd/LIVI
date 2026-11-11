@@ -208,7 +208,8 @@ steps:
       for a in shell.launcher.apps:
           if a.id == "org.livi.test.grid":
               a.argv[a.argv.find("--size") + 1] = "0x0"
-              a.argv.append_array(["--events", runner._client_events("org.livi.test.grid")])
+              # A text field in its top half, for the keyboard beside the slot.
+              a.argv.append_array(["--events", runner._client_events("org.livi.test.grid"), "--text-input", "normal"])
       DirAccess.make_dir_recursive_absolute(runner._client_events("org.livi.test.grid").get_base_dir())
       ThemeManager.set_look({nav_app = "org.livi.test.grid"})
       await runner.frames(3)
@@ -310,6 +311,64 @@ steps:
               return ""
           await runner.frames(1)
       return "no touch reached the navigation app"
+  # Its field at each snap: the keyboard takes the cards' column, at least the app page's share,
+  # the app is configured to the slot's rest and shown there; every key fits, none over another;
+  # cancel gives the app the slot back.
+  - gdscript: |
+      var w: int = Wayland.find_window("org.livi.test.grid")
+      var slot: Control = shell.get_node("Page/Body/Slot")
+      var events: String = runner._client_events("org.livi.test.grid")
+      var last := func() -> String:
+          var got := ""
+          for line in FileAccess.get_file_as_string(events).split("\n", false):
+              if line.begins_with("configure "):
+                  got = line
+          return got
+      var wait_for := func(want: String) -> bool:
+          for i in 120:
+              if last.call() == want:
+                  return true
+              await runner.frames(1)
+          return false
+      var full: float = shell.get_node("Page/Body").size.x
+      for s in shell._snaps():
+          ThemeManager.set_look({home_split = s / full})
+          await runner.frames(3)
+          var k: float = Wayland.window_scale(w)
+          var at: Vector2 = slot.get_global_rect().position + Vector2(60.0, 20.0)
+          await runner._touch(at)
+          for i in 60:
+              if shell.app_keyboard != null and not shell.app_keyboard.moving():
+                  break
+              await runner.frames(1)
+          var kb: AppKeyboard = shell.app_keyboard
+          if kb == null:
+              return "at %s no keyboard for the navigation app's field" % s
+          var kr := kb.get_global_rect()
+          var pr: Rect2 = shell._projection.get_global_rect()
+          if kr.size.x < roundf(shell.size.x * 0.55) - 1.0 or kr.size.x < shell.get_node("Page/Body/Side").size.x - 1.0:
+              return "at %s the keyboard is %s" % [s, kr]
+          if pr.intersects(kr.grow(-1.0)) or not slot.get_global_rect().grow(0.5).encloses(pr) or pr.size.x < 1.0:
+              return "at %s the app at %s, the keyboard at %s, the slot %s" % [s, pr, kr, slot.get_global_rect()]
+          var want := "configure %dx%d" % [roundi(pr.size.x / k), roundi(pr.size.y / k)]
+          if not await wait_for.call(want):
+              return "at %s with the keyboard: %s, not %s" % [s, last.call(), want]
+          var rects := []
+          for b in kb.keyboard.get_node("Keys").get_children():
+              var r: Rect2 = b.get_global_rect()
+              if not kr.grow(0.5).encloses(r):
+                  return "at %s %s at %s, outside %s" % [s, b.name, r, kr]
+              for o in rects:
+                  if o.grow(-0.5).intersects(r.grow(-0.5)):
+                      return "at %s %s at %s over another key" % [s, b.name, r]
+              rects.append(r)
+          kb.get_node("Keyboard/Keys/Cancel").button_down.emit()
+          await runner.frames(30)
+          want = "configure %dx%d" % [roundi(slot.size.x / k), roundi(slot.size.y / k)]
+          if shell.app_keyboard != null or not await wait_for.call(want):
+              return "at %s after cancel: %s, not %s" % [s, last.call(), want]
+      ThemeManager.set_look({home_split = 0.0})
+      await runner.frames(3)
   # Back to the phone: the app keeps running; the phone has video focus and the slot again.
   - tap: { node: Page/Source/Box/Phone }
   - wait: { frames: 30 }

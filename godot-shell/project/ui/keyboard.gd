@@ -53,7 +53,13 @@ var mode := "text":
 		mode = v
 		layer = "number" if v == "number" else "letters"
 		shift = 0
-		_build()
+		# Built keys are kept: only the letters' last row depends on the field.
+		if _layers.is_empty() or _build_queued or extras != _built_extras:
+			_queue_build()
+		else:
+			_show(layer)
+			_style_ids(["shift", "sign", "."])
+			_style_shift()
 ## The keypad's point and sign keys.
 var decimals := true
 var negative := false
@@ -69,17 +75,20 @@ var quiet := false
 var done_label := "Done":
 	set(v):
 		done_label = v
-		_style_keys()
+		_style_ids(["done"])
 ## Done dimmed while what is typed would not be taken.
 var done_ready := true:
 	set(v):
 		done_ready = v
-		_style_keys()
+		_style_ids(["done"])
 
-## The layer showing, named Keys; the others are built too, hidden, named Keys_<layer>, so a
-## layer key switches at once rather than building forty buttons.
+## The layer showing, named Keys; the others are built the frame after, hidden, named
+## Keys_<layer>, so a layer key switches at once and the keyboard's first frame waits for one.
 var _keys: Control
 var _layers := {}
+var _build_queued := false
+## `extras` as the letters were built with.
+var _built_extras: Array = []
 var _held: Button
 var _repeat := 0.0
 var _shift_at := -1.0
@@ -99,8 +108,15 @@ static func touch_only(b: BaseButton) -> void:
 
 
 func _ready() -> void:
-	ThemeManager.changed.connect(_build)
-	_build()
+	ThemeManager.changed.connect(_queue_build)
+	_queue_build()
+
+
+## Once, at the end of this frame, however many settings changed: before it is drawn.
+func _queue_build() -> void:
+	if not _build_queued:
+		_build_queued = true
+		_build.call_deferred()
 
 
 func _process(delta: float) -> void:
@@ -122,45 +138,66 @@ func _draw() -> void:
 
 ## The key with this id or character, for tests and for a host that wants to point at one.
 func key(id: String) -> Button:
+	if _build_queued:
+		_build()
 	return _keys.get_node_or_null(NodePath(_node_name(id))) as Button if _keys else null
 
 
+## The layer showing now; the rest the next frame.
 func _build() -> void:
+	_build_queued = false
+	if not is_inside_tree():
+		return
 	for l in _layers.values():
 		remove_child(l)
 		l.queue_free()
 	_layers.clear()
 	_keys = null
 	_held = null
-	for l in LAYERS:
-		var c := Control.new()
-		c.name = "Keys_" + l
-		c.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		c.visible = false
-		c.set_meta("layer", l)
-		add_child(c)
-		_layers[l] = c
-		for row in _rows(l):
-			for k in row:
-				var id: String = k[0] if k is Array else k
-				var b := _key_button(id)
-				# A second shift: same key, its own node.
-				if c.has_node(NodePath(b.name)):
-					b.name = b.name + "2"
-				b.set_meta("layer", l)
-				c.add_child(b)
+	_built_extras = extras.duplicate()
 	_show(layer)
-	_style_keys()
-	_place()
+	if not get_tree().process_frame.is_connected(_ensure_all):
+		get_tree().process_frame.connect(_ensure_all, CONNECT_ONE_SHOT)
+
+
+func _ensure_all() -> void:
+	for l in LAYERS:
+		_ensure(l)
+
+
+## The layer's keys, built, styled and placed if they are not yet.
+func _ensure(l: String) -> Control:
+	if _layers.has(l):
+		return _layers[l]
+	var c := Control.new()
+	c.name = "Keys_" + l
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	c.visible = false
+	c.set_meta("layer", l)
+	add_child(c)
+	_layers[l] = c
+	for row in _rows(l):
+		for k in row:
+			var id: String = k[0] if k is Array else k
+			var b := _key_button(id)
+			# A second shift: same key, its own node.
+			if c.has_node(NodePath(b.name)):
+				b.name = b.name + "2"
+			b.set_meta("layer", l)
+			c.add_child(b)
+			_style_key(b)
+	_place_layer(l)
+	return c
 
 
 ## The layer's keys in front, named Keys.
 func _show(l: String) -> void:
+	var c := _ensure(l)
 	if _keys:
 		_keys.visible = false
 		_keys.name = "Keys_" + str(_keys.get_meta("layer"))
 	layer = l
-	_keys = _layers[l]
+	_keys = c
 	_keys.name = "Keys"
 	_keys.visible = true
 
@@ -172,7 +209,9 @@ func _key_button(id: String) -> Button:
 	b.set_meta("id", id)
 	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	b.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
-	b.expand_icon = false
+	# Neither the label nor the icon may make a key wider than its place (`_place_layer`).
+	b.clip_text = true
+	b.expand_icon = true
 	touch_only(b)
 	b.button_down.connect(_down.bind(b))
 	return b
@@ -186,18 +225,32 @@ static func _node_name(id: String) -> String:
 	return "U%04X" % id.unicode_at(0)
 
 
-## A layer's rows, with `extras` in the letters' last row.
+## A layer's rows, with `extras` in the letters' last row; narrow, that row's characters go
+## (the symbols layer has them) and space takes their room.
 func _rows(l: String) -> Array:
 	var rows: Array = LAYERS[l]
-	if l != "letters" or extras.size() != 3:
+	if l != "letters" or (extras.size() != 3 and not _narrow):
 		return rows
 	rows = rows.duplicate(true)
 	var last: Array = rows[-1]
-	rows[-1] = last.slice(0, last.size() - 3) + extras
+	if _narrow:
+		rows[-1] = last.filter(func(k): return k is Array).map(func(k): return ["space", 8.0] if k[0] == "space" else k)
+	else:
+		rows[-1] = last.slice(0, last.size() - 3) + extras
 	return rows
 
 
+## Letters narrower than a finger's touch size.
+var _narrow := false
+
+
 func _place() -> void:
+	var narrow: bool = size.x > 0.0 and (size.x - ThemeManager.px.gap * 3.0) / 11.5 < ThemeManager.px.touch
+	if narrow != _narrow and not _layers.is_empty():
+		_narrow = narrow
+		_build()
+		return
+	_narrow = narrow
 	for l in _layers:
 		_place_layer(l)
 
@@ -226,8 +279,23 @@ func _place_layer(l: String) -> void:
 			b.position = Vector2(x + g * 0.4, top + r * kh + g * 0.4)
 			b.size = Vector2(w - g * 0.8, kh - g * 0.8)
 			b.pivot_offset = b.size / 2.0
+			b.add_theme_constant_override("icon_max_width", roundi(minf(ThemeManager.px.icon * 1.3, minf(b.size.x, b.size.y) * 0.6)))
+			_fit_font(b)
 			x += w
 			i += 1
+
+
+## The key's size (`fs` meta), smaller until its label fits its width.
+func _fit_font(b: Button) -> void:
+	var fs: int = b.get_meta("fs", 0)
+	if fs <= 0 or b.size.x <= 0.0:
+		return
+	fs = mini(fs, roundi(b.size.y * 0.6))
+	var room: float = b.size.x - ThemeManager.px.gap
+	var f: Font = ThemeManager.fonts.strong
+	while fs > 8 and b.text != "" and f.get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > room:
+		fs -= 1
+	b.add_theme_font_size_override("font_size", fs)
 
 
 func _row_units(row: Array) -> float:
@@ -246,14 +314,25 @@ func _style_keys() -> void:
 	queue_redraw()
 
 
+## Only these keys, in every built layer: a label or state that changed.
+func _style_ids(ids: Array) -> void:
+	for c in _layers.values():
+		for b in c.get_children():
+			if b.get_meta("id") in ids:
+				_style_key(b)
+
+
 ## After shift: the letters' case and the shift keys, not every key's boxes.
 func _style_shift() -> void:
+	if not _layers.has("letters"):
+		return
 	for b in _layers["letters"].get_children():
 		var id: String = b.get_meta("id")
 		if id == "shift":
 			_style_key(b)
 		elif id.length() == 1:
 			b.text = _label(id, "letters")
+			_fit_font(b)
 
 
 func _style_key(b: Button) -> void:
@@ -267,7 +346,9 @@ func _style_key(b: Button) -> void:
 	if icon != "":
 		b.icon = Icons.texture(icon, ThemeManager.px.icon * 1.3)
 	b.add_theme_font_override("font", ThemeManager.fonts.strong)
-	b.add_theme_font_size_override("font_size", fs if not special or id == "sign" else ThemeManager.font_size("body"))
+	b.set_meta("fs", fs if not special or id == "sign" else ThemeManager.font_size("body"))
+	b.add_theme_font_size_override("font_size", b.get_meta("fs"))
+	_fit_font(b)
 	var fill: Color = ThemeManager.c.surface2
 	var ink: Color = ThemeManager.c.text
 	if id == "done":

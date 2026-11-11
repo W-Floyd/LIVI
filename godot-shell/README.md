@@ -345,6 +345,15 @@ An app with no text input (`Wayland.has_text_input`) gets a keyboard button in i
 corner instead, and typing reaches it as key presses on a US layout. Projection windows never get
 it: the phone draws its own.
 
+On home, for the navigation app in the slot, it takes the cards' column widened to at least that
+55 %, and the app is configured to what is left of the slot until it goes. Keys fit any width:
+labels shrink to their key, and narrower than a finger's width per letter the letters' last row
+drops `' - @` (the symbols layer has them). Each key takes a finger's touch only, not the mouse
+Godot emulates from it, so it acts once and on the press. Built ahead and kept hidden, a keyboard
+shows the frame its field asks (its layers beyond the first are built the frame after); with
+`LIVI_SHELL_TIMING` the shell logs `[keyboard]` lines from the ask to the first frame and to in
+place. Esc and Ctrl's toggle is an icon outside terminals.
+
 Terminals get a row of Esc, Tab, Ctrl, Alt, Super, arrows and Fn (F1 to F12) between the bar and
 the keys: by the terminal purpose (VTE sends it), a desktop entry with `Categories=TerminalEmulator`,
 or a known app_id (`AppKeyboard.TERMINALS`); the bar's toggle shows it for any app. Ctrl, Alt and

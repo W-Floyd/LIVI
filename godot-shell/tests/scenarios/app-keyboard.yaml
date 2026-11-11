@@ -62,6 +62,27 @@ steps:
               if kb.layer != id:
                   return "%s: the layer is %s after the %s" % [id, kb.layer, "press" if down else "release"]
               await runner.frames(1)
+  # Any width, every layer: each key inside the keyboard and over no other.
+  - gdscript: |
+      for w in [320, 480, 640, 800, 1000, 1400]:
+          var kb := Keyboard.new()
+          runner.add_child(kb)
+          kb.size = Vector2(w, 560)
+          for mode in ["text", "number"]:
+              kb.mode = mode
+              kb._ensure_all()
+              await runner.frames(1)
+              for l in (["letters", "symbols", "more"] if mode == "text" else ["number"]):
+                  var rects := []
+                  for b in kb._layers[l].get_children():
+                      var r: Rect2 = b.get_rect()
+                      if not Rect2(Vector2.ZERO, kb.size).grow(0.5).encloses(r):
+                          return "%d px, %s: %s at %s, outside" % [w, l, b.name, r]
+                      for o in rects:
+                          if o.grow(-0.5).intersects(r.grow(-0.5)):
+                              return "%d px, %s: %s at %s over another key" % [w, l, b.name, r]
+                      rects.append(r)
+          kb.free()
   - tap: { node: AppKeyboard/Keyboard/Keys/Shift }
   - tap: { node: AppKeyboard/Keyboard/Keys/h }
   - tap: { node: AppKeyboard/Keyboard/Keys/i }

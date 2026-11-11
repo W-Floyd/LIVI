@@ -90,6 +90,8 @@ var app_keyboard: AppKeyboard
 const APP_KEYBOARD_SHARE := 0.55
 ## Brings the keyboard up for an app with no text input, to type to it as keys.
 var _keys_button: Button
+## Built ahead for the next field (`_prepare_keyboard`).
+var _spare_keyboard: AppKeyboard
 ## Panel pixels a docked rail (NavRail) takes on the driver's side: every page lays out in the
 ## rest, the phone's area included, except the phone's own page, which keeps the whole panel.
 var rail_width := 0.0:
@@ -200,6 +202,8 @@ func _ready() -> void:
 	Wayland.window_unmapped.connect(_on_window_unmapped)
 	Wayland.text_input_wanted.connect(_on_text_wanted)
 	Wayland.text_input_released.connect(func(id): if app_keyboard and app_keyboard.window_id == id: app_keyboard.close())
+	# After the first frames: a keyboard ready for the first field.
+	get_tree().create_timer(2.0).timeout.connect(_prepare_keyboard)
 	Drive.changed.connect(_update_keys_button)
 	launcher.show_window.connect(bring_forward)
 	launcher.changed.connect(_update_source)
@@ -616,7 +620,7 @@ func _own_bar() -> bool:
 func _place_projection(ask := true) -> void:
 	if _projection == null:
 		return
-	var r := Rect2(_slot.global_position - global_position, _slot.size)
+	var r := _slot_rect()
 	if _app_page:
 		r = Rect2(Vector2.ZERO, size)
 		var kw := 0.0 if _projection_page else _keyboard_width()
@@ -936,7 +940,8 @@ func _size_nav() -> void:
 		Wayland.set_window_area(nav, 0, 0)
 		_nav_window = -1
 	elif _slot_nav() and _split_tween == null and not _dragging and _slot.size.x >= 1.0:
-		Wayland.set_window_area(nav, roundi(_slot.size.x), roundi(_slot.size.y))
+		var s := _slot_rect()
+		Wayland.set_window_area(nav, roundi(s.size.x), roundi(s.size.y))
 		_nav_window = nav
 
 
@@ -1052,10 +1057,29 @@ func _typing_page() -> bool:
 ## Over the cards on home, beside the navigation app; else full height on the driver's side of
 ## the shell's rect.
 func _keyboard_rect() -> Rect2:
-	if _page_name == "home":
-		return Rect2(_side.get_global_rect().position - global_position, _side.size)
 	var kw := roundf(size.x * APP_KEYBOARD_SHARE)
+	if _page_name == "home":
+		# The cards' column is too narrow for the keys: at least the app page's share, into the
+		# slot, whose app is configured to the rest (`_slot_rect`).
+		var side := Rect2(_side.get_global_rect().position - global_position, _side.size)
+		kw = maxf(side.size.x, kw)
+		return Rect2(side.position.x if ThemeManager.side_left() else side.end.x - kw, side.position.y, kw, side.size.y)
 	return Rect2(0.0 if _driver_left() else size.x - kw, 0.0, kw, size.y)
+
+
+## Home's slot, less what the keyboard takes of it.
+func _slot_rect() -> Rect2:
+	var r := Rect2(_slot.global_position - global_position, _slot.size)
+	if _page_name != "home" or app_keyboard == null or app_keyboard.closing():
+		return r
+	var k := _keyboard_rect()
+	if ThemeManager.side_left():
+		var cut := clampf(k.end.x - r.position.x, 0.0, r.size.x)
+		r.position.x += cut
+		r.size.x -= cut
+	else:
+		r.size.x -= clampf(r.end.x - k.position.x, 0.0, r.size.x)
+	return r
 
 
 ## A hosted app showing on the app page, or the navigation app in home's slot, wants text: the
@@ -1064,16 +1088,46 @@ func _on_text_wanted(id: int) -> void:
 	print("keyboard: window %d (%s) wants text: %s" % [id, _app_ids.get(id, ""), Wayland.text_field(id)])
 	if not _typing_page() or _projection.window.window_id != id or _is_projection(id):
 		return
+	var t0 := Time.get_ticks_usec()
+	var was := app_keyboard
+	var ready := is_instance_valid(_spare_keyboard)
 	open_keyboard(id, Wayland.text_field(id))
+	if app_keyboard != was:
+		_time_keyboard(t0, ready)
+
+
+## LIVI_SHELL_TIMING: from the field's ask (the frame its enable arrived) to the keyboard built,
+## first drawn, and in place.
+func _time_keyboard(t0: int, ready: bool) -> void:
+	if OS.get_environment("LIVI_SHELL_TIMING") == "":
+		return
+	var ms := func() -> float: return (Time.get_ticks_usec() - t0) / 1000.0
+	var line := "[keyboard] %s %.1f ms" % ["shown (built ahead)" if ready else "built", ms.call()]
+	var k := app_keyboard
+	await RenderingServer.frame_post_draw
+	line += ", first frame %.1f ms" % ms.call()
+	while is_instance_valid(k) and k.moving():
+		await get_tree().process_frame
+	launcher._log(line + ", in place %.1f ms" % ms.call())
 
 
 ## The keyboard for window `id`'s `field` (as `Wayland.text_field` gives it; empty: keys only).
 func open_keyboard(id: int, field: Dictionary) -> void:
 	if app_keyboard and app_keyboard.window_id == id and not app_keyboard.closing():
 		return
-	var k := AppKeyboard.new()
+	# The one built ahead, hidden, if it is there: a keyboard's buttons take a frame or more.
+	var k := _spare_keyboard if is_instance_valid(_spare_keyboard) else AppKeyboard.new()
+	_spare_keyboard = null
 	k.closed.connect(_on_keyboard_closed.bind(k))
-	add_child(k)
+	if k.get_parent() == self:
+		move_child(k, -1)
+	else:
+		add_child(k)
+	k.name = "AppKeyboard"
+	k.visible = true
+	k.set_process(true)
+	# The next, once this one is in.
+	get_tree().create_timer(1.0).timeout.connect(_prepare_keyboard)
 	# No typing while the car is driven.
 	var lock := DriveCover.new()
 	lock.typing = true
@@ -1087,7 +1141,22 @@ func open_keyboard(id: int, field: Dictionary) -> void:
 	k.slide_in(k.position.x, ThemeManager.side_left() if _page_name == "home" else _driver_left())
 	_tell_app_area()
 	_place_projection(false)
+	_size_nav()
 	_update_keys_button()
+
+
+## A keyboard built and kept hidden for the next field, so it shows the frame it is asked for.
+func _prepare_keyboard() -> void:
+	if is_instance_valid(_spare_keyboard) or not is_inside_tree():
+		return
+	var k := AppKeyboard.new()
+	k.name = "SpareKeyboard"
+	k.visible = false
+	k.set_process(false)
+	add_child(k)
+	# Sized as it will show, so its keys are laid out for it.
+	k.size = Vector2(roundf(size.x * APP_KEYBOARD_SHARE), size.y)
+	_spare_keyboard = k
 
 
 func _on_keyboard_closed(_submitted: bool, k: AppKeyboard) -> void:
@@ -1097,6 +1166,7 @@ func _on_keyboard_closed(_submitted: bool, k: AppKeyboard) -> void:
 		app_keyboard = null
 	_tell_app_area()
 	_place_projection(false)
+	_size_nav()
 	_update_keys_button()
 
 

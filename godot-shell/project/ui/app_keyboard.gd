@@ -11,7 +11,7 @@ extends Control
 ## Done or cancel: the keyboard is going. `submitted`: Done, which sent Enter.
 signal closed(submitted: bool)
 
-const SLIDE_S := 0.22
+const SLIDE_S := 0.12
 ## A second tap on a modifier within this locks it.
 const MOD_TAP_S := 0.4
 ## zwp_text_input_v3's content purposes and hints the keyboard acts on.
@@ -140,10 +140,19 @@ func configure(id: int, field: Dictionary) -> void:
 	keyboard.mode = "number" if purpose in [PURPOSE_DIGITS, PURPOSE_NUMBER, PURPOSE_PHONE, PURPOSE_PIN] else "text"
 	if hint & HINT_AUTO_CAPITALIZATION and str(field.get("text", "x")).strip_edges() == "":
 		keyboard.shift = 1
-		keyboard._style_keys()
+		keyboard._style_shift()
 	set_extras(terminal)
+	_style_toggle()
 	_place()
 	_refresh()
+
+
+## Named for a terminal; elsewhere, where it is rarely wanted, a small icon at the bar's end.
+func _style_toggle() -> void:
+	_toggle.text = "Esc Ctrl" if terminal else ""
+	_toggle.tooltip_text = "" if terminal else "Esc, Ctrl and arrows"
+	_toggle.icon = null if terminal else Icons.texture("tune", ThemeManager.px.icon * 0.8)
+	_toggle.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
 
 ## Shows or hides the extra row.
@@ -184,6 +193,7 @@ func _style() -> void:
 	UI.style_labels(self)
 	_toggle.add_theme_font_size_override("font_size", ThemeManager.font_size("caption"))
 	_hide.icon = Icons.texture("chevron_down", ThemeManager.px.icon)
+	_style_toggle()
 	_style_extras()
 	_place()
 	queue_redraw()
@@ -198,7 +208,7 @@ func _place() -> void:
 	var hw := h * 1.5 + g if _hide.visible else 0.0
 	_hide.size = Vector2(h * 1.5, h - g)
 	_hide.position = Vector2(size.x - h * 1.5 - pad if _driver_left else pad, g * 0.5)
-	var tw := maxf(_toggle.get_combined_minimum_size().x, h * 2.0)
+	var tw := maxf(_toggle.get_combined_minimum_size().x, h * 2.0) if terminal else h
 	_toggle.size = Vector2(tw, h - g)
 	_toggle.position = Vector2(size.x - tw - pad - hw if _driver_left else pad + hw, g * 0.5)
 	_preview.size = Vector2(size.x - tw - hw - pad * 3.0, h)
@@ -234,6 +244,9 @@ func _build_extras() -> void:
 		b.set_meta("id", id)
 		b.focus_mode = Control.FOCUS_NONE
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.clip_text = true
+		b.expand_icon = true
+		b.add_theme_constant_override("icon_max_width", roundi(ThemeManager.px.icon))
 		Keyboard.touch_only(b)
 		b.button_down.connect(_extra.bind(id))
 		_extras.add_child(b)

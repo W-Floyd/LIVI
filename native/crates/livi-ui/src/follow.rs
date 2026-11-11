@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use livi_core_proto::state::{Front, State, VideoPlayback};
+use livi_core_proto::state::{Front, Protocol, State, VideoPlayback};
 use livi_ui_model::shell::{Look, look};
 
 use crate::PhoneState;
@@ -33,8 +33,11 @@ pub enum Update {
     PhoneName(String),
     Camera(bool),
     MainMask(Option<Mask>),
+    ViewArea(livi_core_proto::config::ViewArea),
     Fonts(Vec<String>),
     Video(Option<VideoPlayback>),
+    Mirrored(bool),
+    Held(bool),
 }
 
 #[derive(Default)]
@@ -53,8 +56,11 @@ pub struct Follow {
     phones: overlay::Phone,
     started: bool,
     main_mask: Option<Option<Mask>>,
+    view_area: Option<livi_core_proto::config::ViewArea>,
     fonts: Option<Vec<String>>,
     video: Option<Option<VideoPlayback>>,
+    mirrored: Option<bool>,
+    held: Option<bool>,
 }
 
 impl Follow {
@@ -93,6 +99,16 @@ impl Follow {
                 self.phone = Some(phone);
                 out.push(Update::Phone(phone));
             }
+            let mirrored = state.sessions.active == Some(Protocol::Airplay);
+            if self.mirrored != Some(mirrored) {
+                self.mirrored = Some(mirrored);
+                out.push(Update::Mirrored(mirrored));
+            }
+            let held = state.sessions.held;
+            if self.held != Some(held) {
+                self.held = Some(held);
+                out.push(Update::Held(held));
+            }
         }
         if hit("front") {
             let front = state.front.main;
@@ -106,6 +122,11 @@ impl Follow {
             if self.look.as_ref() != Some(&next) {
                 self.look = Some(next.clone());
                 out.push(Update::Look(next));
+            }
+            let area = state.config.view_area.main;
+            if self.view_area != Some(area) {
+                self.view_area = Some(area);
+                out.push(Update::ViewArea(area));
             }
             let kiosk = state.config.kiosk.main;
             if self.kiosk != Some(kiosk) {

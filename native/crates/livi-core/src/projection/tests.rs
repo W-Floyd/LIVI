@@ -5,10 +5,12 @@
 use livi_core_proto::config::{AppearanceMode, defaults};
 use livi_core_proto::input::Point;
 use livi_core_proto::state::Maneuver;
-use livi_cp::stack::{AudioProfile, Surface};
+use livi_cp::airplay::{AirplayCommand, AirplayRemote, AirplaySender};
+use livi_cp::stack::AudioProfile;
 use livi_media::compositor::CompositorControl;
 use livi_media::gst_host::GstHost;
 use serde_json::json;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::*;
 use crate::config_file::tests::TempDir;
@@ -130,7 +132,7 @@ impl Rig {
         };
         assert_eq!(
             rig.drain(),
-            [CpCmd::InitialNightMode(None), CpCmd::ClusterActive(false)]
+            [CpCmd::NightModes([true; 4]), CpCmd::ClusterActive(false)]
         );
         rig
     }
@@ -418,7 +420,7 @@ async fn levels_follow_the_config_and_the_ducking() {
         [
             volume(1, AudioKind::Alert, 0.5, RAMP_DOWN_MS),
             volume(1, AudioKind::Call, 1.0, RAMP_UP_MS),
-            CpCmd::InitialNightMode(Some(true)),
+            CpCmd::NightModes([true; 4]),
             stream_volumes(cfg.audio_volume, 0.5, 1.0, cfg.voice_assistant_volume),
         ]
     );
@@ -1342,14 +1344,8 @@ async fn the_phone_hands_the_screen_back() {
     assert_eq!(rig.front(), Front::Livi);
 }
 
-fn night(on: bool) -> Vec<CpCmd> {
-    std::iter::once(CpCmd::NightMode(on))
-        .chain(Surface::ALL.map(|s| CpCmd::Appearance(s, on)))
-        .collect()
-}
-
 #[tokio::test]
-async fn telemetry_reaches_carplay_and_only_a_config_change_sets_the_night_mode_again() {
+async fn only_the_config_sets_the_night_modes() {
     let mut rig = Rig::new();
     let cfg = rig.p.config_seen.clone();
     let snap = |v: Value| v.as_object().cloned().unwrap_or_default();
@@ -1357,7 +1353,11 @@ async fn telemetry_reaches_carplay_and_only_a_config_change_sets_the_night_mode_
         .on_state(cfg.clone(), snap(json!({ "nightMode": true, "ts": 1 })));
     rig.p
         .on_state(cfg.clone(), snap(json!({ "nightMode": true, "ts": 2 })));
-    assert_eq!(rig.drain(), night(true));
+    assert_eq!(
+        rig.drain(),
+        [],
+        "telemetry reaches carplay through the config"
+    );
 
     let mut day = cfg.clone();
     day.appearance_mode = AppearanceMode::Day;
@@ -1369,17 +1369,10 @@ async fn telemetry_reaches_carplay_and_only_a_config_change_sets_the_night_mode_
         cfg.call_volume,
         cfg.voice_assistant_volume,
     );
-    assert_eq!(
-        rig.drain(),
-        [CpCmd::InitialNightMode(Some(false)), levels.clone()]
-    );
+    assert_eq!(rig.drain(), [CpCmd::NightModes([true; 4]), levels.clone()]);
 
     rig.p.on_event(CpEvent::Spawned { id: 1 });
-    assert_eq!(
-        rig.drain(),
-        [night(true), vec![levels]].concat(),
-        "a new session hears the volumes"
-    );
+    assert_eq!(rig.drain(), [levels], "a new session hears the volumes");
 }
 
 fn aa(id: AaId, cmd: SessionCmd) -> AaCmd {
@@ -2028,4 +2021,93 @@ async fn an_iphone_mac_is_not_taken_for_an_unnamed_android_auto_session() {
     rig.p
         .on_back(Back::Phones(vec!["AA:00:00:00:00:07".into()]));
     assert!(rig.p.hands_free.bt_by_instance.is_empty());
+}
+
+fn airplay(rig: &mut Rig, id: u64, name: &str) -> UnboundedReceiver<AirplayCommand> {
+    let (remote, commands) = AirplayRemote::channel();
+    rig.p.on_ap(ApEvent::Started {
+        id,
+        close: Arc::new(Notify::new()),
+        peer: AirplaySender {
+            name: Some(name.into()),
+            model: None,
+        },
+        remote,
+    });
+    commands
+}
+
+#[tokio::test]
+async fn the_mirror_picture_waits_for_park() {
+    let mut rig = Rig::new();
+    let _commands = airplay(&mut rig, 1, "LaPhone");
+    rig.p.video_up(Link::Ap(1));
+    let cfg = rig.p.config_seen.clone();
+    let car = |v: Value| v.as_object().cloned().unwrap();
+    let held = |rig: &Rig| rig.hub.watch().borrow().sessions.held;
+    assert!(!held(&rig), "no gear known yet");
+    rig.p.on_state(cfg.clone(), car(json!({ "gear": "D" })));
+    assert!(held(&rig));
+    rig.p.on_state(cfg.clone(), car(json!({ "gear": "P" })));
+    assert!(!held(&rig));
+}
+
+#[tokio::test]
+async fn media_keys_reach_the_airplay_sender() {
+    let mut rig = Rig::new();
+    let mut commands = airplay(&mut rig, 1, "LaPhone");
+    rig.p.media(MediaControl::PlayPause);
+    rig.p.on_ap(ApEvent::NowPlaying {
+        id: 1,
+        patch: NowPlayingPatch {
+            playing: Some(true),
+            ..Default::default()
+        },
+    });
+    rig.p.media(MediaControl::PlayPause);
+    rig.p.media(MediaControl::Next);
+    rig.p.media(MediaControl::Prev);
+    rig.p.key("KeyN", true);
+    rig.p.key("KeyN", false);
+    rig.p.seek(61_500);
+    let mut sent = Vec::new();
+    while let Ok(c) = commands.try_recv() {
+        sent.push(c);
+    }
+    assert_eq!(
+        sent,
+        [
+            AirplayCommand::Play,
+            AirplayCommand::Pause,
+            AirplayCommand::Next,
+            AirplayCommand::Prev,
+            AirplayCommand::Next,
+            AirplayCommand::Seek(61.5)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_mirror_shows_what_carplay_on_the_same_phone_plays() {
+    let mut rig = Rig::new();
+    rig.connect(1, false);
+    rig.p.on_event(CpEvent::Presence {
+        id: 1,
+        wired: false,
+        presence: Presence::Device {
+            bt_mac: "aa:bb:cc:dd:ee:01".into(),
+            wifi_mac: String::new(),
+            ip: String::new(),
+            usb_udid: String::new(),
+            name: "LaPhone".into(),
+            model: String::new(),
+        },
+    });
+    rig.meta(1, json!({ "type": "nowplaying", "title": "Car" }));
+    airplay(&mut rig, 7, "laphone");
+    rig.p.ap_video_shown();
+    assert_eq!(rig.sessions().0, Some(Protocol::Airplay));
+    assert_eq!(rig.now_playing().title.as_deref(), Some("Car"));
+    rig.meta(1, json!({ "type": "nowplaying", "title": "Next" }));
+    assert_eq!(rig.now_playing().title.as_deref(), Some("Next"));
 }

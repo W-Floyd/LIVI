@@ -217,7 +217,10 @@ fn apply(ui: &AppWindow, update: Update) {
         Update::PhoneName(name) => overlay_ui::phone(ui, &name),
         Update::Camera(found) => ui.set_camera_found(found),
         Update::MainMask(mask) => ui.set_main_mask(dashboard_ui::mask_data(mask)),
+        Update::ViewArea(area) => ui.set_view_area(view_area(area)),
         Update::Video(video) => video_ui::show(ui, video),
+        Update::Mirrored(mirrored) => video_ui::mirrored(ui, mirrored),
+        Update::Held(held) => ui.set_held(held),
         Update::Fonts(paths) => {
             if fonts::register(&paths) {
                 let lang = settings_ui::language();
@@ -229,6 +232,16 @@ fn apply(ui: &AppWindow, update: Update) {
                 secondary::relayout();
             }
         }
+    }
+}
+
+pub(crate) fn view_area(area: livi_core_proto::config::ViewArea) -> ViewArea {
+    let px = |v: u32| i32::try_from(v).unwrap_or(i32::MAX);
+    ViewArea {
+        top: px(area.top),
+        bottom: px(area.bottom),
+        left: px(area.left),
+        right: px(area.right),
     }
 }
 
@@ -269,7 +282,7 @@ fn open_path(ui: &AppWindow, path: &str) {
     }
 }
 
-fn choose(ui: &AppWindow, page: Page) {
+pub(crate) fn choose(ui: &AppWindow, page: Page) {
     ui.set_page(page);
     CLIENT.with_borrow(|c| {
         if let Some(c) = c {

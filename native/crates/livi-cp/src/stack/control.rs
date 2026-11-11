@@ -99,7 +99,7 @@ impl<M: Media> Conn<M> {
             "RECORD" => {
                 println!("[cpStack] RECORD (session started)");
                 self.live = true;
-                self.send_appearances().await;
+                self.send_surfaces().await;
                 if let Some(limited) = self.limited_ui {
                     self.send_limited_ui(limited).await;
                 }
@@ -186,14 +186,7 @@ impl<M: Media> Conn<M> {
             if let Some(refresh) = self.ctx.refresh.clone() {
                 let _ = tokio::task::spawn_blocking(move || refresh()).await;
             }
-            let mut cfg = self.ctx.config.borrow().info.clone();
-            let [main_ui, main_map, cluster_ui, cluster_map] = self.appearance;
-            cfg.main.ui_night = main_ui.or(cfg.main.ui_night);
-            cfg.main.map_night = main_map.or(cfg.main.map_night);
-            if let Some(cluster) = &mut cfg.cluster {
-                cluster.ui_night = cluster_ui.or(cluster.ui_night);
-                cluster.map_night = cluster_map.or(cluster.map_night);
-            }
+            let cfg = self.ctx.config.borrow().info.clone();
             self.told_info = Some(cfg.clone());
             let mut info = info::build(&cfg);
             if self.video_playback {

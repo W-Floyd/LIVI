@@ -152,9 +152,7 @@ pub enum CpEvent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CpCmd {
     Stack { id: SessionId, cmd: StackCmd },
-    NightMode(bool),
-    Appearance(Surface, bool),
-    InitialNightMode(Option<bool>),
+    NightModes([bool; 4]),
     LimitedUi(bool),
     VideoAllowed(bool),
     ClusterActive(bool),
@@ -204,9 +202,8 @@ impl Session {
         }
     }
 
-    fn appearance(&self, night: bool) {
-        self.send(StackCmd::NightMode(night));
-        for surface in Surface::ALL {
+    fn night_modes(&self, modes: [bool; 4]) {
+        for (surface, night) in Surface::ALL.into_iter().zip(modes) {
             self.send(StackCmd::Appearance(surface, night));
         }
     }
@@ -247,11 +244,7 @@ struct Manager<M: Media> {
     to_cable: HashMap<String, JoinHandle<()>>,
     awaiting: HashMap<String, JoinHandle<()>>,
     reset_once: HashSet<String>,
-    initial_night_mode: Option<bool>,
-    // The car's latest, for sessions that connect after it arrived; a forced
-    // appearance (initial_night_mode) wins over it.
-    car_night_mode: Option<bool>,
-    car_appearance: [Option<bool>; 4],
+    night_modes: Option<[bool; 4]>,
     notices: Notices,
     cluster_stream_active: bool,
     video_allowed: bool,
@@ -295,9 +288,7 @@ async fn run<M: Media>(
         to_cable: HashMap::new(),
         awaiting: HashMap::new(),
         reset_once: HashSet::new(),
-        initial_night_mode: None,
-        car_night_mode: None,
-        car_appearance: [None; 4],
+        night_modes: None,
         notices: Notices::default(),
         cluster_stream_active: true,
         video_allowed: true,
@@ -379,17 +370,8 @@ impl<M: Media> Manager<M> {
     fn register(&mut self, session: Session) -> SessionId {
         let id = self.next_id;
         self.next_id += 1;
-        if let Some(night) = self.initial_night_mode {
-            session.appearance(night);
-        } else {
-            if let Some(night) = self.car_night_mode {
-                session.send(StackCmd::NightMode(night));
-            }
-            for surface in Surface::ALL {
-                if let Some(night) = self.car_appearance[surface as usize] {
-                    session.send(StackCmd::Appearance(surface, night));
-                }
-            }
+        if let Some(modes) = self.night_modes {
+            session.night_modes(modes);
         }
         session.send(StackCmd::ClusterActive(self.cluster_stream_active));
         if !self.notices.history.is_empty() {
@@ -986,23 +968,11 @@ impl<M: Media> Manager<M> {
                     s.send(cmd);
                 }
             }
-            CpCmd::NightMode(night) => {
-                self.car_night_mode = Some(night);
-                for s in self.sessions.values() {
-                    s.send(StackCmd::NightMode(night));
-                }
-            }
-            CpCmd::Appearance(surface, night) => {
-                self.car_appearance[surface as usize] = Some(night);
-                for s in self.sessions.values() {
-                    s.send(StackCmd::Appearance(surface, night));
-                }
-            }
-            CpCmd::InitialNightMode(night) => {
-                self.initial_night_mode = night;
-                if let Some(night) = night {
+            CpCmd::NightModes(modes) => {
+                if self.night_modes != Some(modes) {
+                    self.night_modes = Some(modes);
                     for s in self.sessions.values() {
-                        s.appearance(night);
+                        s.night_modes(modes);
                     }
                 }
             }
@@ -1478,9 +1448,7 @@ mod tests {
             .await;
 
         rig.handle.stack(id, StackCmd::Keyframe);
-        rig.handle.send(CpCmd::NightMode(true));
-        rig.handle.send(CpCmd::Appearance(Surface::ClusterUi, true));
-        rig.handle.send(CpCmd::InitialNightMode(Some(false)));
+        rig.handle.send(CpCmd::NightModes([true; 4]));
         rig.handle.send(CpCmd::LimitedUi(true));
         rig.handle.send(CpCmd::VideoAllowed(false));
         rig.handle.send(CpCmd::ClusterActive(false));

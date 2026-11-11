@@ -235,6 +235,7 @@ fn to_dict(a: &App) -> VarDictionary {
     d.set("timeout_s", a.timeout_s as i64);
     d.set("scale", a.scale.unwrap_or(0) as i64);
     d.set("drive_safe", a.drive_safe);
+    d.set("terminal", a.terminal);
     d
 }
 

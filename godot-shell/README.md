@@ -331,6 +331,13 @@ An app with no text input (`Wayland.has_text_input`) gets a keyboard button in i
 corner instead, and typing reaches it as key presses on a US layout. Projection windows never get
 it: the phone draws its own.
 
+Terminals get a row of Esc, Tab, Ctrl, Alt, Super, arrows and Fn (F1 to F12) between the bar and
+the keys: by the terminal purpose (VTE sends it), a desktop entry with `Categories=TerminalEmulator`,
+or a known app_id (`AppKeyboard.TERMINALS`); the bar's toggle shows it for any app. Ctrl, Alt and
+Super are sticky (once for the next key, twice to lock, tinted and lit as shift is), and while one
+is down letters go as keys under it rather than as commits: VTE ignores a committed control
+character (`app-keyboard-console` checks Console's shell reads Ctrl+C as 0x03).
+
 ## While driving
 
 `Drive` (an autoload) says whether the car is driven and what that locks, as PLAN.md's "What a

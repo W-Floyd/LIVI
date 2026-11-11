@@ -561,9 +561,13 @@ impl Server {
     /// Types `text` into the focused window: through its enabled text input, else as key presses
     /// on a US layout. False when neither could take all of it (nothing is sent then).
     pub fn type_text(&mut self, text: &str) -> bool {
-        if self.state.text_input.commit_string(text) {
-            return true;
-        }
+        self.state.text_input.commit_string(text) || self.type_keys(text)
+    }
+
+    /// Types `text` as key presses on a US layout, whatever text input there is: with Ctrl held,
+    /// a terminal needs the key, not the character. False, sending nothing, when a character has
+    /// no key.
+    pub fn type_keys(&mut self, text: &str) -> bool {
         let Some(keys) = text.chars().map(crate::keys::us_key).collect::<Option<Vec<_>>>() else {
             return false;
         };
@@ -1771,6 +1775,17 @@ mod tests {
                 &[],
             ),
             (|s| s.type_text("hé!"), any, &["text commit hé!"]),
+            // Ctrl held (a terminal's sticky Ctrl): keys even though the field is enabled.
+            (
+                |s| {
+                    s.key(29, true);
+                    let typed = s.type_keys("c") && !s.type_keys("é");
+                    s.key(29, false);
+                    typed
+                },
+                any,
+                &["key 29 pressed", "key 46 pressed", "key 46 released", "key 29 released"],
+            ),
             (|s| s.state.text_input.delete_surrounding(1, 0), any, &["text delete 1 0"]),
             (|s| s.state.text_input.preedit("ab", 2, 2), any, &["text preedit ab"]),
             // Enabled again by a tap while enabled: asked again, for a keyboard put away.

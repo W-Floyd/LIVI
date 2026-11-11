@@ -885,6 +885,7 @@ func open_keyboard(id: int, field: Dictionary) -> void:
 	lock.dismissed.connect(k.close)
 	k.add_child(lock)
 	app_keyboard = k
+	k.terminal = _terminal(id)
 	k.configure(id, field)
 	_place_keyboard()
 	k.slide_in(k.position.x, _driver_left())
@@ -934,6 +935,12 @@ func _on_keys_button() -> void:
 		return
 	_projection.window.focus_app()
 	open_keyboard(id, {})
+
+
+## A terminal: its launcher entry says TerminalEmulator, or its app_id is a known one.
+func _terminal(id: int) -> bool:
+	var owner: Dictionary = launcher.windows.get(id, {})
+	return bool(launcher.app(str(owner.get("app", ""))).get("terminal", false)) or AppKeyboard.terminal_app(str(_app_ids.get(id, "")))
 
 
 ## livi-gst-host names its video windows livi-video; their touches are the phone's.

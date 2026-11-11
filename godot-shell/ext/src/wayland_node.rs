@@ -397,6 +397,13 @@ impl WaylandCompositor {
         self.server.as_mut().is_some_and(|s| s.type_text(&text.to_string()))
     }
 
+    /// Types into the focused window as key presses on a US layout only, under whatever
+    /// modifiers `key` holds down. False, sending nothing, when a character has no key.
+    #[func]
+    fn type_keys(&mut self, text: GString) -> bool {
+        self.server.as_mut().is_some_and(|s| s.type_keys(&text.to_string()))
+    }
+
     /// Deletes `before` and `after` bytes around the cursor of the enabled field. False with none.
     #[func]
     fn text_delete(&mut self, before: i64, after: i64) -> bool {

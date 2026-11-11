@@ -73,6 +73,8 @@ pub struct App {
     pub scale: Option<u32>,
     /// Usable while driving: `X-LIVI-DriveSafe=true`, or apps.yaml's `drive_safe`.
     pub drive_safe: bool,
+    /// `Categories` has TerminalEmulator: the keyboard offers Ctrl, Alt, Esc, Tab and arrows.
+    pub terminal: bool,
 }
 
 /// The `[Desktop Entry]` group's keys, values unescaped at the string level.
@@ -336,6 +338,7 @@ pub fn desktop_app(id: &str, file: &Path, text: &str, data_dirs: &[PathBuf], lan
         timeout_s: if id.starts_with("waydroid.") { WAYDROID_TIMEOUT_S } else { TIMEOUT_S },
         scale: None,
         drive_safe: is_true(&e, "X-LIVI-DriveSafe"),
+        terminal: e.get("Categories").is_some_and(|c| list(c).iter().any(|c| c == "TerminalEmulator")),
     })
 }
 
@@ -405,6 +408,7 @@ pub fn waydroid_apps(list: &str, icons_dir: &Path) -> Vec<App> {
             timeout_s: WAYDROID_TIMEOUT_S,
             scale: None,
             drive_safe: false,
+            terminal: false,
         });
     };
     for line in list.lines() {
@@ -510,6 +514,7 @@ pub fn merge(found: Vec<App>, cfg: &Config, data_dirs: &[PathBuf]) -> Vec<App> {
                     timeout_s: TIMEOUT_S,
                     scale: None,
                     drive_safe: false,
+                    terminal: false,
                 });
                 apps.len() - 1
             }
@@ -639,9 +644,15 @@ mod tests {
         assert_eq!(a.app_ids, vec!["org.x.Y", "yy"]);
         assert_eq!(a.cwd.as_deref(), Some("/tmp"));
         assert_eq!(a.timeout_s, TIMEOUT_S);
-        assert!(!a.drive_safe);
-        for (extra, safe) in [("X-LIVI-DriveSafe=true\n", true), ("X-LIVI-DriveSafe=false\n", false)] {
-            assert_eq!(desktop_app("t", Path::new("/t"), &format!("{base}{extra}"), &[], &[], &path).unwrap().drive_safe, safe, "{extra:?}");
+        assert!(!a.drive_safe && !a.terminal);
+        for (extra, safe, terminal) in [
+            ("X-LIVI-DriveSafe=true\n", true, false),
+            ("X-LIVI-DriveSafe=false\n", false, false),
+            ("Categories=GTK;System;TerminalEmulator;\n", false, true),
+            ("Categories=Utility;Terminal;\n", false, false),
+        ] {
+            let a = desktop_app("t", Path::new("/t"), &format!("{base}{extra}"), &[], &[], &path).unwrap();
+            assert_eq!((a.drive_safe, a.terminal), (safe, terminal), "{extra:?}");
         }
     }
 
@@ -724,7 +735,7 @@ mod tests {
     }
 
     fn app(id: &str, name: &str) -> App {
-        App { id: id.into(), name: name.into(), icon: None, argv: vec![id.into()], cwd: None, app_ids: vec![id.into()], source: "desktop", timeout_s: TIMEOUT_S, scale: None, drive_safe: false }
+        App { id: id.into(), name: name.into(), icon: None, argv: vec![id.into()], cwd: None, app_ids: vec![id.into()], source: "desktop", timeout_s: TIMEOUT_S, scale: None, drive_safe: false, terminal: false }
     }
 
     #[test]

@@ -1,0 +1,43 @@
+name: app-keyboard-console
+# GNOME Console (kgx, VTE on GTK 4): its terminal asks for text with the terminal purpose, so the
+# keyboard comes with the extra row; Ctrl+C reaches VTE as a key with Ctrl down, its shell reading
+# a 0x03 byte, and plain letters as commits after it. Needs gnome-console in the VM.
+clock: 2026-11-09T08:30:00
+nav: true
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - wait: { frames: 2 }
+  - gdscript: |
+      var log: String = runner._client_events("org.gnome.Console")
+      DirAccess.make_dir_recursive_absolute(log.get_base_dir())
+      runner.set_meta("log", log)
+      # Raw, so Ctrl+C is a byte read, not a signal.
+      return runner._spawn({role = "command", run = ["env", "GSK_RENDERER=cairo", "kgx", "--", "sh", "-c", "stty raw -echo; dd bs=1 count=3 of=" + log + " 2>/dev/null"]})
+  - wait: { window: org.gnome.Console }
+  - page: app
+  - wait: { frames: 60 }
+  - gdscript: |
+      await runner._touch(Vector2(shell.get_global_rect().position.x + 400.0, 300.0))
+      for i in 120:
+          if shell.app_keyboard != null:
+              break
+          await runner.frames(1)
+      if shell.app_keyboard == null:
+          return "no keyboard for Console"
+      if not shell.app_keyboard.extras_on:
+          return "no extra row for Console"
+      await runner.frames(30)
+  - screenshot: { name: app-keyboard-console, compare: false }
+  - tap: { node: AppKeyboard/Extras/Ctrl }
+  - tap: { node: AppKeyboard/Keyboard/Keys/c }
+  - tap: { node: AppKeyboard/Keyboard/Keys/l }
+  - tap: { node: AppKeyboard/Keyboard/Keys/x }
+  - gdscript: |
+      for i in 120:
+          if FileAccess.get_file_as_bytes(runner.get_meta("log")).size() >= 3:
+              break
+          await runner.frames(1)
+      var got := FileAccess.get_file_as_bytes(runner.get_meta("log"))
+      if got != PackedByteArray([3, 108, 120]):
+          return "Console's shell read %s, not Ctrl+C l x" % got

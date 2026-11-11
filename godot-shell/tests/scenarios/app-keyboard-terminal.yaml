@@ -1,0 +1,93 @@
+name: app-keyboard-terminal
+# A terminal's keyboard: a field with the terminal purpose (as VTE sends) gets the extra row of
+# Esc, Tab, Ctrl, Alt, Super, arrows and Fn. Ctrl is sticky: once for the next key, twice to
+# lock, and while it is down letters go as keys under it, not as commits. The bar's toggle hides
+# the row. A terminal without text input (by its app_id) gets the row through the keys button.
+clock: 2026-11-09T08:30:00
+nav: true
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - wait: { frames: 2 }
+  - gdscript: |
+      return runner._spawn({role = "app", app_id = "org.livi.test.term", pattern = "grid", size = "0x0", events = true, text_input = "terminal"})
+  - wait: { window: org.livi.test.term }
+  - page: app
+  - wait: { frames: 2 }
+  - tap: { x: 1500, y: 100, with: touch }
+  - wait: { frames: 30 }
+  - gdscript: |
+      var kb: AppKeyboard = shell.app_keyboard
+      if kb == null or not kb.extras_on or not kb.has_node("Extras/Ctrl"):
+          return "no extra row for a terminal"
+      var row: Rect2 = kb.get_node("Extras").get_global_rect()
+      if row.end.y > kb.keyboard.get_global_rect().position.y + 1.0 or row.size.x != kb.size.x:
+          return "the extra row at %s, the keys at %s" % [row, kb.keyboard.get_global_rect()]
+  - screenshot: { name: app-keyboard-terminal, mask: [[0, 0, 100, 720]] }
+  # Ctrl for the next key: a key with Ctrl down, then letters are commits again.
+  - tap: { node: AppKeyboard/Extras/Ctrl }
+  - gdscript: |
+      var m: Dictionary = shell.app_keyboard.mods
+      if [m.ctrl, m.alt, m["super"]] != [1, 0, 0]:
+          return "mods %s" % m
+  - tap: { node: AppKeyboard/Keyboard/Keys/c }
+  - tap: { node: AppKeyboard/Keyboard/Keys/d }
+  - gdscript: |
+      var m: Dictionary = shell.app_keyboard.mods
+      if [m.ctrl, m.alt, m["super"]] != [0, 0, 0]:
+          return "mods %s" % m
+  - expect_client:
+      app_id: org.livi.test.term
+      lines: ["key 29 pressed", "key 46 pressed", "key 46 released", "key 29 released", "text commit d"]
+  # Twice: locked for every key until tapped again; Alt with it for one.
+  - tap: { node: AppKeyboard/Extras/Ctrl }
+  - tap: { node: AppKeyboard/Extras/Ctrl }
+  - tap: { node: AppKeyboard/Extras/Alt }
+  - tap: { node: AppKeyboard/Keyboard/Keys/a }
+  - tap: { node: AppKeyboard/Keyboard/Keys/b }
+  - gdscript: |
+      var m: Dictionary = shell.app_keyboard.mods
+      if [m.ctrl, m.alt, m["super"]] != [2, 0, 0]:
+          return "mods %s" % m
+  - tap: { node: AppKeyboard/Extras/Ctrl }
+  - gdscript: |
+      var m: Dictionary = shell.app_keyboard.mods
+      if [m.ctrl, m.alt, m["super"]] != [0, 0, 0]:
+          return "mods %s" % m
+  - tap: { node: AppKeyboard/Extras/Esc }
+  - tap: { node: AppKeyboard/Extras/Up }
+  - tap: { node: AppKeyboard/Extras/Fn }
+  - tap: { node: AppKeyboard/Extras/F1 }
+  - expect_client:
+      app_id: org.livi.test.term
+      lines: ["key 29 pressed", "key 56 pressed", "key 30 pressed", "key 30 released", "key 56 released", "key 29 released",
+        "key 29 pressed", "key 48 pressed", "key 48 released", "key 29 released",
+        "key 1 pressed", "key 1 released", "key 103 pressed", "key 103 released", "key 59 pressed", "key 59 released"]
+  # The toggle hides the row.
+  - tap: { node: AppKeyboard/ExtrasToggle }
+  - wait: { frames: 2 }
+  - gdscript: |
+      var kb: AppKeyboard = shell.app_keyboard
+      if kb.extras_on or kb.get_node("Extras").visible:
+          return "the row stayed"
+  - tap: { node: AppKeyboard/Keyboard/Keys/Cancel }
+  - wait: { frames: 30 }
+  # A terminal with no text input, known by its app_id: the keys button, then the row.
+  - gdscript: |
+      var e: String = runner._spawn({role = "app", app_id = "foot", pattern = "bars", size = "0x0", events = true})
+      if e != "":
+          return e
+      for i in 300:
+          if Wayland.find_window("foot") >= 0:
+              break
+          await runner.frames(1)
+      shell.bring_forward(Wayland.find_window("foot"))
+      await runner.frames(2)
+  - expect_node: { path: KeysButton, visible: true }
+  - tap: { node: KeysButton }
+  - wait: { frames: 30 }
+  - tap: { node: AppKeyboard/Extras/Ctrl }
+  - tap: { node: AppKeyboard/Keyboard/Keys/c }
+  - expect_client:
+      app_id: foot
+      lines: ["keyboard enter", "key 29 pressed", "key 46 pressed", "key 46 released", "key 29 released"]

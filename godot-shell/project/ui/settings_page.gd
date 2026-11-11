@@ -932,8 +932,8 @@ func _look_set(key: String, value: Variant) -> void:
 	ThemeManager.save_look()
 
 
-## The lockout while driving (Drive), Look's last group. While the car is driven its choice can only go back to
-## following the car, and the developer options wait until it parks.
+## The lockout while driving (Drive), Look's last group. While the car is driven its choice can
+## only go back to following the car, and the developer options wait until it parks.
 func _driving_rows() -> Array:
 	var by := {regulation = "the car's driving lockout", gear = "the gear", parking_brake = "the parking brake and speed",
 		speed = "speed", ignition = "the ignition"}

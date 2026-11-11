@@ -44,6 +44,7 @@ var _heading: Control
 var _up: Button
 var _heading_label: Label
 var _rows: DragScroll
+var _entry: TextEntry
 
 
 func _init() -> void:
@@ -288,13 +289,14 @@ func _build_livi() -> void:
 			_add_picks(opts, func(i): if not bool(_view.get("readOnly", false)): Core.settings_pick(-1, i); _refresh(true))
 		"number":
 			_rows.list.add_child(_number_page())
+			_rows.list.add_child(_keypad_button())
 		"slider":
 			var r := {kind = "value", label = _heading_label.text, enabled = true, slider = {level = _view.get("level", 0.0), text = _view.get("text", "")}}
 			_rows.list.add_child(_row(r, -1))
 		"text", "color":
 			var r := {kind = "info", label = str(_view.get("value", "")), value = "", enabled = true}
 			_rows.list.add_child(_row(r, -1))
-			_rows.list.add_child(_note("Typing needs a keyboard, which this panel does not have yet."))
+			_type_text()
 		_:
 			_rows.list.add_child(_note("This page needs LIVI's own settings screen."))
 
@@ -674,6 +676,52 @@ func _number_page() -> Control:
 	for by in [1.0, 10.0, 100.0]:
 		add.call(by * step)
 	return row
+
+
+## A text page opens straight onto the keyboard: Done sends what stock's commit sends and goes
+## back up (stock's page closes once taken); cancel goes back up with nothing sent.
+func _type_text() -> void:
+	if is_instance_valid(_entry):
+		return
+	var lo = _view.get("minLen")
+	var hi = _view.get("maxLen")
+	_entry = TextEntry.edit(self, {label = _heading_label.text, value = _view.get("value", ""),
+		secret = bool(_view.get("secret", false)), min_len = int(lo) if lo != null else 0, max_len = int(hi) if hi != null else 0})
+	_entry.on_commit = func(t: String) -> bool: return Core.settings_text(-1, t)
+	_entry.closed.connect(func(taken: bool):
+		_entry = null
+		if not taken:
+			Core.settings_back()
+		_rows.offset = 0.0
+		_refresh(true))
+
+
+func _keypad_button() -> Button:
+	var b := Button.new()
+	b.name = "Type"
+	b.text = "Type a value"
+	b.icon = Icons.texture("keyboard", ThemeManager.px.icon)
+	b.focus_mode = Control.FOCUS_NONE
+	b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	b.custom_minimum_size.y = ThemeManager.px.touch
+	b.pressed.connect(func(): if not _rows.dragged: _type_number())
+	return b
+
+
+func _type_number() -> void:
+	if is_instance_valid(_entry):
+		return
+	var v := float(_view.get("value", 0.0))
+	var lo = _view.get("min")
+	_entry = TextEntry.edit(self, {label = _heading_label.text, kind = "number",
+		value = str(int(v)) if is_equal_approx(v, roundf(v)) else str(v),
+		decimals = float(_view.get("step", 1.0)) < 1.0, negative = lo == null or float(lo) < 0.0})
+	_entry.on_commit = func(t: String) -> bool:
+		Core.settings_number(-1, float(t.replace(",", ".")))
+		return true
+	_entry.closed.connect(func(_taken: bool):
+		_entry = null
+		_refresh(true))
 
 
 ## A list of options with a check on the chosen one; `on_pick` gets the index.

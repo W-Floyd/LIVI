@@ -1,0 +1,143 @@
+name: keyboard
+# Settings text and numbers typed on the on-screen keyboard: it covers the driver's side (left for
+# LHD, right for RHD), the field's name and value alone on the other; Done sends what stock's
+# commit sends, cancel sends nothing. Taps, and a hardware keyboard's keys.
+viewport: { width: 1920, height: 720 }
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - set: { core: { config: { carName: LIVI, wifiPassword: "12345678", redlineRpm: 6500 } } }
+  - page: settings
+  - tap: { node: Settings/Sections/List/General }
+  - tap: { node: Settings/Rows/List/Connections }
+  - tap: { node: Settings/Rows/List/Car Name }
+  - wait: { frames: 20 }
+  - expect_node: { path: Settings/Entry, text: LIVI }
+  - expect_node: { path: Settings/Entry/Root/Field/Label, text: Car Name }
+  # LHD: the keyboard on the left, two thirds to three quarters of the panel; the field right of it.
+  - gdscript: |
+      var kb: Control = shell.get_node("Settings/Entry/Root/Keyboard")
+      var field: Control = shell.get_node("Settings/Entry/Root/Field")
+      var w: float = shell.get_viewport().get_visible_rect().size.x
+      var r := kb.get_global_rect()
+      if absf(r.position.x) > 1.0 or r.size.x < w * 0.66 or r.size.x > w * 0.75:
+          return "keyboard at %s" % r
+      if field.get_global_rect().position.x < r.end.x or field.get_global_rect().end.x > w:
+          return "field at %s" % field.get_global_rect()
+      if shell.get_node("Settings").visible:
+          return "the settings page shows beside the keyboard"
+  - screenshot: keyboard-day
+  # Taps: backspace, shift for one capital, space, the numbers layer.
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Backspace }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Backspace }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Backspace }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Backspace }
+  - expect_node: { path: Settings/Entry, text: "" }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Shift }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/k }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/i }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/a }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Space }
+  - expect_node: { path: Settings/Entry, text: "Kia " }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Symbols }
+  - theme: { appearance: night }
+  - wait: { frames: 20 }
+  - screenshot: keyboard-night
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/6 }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Letters }
+  - expect_node: { path: Settings/Entry, text: "Kia 6" }
+  - theme: { appearance: day }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Done }
+  - expect_action: { SetConfig: { patch: { carName: "Kia 6" } } }
+  - wait: { frames: 20 }
+  - expect_node: { path: Settings/Heading/Title, text: Connections }
+  - expect_node: { path: Settings, visible: true }
+  - gdscript: |
+      if shell.has_node("Settings/Entry"):
+          return "the keyboard is still there"
+  # Cancel goes back up and sends nothing.
+  - tap: { node: Settings/Rows/List/Car Name }
+  - wait: { frames: 20 }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/x }
+  - gdscript: |
+      Core.fake_clear()
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Cancel }
+  - wait: { frames: 20 }
+  - expect_node: { path: Settings/Heading/Title, text: Connections }
+  - gdscript: |
+      var sent: Array = Core.fake_sent().filter(func(m): return m.get("type") == "action")
+      if not sent.is_empty():
+          return "cancel sent %s" % JSON.stringify(sent)
+      if shell.has_node("Settings/Entry"):
+          return "the keyboard is still there"
+  # A hardware keyboard: letters, backspace, Enter for Done.
+  - tap: { node: Settings/Rows/List/Car Name }
+  - wait: { frames: 20 }
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: Backspace
+  - key: E
+  - key: V
+  - expect_node: { path: Settings/Entry, text: ev }
+  - key: Enter
+  - expect_action: { SetConfig: { patch: { carName: ev } } }
+  - wait: { frames: 20 }
+  # RHD: the keyboard on the right. A password is dots until shown, and too short is refused.
+  - theme: { hand: rhd }
+  - tap: { node: Settings/Rows/List/Wi-Fi }
+  - tap: { node: Settings/Rows/List/Wi-Fi Password }
+  - wait: { frames: 20 }
+  - gdscript: |
+      var kb: Control = shell.get_node("Settings/Entry/Root/Keyboard")
+      var field: Control = shell.get_node("Settings/Entry/Root/Field")
+      var w: float = shell.get_viewport().get_visible_rect().size.x
+      var r := kb.get_global_rect()
+      if absf(r.end.x - w) > 1.0 or r.size.x < w * 0.66 or r.size.x > w * 0.75:
+          return "keyboard at %s" % r
+      if field.get_global_rect().end.x > r.position.x or field.get_global_rect().position.x < 0.0:
+          return "field at %s" % field.get_global_rect()
+  - expect_node: { path: Settings/Entry/Root/Field/Value, masked: true }
+  - screenshot: keyboard-rhd
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Backspace }
+  - gdscript: |
+      Core.fake_clear()
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Done }
+  - expect_node: { path: Settings/Entry, text: "1234567" }
+  - gdscript: |
+      if not Core.fake_sent().filter(func(m): return m.get("type") == "action").is_empty():
+          return "a password too short was sent"
+  - tap: { node: Settings/Entry/Root/Field/Show }
+  - expect_node: { path: Settings/Entry/Root/Field/Value, masked: false }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Symbols }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/9 }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Done }
+  - expect_action: { SetConfig: { patch: { wifiPassword: "12345679" } } }
+  - wait: { frames: 20 }
+  # A number with a page of its own offers the keypad.
+  - theme: { hand: lhd }
+  - tap: { node: Settings/Sections/List/Car }
+  # Low on the list: scrolled into view first.
+  - gdscript: |
+      shell.get_node("Settings/Rows").reveal(shell.get_node("Settings/Rows/List/Redline"))
+      await runner.frames(1)
+  - tap: { node: Settings/Rows/List/Redline }
+  - tap: { node: Settings/Rows/List/Type }
+  - wait: { frames: 20 }
+  - expect_node: { path: Settings/Entry, text: "6500" }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Backspace }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Backspace }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Backspace }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/2 }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/0 }
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/0 }
+  - expect_node: { path: Settings/Entry, text: "6200" }
+  - wait: { frames: 20 }
+  - screenshot: keyboard-keypad
+  - tap: { node: Settings/Entry/Root/Keyboard/Keys/Done }
+  - expect_action: { SetConfig: { patch: { redlineRpm: 6200 } } }
+  - wait: { frames: 20 }
+  - expect_node: { path: Settings/Heading/Title, text: Redline }

@@ -145,7 +145,11 @@ impl Controller {
             Screen::Number { value, min, max, step, text, .. } => json!({
                 "kind": "number", "value": value, "min": min, "max": max, "step": step, "text": text,
             }),
-            Screen::Text { value, .. } => json!({ "kind": "text", "value": value }),
+            Screen::Text { value, min_len, max_len, url, .. } => json!({
+                "kind": "text", "value": value, "minLen": min_len, "maxLen": max_len, "url": url,
+                // Stock shows it plain; the shell's keyboard hides it until asked.
+                "secret": self.model.node(&self.stack).is_some_and(|n| n.path.to_ascii_lowercase().contains("password")),
+            }),
             Screen::Color { value, .. } => json!({ "kind": "color", "value": value }),
             Screen::Slider { level, text, .. } => json!({ "kind": "slider", "level": level, "text": text }),
             Screen::Calibration { .. } => json!({ "kind": "unsupported" }),
@@ -318,6 +322,17 @@ impl Controller {
             Some(at) => send(self.model.number(&at, value, state).into_iter().collect()),
             None => Vec::new(),
         }
+    }
+
+    /// Typed text for the text page open now (`row < 0`, which closes once taken, as stock's
+    /// does) or a row's own; nothing when the field's rules refuse it.
+    pub fn text(&mut self, row: i64, text: &str) -> Vec<Out> {
+        let Some(at) = self.child(row) else { return Vec::new() };
+        let change = self.model.text(&at, text);
+        if row < 0 && change.is_some() {
+            self.stack.pop();
+        }
+        send(change.into_iter().collect())
     }
 
     pub fn dialog_press(&mut self, i: usize) -> Vec<Out> {
@@ -617,6 +632,13 @@ mod tests {
                 json!({ "config": { "batteryPreconditioning": "auto" } }), toggle,
                 vec![act(Action::PreconditionBattery { on: true })]),
             (&["System", "Software Update"], "Check for Updates", json!({}), press, vec![act(Action::CheckUpdate)]),
+            // Typed on the field's page, which then closes; refused when too short.
+            (&["General", "Connections"], "Car Name", json!({}), |c, r, _| {
+                c.open(r);
+                c.text(-1, "Kia")
+            }, vec![set(json!({ "carName": "Kia" }))]),
+            (&["General", "Connections", "Wi-Fi"], "Wi-Fi Password", json!({}),
+                |c, r, _| c.text(r as i64, "short"), vec![]),
             (&["Appearance", "UI Icon"], "UI Icon", json!({ "config": { "carplayIcon180": "abc" } }), press,
                 vec![set(json!({ "carplayIcon120": "", "carplayIcon180": "", "carplayIcon256": "" }))]),
         ];

@@ -276,6 +276,18 @@ impl CoreLink {
         self.settings_do(|c, s| c.number(row, value, s));
     }
 
+    /// Typed text; false when the field refused it, which then stays open.
+    #[func]
+    fn settings_text(&mut self, row: i64, text: GString) -> bool {
+        let mut taken = false;
+        self.settings_do(|c, _| {
+            let out = c.text(row, &text.to_string());
+            taken = !out.is_empty();
+            out
+        });
+        taken
+    }
+
     #[func]
     fn settings_dialog(&mut self, i: i64) {
         self.settings_do(|c, _| c.dialog_press(i.max(0) as usize));

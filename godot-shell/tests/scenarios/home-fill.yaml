@@ -1,0 +1,126 @@
+name: home-fill
+# Home without the phone's picture: the cards over the whole width, the charge as the hero where
+# the picture would be. Android Auto's video joining moves the cards aside (about 350 ms) and opens
+# the slot, the picture following the slot every frame and the phone asked for the slot once,
+# settled; its going does the reverse, asking nothing. At once under reduced motion. The rail
+# offers the phone's page only while there is a picture, and that page falls back when it goes.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - set: { core: { config: { projectionWidth: 1920, projectionHeight: 720 } } }
+  - wait: { frames: 2 }
+  - gdscript: &filled |
+      var slot: Control = shell.get_node("Page/Body/Slot")
+      var side: Control = shell.get_node("Page/Body/Side")
+      if slot.size.x > 0.5 or side.size.x < shell.size.x - 0.5 or shell.get_node("Projection").visible:
+          return "with no phone the slot is %s and the side %s" % [slot.size, side.size]
+      var stat: Control = shell.get_node("Page/Body/Side/Panel/Stat")
+      var pre: Control = shell.get_node("Page/Body/Side/Panel/Precondition")
+      var hero := stat.get_global_rect()
+      var row := pre.get_global_rect()
+      # The hero takes the picture's side: left for LHD, right for RHD.
+      var picture_left := not ThemeManager.side_left()
+      if (hero.end.x > row.position.x) if picture_left else (row.end.x > hero.position.x):
+          return "hero %s, stacked card %s" % [hero, row]
+      if hero.size.y < row.size.y * 3 or not stat.hero:
+          return "the hero is %s" % hero
+  - screenshot: home-filled
+  - theme: { appearance: night }
+  - screenshot: home-filled-night
+  - theme: { hand: rhd }
+  - gdscript: *filled
+  - theme: { appearance: day, hand: lhd }
+  # The rail as boot.gd wires it, hidden so the shots don't show it.
+  - gdscript: |
+      var rail := NavRail.new()
+      rail.name = "TestRail"
+      rail.visible = false
+      shell.add_child(rail)
+      rail.set_item_visible("projection", shell.has_phone())
+      shell.phone_changed.connect(func(on): rail.set_item_visible("projection", on))
+      if rail._buttons.projection.visible:
+          return "the rail offers the phone's page with no phone"
+      runner.set_meta("stat", shell.get_node("Page/Body/Side/Panel/Stat").get_instance_id())
+  # Android Auto's video comes: the slot opens over frames, the phone asked once it settled.
+  - gdscript: &join |
+      Core.fake_clear()
+      return runner._spawn({role = "app", app_id = "livi-video-main", pattern = "grid", size = "1920x1080", buffer = "nv12", video = true})
+  - wait: { window: livi-video-main }
+  - gdscript: &opens |
+      var areas := func():
+          return Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea")
+      var slot: Control = shell.get_node("Page/Body/Slot")
+      var proj: Control = shell.get_node("Projection")
+      var full: float = shell.size.x - ThemeManager.px.side
+      var between := 0
+      var last := -1.0
+      for i in 40:
+          var r := Rect2(slot.global_position - shell.global_position, slot.size)
+          if not ThemeManager.floating() and not Rect2(proj.position, proj.size).is_equal_approx(r):
+              return "frame %d: the picture is at %s, the slot %s" % [i, Rect2(proj.position, proj.size), r]
+          if slot.size.x < last - 0.5:
+              return "frame %d: the slot shrank opening, %s after %s" % [i, slot.size.x, last]
+          last = slot.size.x
+          if slot.size.x > 0.5 and slot.size.x < full - 0.5:
+              between += 1
+              if not areas.call().is_empty():
+                  return "frame %d: asked %s before the slot settled" % [i, areas.call()]
+          await runner.frames(1)
+      if absf(slot.size.x - full) > 0.5:
+          return "the slot settled at %s, not %s" % [slot.size.x, full]
+      if (between > 0) if ThemeManager.reduced_motion else (between < 10):
+          return "%d frames between (reduced motion %s)" % [between, ThemeManager.reduced_motion]
+      var got: Array = areas.call().map(func(m): return Rect2i(m.action.x, m.action.y, m.action.width, m.action.height))
+      if got != [Rect2i(slot.get_global_rect())]:
+          return "asked %s, want the settled slot %s once" % [got, Rect2i(slot.get_global_rect())]
+      if shell.get_node("Page/Body/Side/Panel/Stat").get_instance_id() != runner.get_meta("stat") or shell.get_node("Page/Body/Side/Panel/Stat").hero:
+          return "the charge card is not the same card, as a column card"
+      if not shell.get_node("TestRail")._buttons.projection.visible:
+          return "no Phone on the rail with the phone's picture there"
+  - screenshot: { name: home-phone, tolerance: 8 }
+  # It goes: the cards take the width back over frames, and nothing is asked.
+  - gdscript: &drop |
+      Core.fake_clear()
+      OS.kill(runner._clients.pop_back())
+      var slot: Control = shell.get_node("Page/Body/Slot")
+      var full := slot.size.x
+      var between := 0
+      for i in 300:
+          if Wayland.window_count() == 0 and slot.size.x < 0.5:
+              break
+          if slot.size.x > 0.5 and slot.size.x < full - 0.5:
+              between += 1
+          await runner.frames(1)
+      await runner.frames(2)
+      if (between > 0) if ThemeManager.reduced_motion else (between < 10):
+          return "%d frames between (reduced motion %s)" % [between, ThemeManager.reduced_motion]
+      var asked: Array = Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea")
+      if not asked.is_empty():
+          return "asked %s for a closed slot" % [asked]
+      if shell.get_node("TestRail")._buttons.projection.visible:
+          return "Phone stays on the rail after the phone's picture went"
+  - gdscript: *filled
+  # Reduced motion: both ways at once, still one area asked.
+  - theme: { reduced_motion: true }
+  - gdscript: *join
+  - wait: { window: livi-video-main }
+  - gdscript: *opens
+  - gdscript: *drop
+  - gdscript: *filled
+  # The phone's page, left open as the picture goes: back to where it was opened from.
+  - gdscript: *join
+  - wait: { window: livi-video-main }
+  - page: apps
+  - page: projection
+  - gdscript: |
+      OS.kill(runner._clients.pop_back())
+      for i in 300:
+          if Wayland.window_count() == 0:
+              break
+          await runner.frames(1)
+      await runner.frames(2)
+      if shell._page_name != "apps":
+          return "after the phone went the page is %s" % shell._page_name
+  - page: home
+  - gdscript: *filled

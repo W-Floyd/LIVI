@@ -6,4 +6,6 @@ fixtures:
     - { role: app, app_id: org.livi.test.bars, pattern: bars, size: 640x360 }
 steps:
   - wait: { window: org.livi.test.bars }
+  # A hosted app shows on the app page; home's slot is the phone's.
+  - page: app
   - screenshot: home-app

@@ -7,6 +7,7 @@ fixtures:
     - { role: app, app_id: org.livi.test.anim, pattern: grid, size: 1280x720, animate: 100000 }
 steps:
   - wait: { window: org.livi.test.anim }
+  - page: app
   - measure:
       name: anim-1280x720
       frames: 240

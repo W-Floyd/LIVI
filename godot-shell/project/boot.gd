@@ -27,6 +27,9 @@ func _ready() -> void:
 		var rail: Control = preload("res://ui/nav_rail.gd").new()
 		rail.selected.connect(func(page): _open(shell, page))
 		shell.page_changed.connect(rail.show_page)
+		# The phone's page only while there is a phone's picture to show.
+		rail.set_item_visible("projection", shell.has_phone())
+		shell.phone_changed.connect(func(on): rail.set_item_visible("projection", on))
 		add_child(rail)
 	_restore_page(shell)
 

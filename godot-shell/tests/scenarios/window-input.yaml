@@ -1,13 +1,15 @@
 name: window-input
-# A hosted window gets the pointer, touch and keys, at its own surface positions. It shows in
-# the projection area, letterboxed and centered, so the area's center is the surface's center,
-# (320, 180) on a 640×360 window, and the area's left edge is letterbox.
+# A hosted window gets the pointer, touch and keys, at its own surface positions. It shows on
+# the app page, letterboxed and centered, so the panel's center is the surface's center,
+# (320, 180) on a 640×360 window, and the panel's left edge is letterbox.
 fixtures:
   core: fixtures/parked.json
   clients:
     - { role: app, app_id: org.livi.test.input, pattern: grid, size: 640x360, events: true }
 steps:
   - wait: { window: org.livi.test.input }
+  # A hosted app shows on the app page; home's slot is the phone's.
+  - page: app
   - tap: { node: Projection/Window }
   - expect_client:
       app_id: org.livi.test.input

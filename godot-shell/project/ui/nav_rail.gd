@@ -49,6 +49,15 @@ func show_page(page: String) -> void:
 		(_buttons[k] as Button).set_pressed_no_signal(k == key)
 
 
+## Shows or hides one item (`projection` while there is no phone's picture); the rail re-centres.
+func set_item_visible(page: String, on: bool) -> void:
+	var b: Button = _buttons.get(page)
+	if b == null or b.visible == on:
+		return
+	b.visible = on
+	_center.call_deferred()
+
+
 func _style() -> void:
 	theme = ThemeManager.godot_theme
 	var g: float = ThemeManager.px.gap

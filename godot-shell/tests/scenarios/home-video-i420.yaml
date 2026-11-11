@@ -11,6 +11,7 @@ steps:
           return "dmabuf is off: %s" % Wayland.dmabuf_status()
       Wayland.reset_stats()
   - wait: { window: org.livi.test.video420 }
+  - page: app
   - gdscript: |
       var s: Dictionary = Wayland.stats()
       if s.imports == 0 or s.uploads != 0:

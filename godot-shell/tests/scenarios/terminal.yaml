@@ -7,4 +7,5 @@ fixtures:
     - { role: command, run: [weston-terminal] }
 steps:
   - wait: { window: org.freedesktop.weston.wayland-terminal }
+  - page: app
   - screenshot: { name: terminal, compare: false }

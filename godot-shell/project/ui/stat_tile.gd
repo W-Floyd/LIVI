@@ -30,7 +30,16 @@ var icon_name := "bolt":
 var fraction := -1.0:
 	set(v):
 		fraction = v
-		if _bar: _bar.queue_redraw()
+		if _bar:
+			_bar.visible = v >= 0.0
+			_bar.queue_redraw()
+## Home's dashboard hero: larger type, the bar along the card's foot.
+var hero := false:
+	set(v):
+		if v == hero:
+			return
+		hero = v
+		if _bar: _restyle()
 
 var _icon: TextureRect
 var _value: Label
@@ -38,6 +47,9 @@ var _unit: Label
 var _sub_label: Label
 var _sub_value: Label
 var _bar: Control
+var _fill: Control
+## The hero's type over the tile's.
+const HERO_SCALE := 1.8
 
 
 func _build() -> void:
@@ -59,14 +71,28 @@ func _build() -> void:
 	sub.size_flags_vertical = Control.SIZE_SHRINK_END
 	_bar = Control.new()
 	_bar.draw.connect(_draw_bar)
-	add_child(UI.vbox([UI.hbox([number, UI.spacer(), sub]), _bar], 0.6))
+	_fill = Control.new()
+	_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	add_child(UI.vbox([UI.hbox([number, UI.spacer(), sub]), _fill, _bar], 0.6))
 
 
 func _style() -> void:
 	var f := ThemeManager.fonts
-	var lift: float = f.display.get_descent(ThemeManager.font_size("display")) - f.body.get_descent(ThemeManager.font_size("title"))
+	var k := HERO_SCALE if hero else 1.0
+	var big := roundi(ThemeManager.px.display * k)
+	var mid := roundi(ThemeManager.px.title * k)
+	_value.add_theme_font_size_override("font_size", big)
+	_unit.add_theme_font_size_override("font_size", mid)
+	_sub_value.add_theme_font_size_override("font_size", mid)
+	_sub_label.add_theme_font_size_override("font_size", roundi(ThemeManager.px.caption * (1.25 if hero else 1.0)))
+	_icon.get_meta("icon")[1] = "status" if hero else "icon"
+	UI.style_icon(_icon)
+	var lift: float = f.display.get_descent(big) - f.body.get_descent(mid)
 	(_unit.get_parent() as MarginContainer).add_theme_constant_override("margin_bottom", roundi(max(0.0, lift)))
-	_bar.custom_minimum_size.y = roundi(ThemeManager.px.gap * 1.2)
+	# Pushes the bar to the hero's foot; nothing (no extra gap) in the column.
+	_fill.visible = hero
+	_bar.custom_minimum_size.y = roundi(ThemeManager.px.gap * (2.0 if hero else 1.2))
 	_bar.visible = fraction >= 0.0
 	_bar.queue_redraw()
 

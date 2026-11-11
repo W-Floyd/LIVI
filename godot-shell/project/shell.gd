@@ -18,6 +18,8 @@ extends Control
 signal ev_action(id: String)
 ## The page now showing, as `open_page` resolved it (`ev` is `ev_live` or `ev_main`).
 signal page_changed(page: String)
+## Whether a phone's picture (a projection video window) is there to show.
+signal phone_changed(present: bool)
 
 ## Mapped windows, oldest first; the newest is shown until the window layouts land.
 var _windows: Array[int] = []
@@ -49,6 +51,12 @@ var _following_front := false
 var _front := ""
 ## Lists and starts apps, and knows which hosted window is whose (the "apps" page).
 var launcher: Launcher
+## Home's split, 0 to 1: the phone's picture beside the cards, or (no picture) the cards over the
+## whole width. Tweened between; `_split_to` is where it is going.
+var _split := 1.0
+var _split_to := 1.0
+var _split_tween: Tween
+const SPLIT_S := 0.35
 
 
 func _init() -> void:
@@ -78,7 +86,7 @@ func _init() -> void:
 	var side := MarginContainer.new()
 	side.name = "Side"
 	side.clip_contents = true
-	var panel := VBoxContainer.new()
+	var panel := HomeCards.new()
 	panel.name = "Panel"
 	for pair in [["Stat", StatTile], ["Precondition", ToggleRow], ["Stop", StopCard], ["Player", MiniPlayer]]:
 		var n: Control = pair[1].new()
@@ -100,6 +108,8 @@ func _ready() -> void:
 	Core.welcome.connect(func(_v): _refresh(); _tell_front(); _ask_area(true))
 	Core.changed.connect(_on_core_changed)
 	Core.open_page.connect(_on_core_page)
+	_stat.hero = _split_to == 1.0
+	_projection.visible = false
 	_precondition.icon_name = "therm"
 	_precondition.pressed.connect(_on_precondition)
 	_player.control.connect(func(c): Core.act({kind = "media", control = c}))
@@ -138,11 +148,14 @@ func _style() -> void:
 	if _page is EvLive and _live_bar != _own_bar():
 		open_page("ev_live")
 	var g: float = ThemeManager.px.gap
-	_side.custom_minimum_size.x = ThemeManager.px.side
 	for k in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
 		_side.add_theme_constant_override(k, roundi(g * 1.5))
-	(_side.get_node("Panel") as VBoxContainer).add_theme_constant_override("separation", roundi(g * 1.5))
+	var cards: HomeCards = _side.get_node("Panel")
+	cards.gap = roundi(g * 1.5)
+	cards.column = ThemeManager.px.side - roundi(g * 1.5) * 2
+	cards.column_left = ThemeManager.side_left()
 	_body.move_child(_side, 0 if ThemeManager.side_left() else 1)
+	_set_split(_split)
 	# The page passes input through where the projection shows.
 	$Page.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -184,10 +197,16 @@ func open_page(page: String) -> String:
 	# The live page keeps the status bar unless its pack draws its own title bar.
 	$Page.visible = home or page == "apps" or (live and not own_bar)
 	_body.visible = home
-	_projection.visible = home or _app_page
-	# Every page change: leaving the full-panel pages puts the picture back in home's slot.
-	_place_projection()
-	_place_projection.call_deferred()
+	# Off home, the split is where it will be when home shows again.
+	if not home and _split_tween:
+		_split_tween.kill()
+		_split_tween = null
+		_set_split(_split_to)
+	_projection.visible = _app_page or (home and _split < 1.0)
+	# Every page change: leaving the full-panel pages puts the picture back in home's slot. The
+	# slot's size is stale until the body, hidden till now, lays out: the phone is asked after.
+	_place_projection(not home)
+	_place_next_frame()
 	if _scene:
 		_scene.visible = home
 	if live:
@@ -310,13 +329,70 @@ func _own_bar() -> bool:
 	return not EvLive.pack_layout().is_empty()
 
 
-func _place_projection() -> void:
+func _place_projection(ask := true) -> void:
 	if _projection == null:
 		return
 	var r := Rect2(Vector2.ZERO, size) if (ThemeManager.floating() or _app_page) else Rect2(_slot.global_position - global_position, _slot.size)
 	_projection.position = r.position
 	_projection.size = r.size
-	_ask_area()
+	# The picture follows the slot every frame; the phone is asked for where it settles.
+	if ask and _split_tween == null:
+		_ask_area()
+
+
+## Once this frame's deferred layout passes (minimum size, then sort) have run.
+func _place_next_frame() -> void:
+	if is_inside_tree() and not get_tree().process_frame.is_connected(_place_projection):
+		get_tree().process_frame.connect(_place_projection, CONNECT_ONE_SHOT)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_RESIZED and _side:
+		_set_split(_split)
+
+
+## Opens home's slot while there is a phone's picture, else gives the cards the whole width:
+## animated on home, at once elsewhere or under reduced motion.
+func _update_split() -> void:
+	var want := 0.0 if has_phone() else 1.0
+	if want == _split_to:
+		return
+	_split_to = want
+	phone_changed.emit(want == 0.0)
+	_stat.hero = want == 1.0
+	_fit.call_deferred()
+	if _split_tween:
+		_split_tween.kill()
+		_split_tween = null
+	if ThemeManager.reduced_motion or _page_name != "home" or not is_visible_in_tree():
+		_set_split(want)
+		_split_settled()
+		return
+	_projection.visible = true
+	_split_tween = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_split_tween.tween_method(_set_split, _split, want, SPLIT_S)
+	_split_tween.finished.connect(_split_settled)
+
+
+func _set_split(v: float) -> void:
+	_split = v
+	_side.custom_minimum_size.x = lerpf(ThemeManager.px.side, size.x, v)
+	(_side.get_node("Panel") as HomeCards).wide = v
+
+
+func _split_settled() -> void:
+	_split_tween = null
+	if _page_name == "home":
+		_projection.visible = _split < 1.0
+	# A slot that closed is asked for again when it opens, whatever it was before.
+	if _split_to == 1.0:
+		_area_asked = Rect2i()
+	_place_next_frame()
+
+
+## A projection video window (Android Auto or CarPlay streaming) is mapped.
+func has_phone() -> bool:
+	return _windows.any(_is_projection)
 
 
 ## The last area asked of the phone, in the projection screen's pixels.
@@ -338,7 +414,8 @@ func _ask_area(again := false) -> void:
 
 ## Shows every item that has content, then drops the least important until the rest fit.
 func _fit() -> void:
-	var panel: VBoxContainer = _side.get_node("Panel")
+	var panel: HomeCards = _side.get_node("Panel")
+	var dashboard := _split_to == 1.0
 	var electric := _powertrain() == "electric"
 	var wanted := {Stat = true, Precondition = electric, Stop = electric and _stop.has_content(), Player = _player.has_content()}
 	for n in PRIORITY:
@@ -350,11 +427,16 @@ func _fit() -> void:
 	var order := PRIORITY.duplicate()
 	order.reverse()
 	for n in order:
-		if panel.get_combined_minimum_size().y <= room:
+		var need := panel.needed(dashboard)
+		if need <= room:
 			break
 		var item: Control = panel.get_node(n)
 		if item.visible:
 			item.visible = false
+			# The hero beside a too-tall stack: leaving it out would not make the stack fit.
+			if panel.needed(dashboard) >= need:
+				item.visible = true
+				continue
 			left_out.append(n)
 	if not left_out.is_empty():
 		print("side panel: left out %s; it holds %d px" % [", ".join(left_out), roundi(room)])
@@ -366,14 +448,21 @@ func _on_window_unmapped(id: int) -> void:
 	# The app page shows hosted apps only: with none left, back to the grid they came from
 	# (not to the phone's video, which is the newest window left).
 	if _page_name == "app" and not _windows.any(func(w): return not _is_projection(w)):
+		_update_split()
 		open_page("apps")
+		return
+	# The phone's page with the phone gone: back where it was opened from, not a blank panel.
+	if _projection_page and not has_phone():
+		_update_split()
+		open_page(_return_to if _return_to != "projection" else "home")
 		return
 	_show_app()
 
 
 func _show_app() -> void:
-	# Home's slot is the phone's while there is a phone: a launched app is the app page's.
-	var phone := _projection_page or (_page_name == "home" and _windows.any(_is_projection))
+	_update_split()
+	# Home's slot is the phone's alone: a hosted app is the app page's.
+	var phone := _projection_page or _page_name == "home"
 	var shown: Array = _windows.filter(_is_projection) if phone else _windows.filter(func(w): return not _is_projection(w)) if _page_name == "app" else Array(_windows)
 	var id: int = shown[-1] if not shown.is_empty() else -1
 	_projection.show_window(id, id >= 0 and _is_projection(id))

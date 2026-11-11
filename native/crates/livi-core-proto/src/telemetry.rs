@@ -28,6 +28,11 @@
 //! | turnSignal                          | ✓    | ✓            | ·               | TODO          |
 //! | lights, highBeam, hazards           | ✓    | ✓            | ·               | ·             |
 //! | parkingBrake                        | ✓    | ✓            | ·               | ·             |
+//! | ignition, vehicleReady              | ✓    | ·            | ·               | ·             |
+//! | drivingRegulation(B)                | ✓    | ·            | ·               | ·             |
+//! | door*Open, door*Locked              | ✓    | ·            | ·               | ·             |
+//! | trunkOpen, hoodOpen, chargePortOpen | ✓    | ·            | ·               | ·             |
+//! | auxBatteryPct                       | ✓    | ·            | ·               | ·             |
 //! | nightMode                           | ·    | ✓            | ✓               | ✓             |
 //! | mainUiNightMode, mainMapNightMode   | ·    | ·            | ✓               | ✓             |
 //! | clusterUiNightMode                  | ·    | ·            | ✓               | ✓             |
@@ -45,6 +50,10 @@
 //! | batteryCapacityKwh, batteryLevelKwh | ✓    | ✓            | ✓ (electric)    | ✓ (electric)  |
 //! | batteryUsableKwh                    | ✓    | ✓            | ·               | ·             |
 //! | charging, activeConnector           | ✓    | ·            | ✓ (electric)    | ✓ (electric)  |
+//! | chargerReady, chargeTime*Min        | ✓    | ·            | ·               | ·             |
+//! | chargeLimit*, rangeAtChargeLimit*  | ✓    | ·            | ·               | ·             |
+//! | tripEnergyKwh, efficiencyAvg        | ✓    | ·            | ·               | ·             |
+//! | climatePowerW, batteryHeaterW       | ✓    | ·            | ·               | ·             |
 //! | rangeMaxElectricKm                  | ✓    | ·            | ✓ (electric)    | ✓ (electric)  |
 //! | carType                             | ✓    | ✓            | ✓               | ✓             |
 //! | evConnectorTypes                    | ✓    | ✓            | ✓               | ✓             |
@@ -67,6 +76,8 @@
 //! | can                                 | ✓    | ·            | ·               | ·             |
 //! | gnss                                | ✓    | ·            | ·               | ·             |
 //! | climate                             | ✓    | ·            | ·               | ✓             |
+//! | steeringWheelHeating, rear*Heating  | ✓    | ·            | ·               | ·             |
+//! | climateKey                          | ✓    | ·            | ·               | ·             |
 //! | notification                        | ·    | ·            | ·               | ✓             |
 //!
 //! With `autoSwitchOnReverse` on, `gear` and `reverse` also bring the camera to the front of the
@@ -102,6 +113,28 @@ pub struct TelemetrySnapshot {
     /// Taken as `turn` too, the name it had before.
     pub turn_signal: Option<TurnSignal>,
     pub parking_brake: Option<bool>,
+    /// The ignition (IGN1) is on.
+    pub ignition: Option<bool>,
+    /// The car is READY to drive; for an electric car, its DC-DC runs.
+    pub vehicle_ready: Option<bool>,
+    /// The car's own lockout of video and the keyboard, as its head unit applies it: true out of
+    /// Park. The car decides when, the head unit applies no speed of its own.
+    pub driving_regulation: Option<bool>,
+    /// The stricter lockout, from Park and the parking brake together.
+    pub driving_regulation_b: Option<bool>,
+    pub door_driver_open: Option<bool>,
+    /// The front passenger's door.
+    pub door_passenger_open: Option<bool>,
+    pub door_rear_left_open: Option<bool>,
+    pub door_rear_right_open: Option<bool>,
+    pub door_driver_locked: Option<bool>,
+    pub door_passenger_locked: Option<bool>,
+    pub door_rear_left_locked: Option<bool>,
+    pub door_rear_right_locked: Option<bool>,
+    pub trunk_open: Option<bool>,
+    pub hood_open: Option<bool>,
+    /// The charging flap.
+    pub charge_port_open: Option<bool>,
     pub coolant_c: Option<f64>,
     pub oil_c: Option<f64>,
     /// Automatic transmission oil.
@@ -112,6 +145,8 @@ pub struct TelemetrySnapshot {
     pub ambient_c: Option<f64>,
     /// The 12 V battery.
     pub battery_v: Option<f64>,
+    /// The 12 V battery's charge, 0 to 100.
+    pub aux_battery_pct: Option<f64>,
     /// 0 to 100, for an electric car the state of charge.
     pub fuel_pct: Option<f64>,
     pub range_km: Option<f64>,
@@ -137,6 +172,29 @@ pub struct TelemetrySnapshot {
     pub charging: Option<bool>,
     /// The `EvConnectorType` name of the plug that charges, such as `Combo2`.
     pub active_connector: Option<String>,
+    /// The on-board charger reports ready.
+    pub charger_ready: Option<bool>,
+    /// Until the battery is full at the charging going on.
+    pub charge_time_to_full_min: Option<f64>,
+    /// The car's estimates to its charge limit, on a fast charger, on AC, and on a DC charger
+    /// at the power the driver set.
+    pub charge_time_dc_min: Option<f64>,
+    pub charge_time_ac_min: Option<f64>,
+    pub charge_time_dc_custom_min: Option<f64>,
+    /// Where AC and DC charging stop, 0 to 100.
+    pub charge_limit_ac_pct: Option<f64>,
+    pub charge_limit_dc_pct: Option<f64>,
+    /// The range once charged to each limit.
+    pub range_at_charge_limit_ac_km: Option<f64>,
+    pub range_at_charge_limit_dc_km: Option<f64>,
+    /// The battery's energy used on this trip.
+    pub trip_energy_kwh: Option<f64>,
+    /// Distance per kWh in the cluster's unit (km or mi); the scale is a guess.
+    pub efficiency_avg: Option<f64>,
+    /// What the climate draws.
+    pub climate_power_w: Option<f64>,
+    /// What the battery's heater draws.
+    pub battery_heater_w: Option<f64>,
     /// The range on a full battery.
     pub range_max_electric_km: Option<f64>,
     /// A `CarType` name such as `HybridDiesel`, written into the settings when it differs.
@@ -206,6 +264,13 @@ pub struct TelemetrySnapshot {
     /// No receiver uses it, it is for tooling and diagnostics.
     pub can: Option<CanFrame>,
     pub climate: Option<Climate>,
+    /// 0 is off; the levels above it are not known.
+    pub steering_wheel_heating: Option<u8>,
+    /// 0 (off) to 3, as the front seats' in `climate`.
+    pub rear_left_seat_heating: Option<u8>,
+    pub rear_right_seat_heating: Option<u8>,
+    /// The dashboard's climate key is held.
+    pub climate_key: Option<bool>,
     pub notification: Option<Notification>,
 }
 
@@ -341,6 +406,15 @@ mod tests {
                 ..Default::default()
             }),
             dash_test: Some(true),
+            driving_regulation_b: Some(true),
+            door_passenger_open: Some(true),
+            door_rear_left_locked: Some(false),
+            charge_port_open: Some(true),
+            aux_battery_pct: Some(87.0),
+            charge_time_dc_custom_min: Some(42.0),
+            range_at_charge_limit_ac_km: Some(410.0),
+            climate_power_w: Some(1400.0),
+            rear_right_seat_heating: Some(2),
             telltales: Some(Telltales {
                 passenger_airbag_off: Some(true),
                 ..Default::default()
@@ -360,6 +434,20 @@ mod tests {
         assert_eq!(named["climate"]["driverTargetC"], 21.5);
         assert_eq!(named["telltales"]["passengerAirbagOff"], true);
         assert_eq!(named["dashTest"], true);
+        // micom-livi's names (go-micomd cmd/micom-livi).
+        for (name, want) in [
+            ("drivingRegulationB", json!(true)),
+            ("doorPassengerOpen", json!(true)),
+            ("doorRearLeftLocked", json!(false)),
+            ("chargePortOpen", json!(true)),
+            ("auxBatteryPct", json!(87.0)),
+            ("chargeTimeDcCustomMin", json!(42.0)),
+            ("rangeAtChargeLimitAcKm", json!(410.0)),
+            ("climatePowerW", json!(1400.0)),
+            ("rearRightSeatHeating", json!(2)),
+        ] {
+            assert_eq!(named[name], want, "{name}");
+        }
         let unknown = serde_json::from_value::<Climate>(json!({ "seatCooling": 1 }));
         assert!(
             unknown.is_err(),

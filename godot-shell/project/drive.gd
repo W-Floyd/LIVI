@@ -30,7 +30,8 @@ var passenger := false
 var launcher: Launcher
 var file := ""
 
-var _state := DriveState.new()
+## The extension's DriveState; null with an older extension, which `_fallback` stands in for.
+var _state: Object = _new_state()
 var _telemetry: Variant = null
 var _ms := 0.0
 
@@ -46,7 +47,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_ms += delta * 1000.0
 	# A lockout lifts only once parked has held: time has to pass without a push.
-	if moving and _state.pending():
+	if moving and _state and _state.pending():
 		_update(false)
 
 
@@ -80,7 +81,7 @@ func reset() -> void:
 	developer = false
 	passenger = false
 	launcher = null
-	_state = DriveState.new()
+	_state = _new_state()
 	moving = false
 	source = ""
 	_update(true)
@@ -162,8 +163,11 @@ func _update(pushed: bool) -> void:
 		_telemetry = Core.get_value("/telemetry")
 	var was_moving := moving
 	var was_passenger := passenger
-	moving = _state.update(_telemetry, roundi(_ms))
-	source = _state.source()
+	if _state:
+		moving = _state.update(_telemetry, roundi(_ms))
+		source = _state.source()
+	else:
+		_fallback()
 	# One drive's: parking or switching off ends it.
 	var t: Dictionary = _telemetry if _telemetry is Dictionary else {}
 	if not moving or t.get("ignition") == false or t.get("vehicleReady") == false:
@@ -171,3 +175,28 @@ func _update(pushed: bool) -> void:
 	if moving != was_moving or passenger != was_passenger:
 		print("drive: %s (%s)%s" % ["driving" if moving else "parked", source if source != "" else "nothing known", ", passenger" if passenger else ""])
 		changed.emit()
+
+
+static func _new_state() -> Object:
+	return ClassDB.instantiate("DriveState") if ClassDB.class_exists("DriveState") else null
+
+
+## Without the extension's DriveState: its order of signals, with no hold before a lockout lifts.
+func _fallback() -> void:
+	var t: Dictionary = _telemetry if _telemetry is Dictionary else {}
+	var gear = t.get("gear")
+	if t.get("ignition") == false:
+		moving = false
+		source = "ignition"
+	elif t.get("drivingRegulation") is bool:
+		moving = t.drivingRegulation
+		source = "regulation"
+	elif t.get("reverse") == true or gear is String:
+		moving = t.get("reverse") == true or str(gear).to_upper() != "P"
+		source = "gear"
+	elif t.get("speedKph") != null:
+		moving = float(t.speedKph) >= 5.0
+		source = "speed"
+	else:
+		moving = false
+		source = ""

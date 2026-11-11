@@ -875,10 +875,10 @@ func _on_apply() -> void:
 func _look_rows() -> Array:
 	if _app_open():
 		return _app_rows()
-	var themes := []
-	for t in ThemeManager.theme_names():
 	if _driving():
 		return _driving_rows()
+	var themes := []
+	for t in ThemeManager.theme_names():
 		themes.append([t, t.capitalize()])
 	var rows := [
 		_look_choice("theme_name", "Theme", themes),
@@ -923,21 +923,18 @@ func _look_set(key: String, value: Variant) -> void:
 	if _app_open():
 		_app_set(key, value)
 		return
-	var look := {}
-	look[key] = value
-	ThemeManager.set_look(look)
 	if _driving():
 		if key == "developer":
 			Drive.set_developer(bool(value))
 		else:
 			Drive.set_mode(str(value))
 		return
+	var look := {}
+	look[key] = value
+	ThemeManager.set_look(look)
 	ThemeManager.save_look()
 
 
-## `$XDG_DATA_HOME`, then each of `$XDG_DATA_DIRS`, under `livi-shell/settings`.
-static func default_app_dirs() -> PackedStringArray:
-	var home := OS.get_environment("XDG_DATA_HOME")
 func _driving() -> bool:
 	return section is String and section == DRIVING
 
@@ -981,6 +978,9 @@ func _driving_rows() -> Array:
 	]
 
 
+## `$XDG_DATA_HOME`, then each of `$XDG_DATA_DIRS`, under `livi-shell/settings`.
+static func default_app_dirs() -> PackedStringArray:
+	var home := OS.get_environment("XDG_DATA_HOME")
 	var dirs := PackedStringArray([home if home != "" else OS.get_environment("HOME").path_join(".local/share")])
 	var data := OS.get_environment("XDG_DATA_DIRS")
 	dirs.append_array((data if data != "" else "/usr/local/share:/usr/share").split(":", false))

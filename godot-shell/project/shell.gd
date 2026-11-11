@@ -727,6 +727,11 @@ func open_keyboard(id: int, field: Dictionary) -> void:
 	var k := AppKeyboard.new()
 	k.closed.connect(_on_keyboard_closed.bind(k))
 	add_child(k)
+	# No typing while the car is driven.
+	var lock := DriveCover.new()
+	lock.typing = true
+	lock.dismissed.connect(k.close)
+	k.add_child(lock)
 	app_keyboard = k
 	k.configure(id, field)
 	_place_keyboard()
@@ -830,11 +835,6 @@ func _refresh(sections := {}) -> void:
 	_status.charge_icon = "bolt" if power == "electric" else "fuel"
 	_status.phone = "Pixel"
 
-	# No typing while the car is driven.
-	var lock := DriveCover.new()
-	lock.typing = true
-	lock.dismissed.connect(k.close)
-	k.add_child(lock)
 	var on := _preconditioning()
 	_precondition.set_pressed_no_signal(on)
 	_precondition.label = "Warming battery" if on else "Precondition battery"

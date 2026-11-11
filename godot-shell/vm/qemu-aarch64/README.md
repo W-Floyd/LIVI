@@ -71,7 +71,7 @@ Screenshot, any mode: `echo "screendump $PWD/s.ppm" | nc -U monitor.sock`.
 ```
 
 The image is built with pmbootstrap in nura's builder container
-(`NURA_DIR`, default `/Users/william/Documents/Personal/git/nura-G5W-Android`).
+(`NURA_DIR`, required: a nura-G5W-Android checkout).
 It uses its own config (`pmbootstrap.cfg`, copied into the container as
 `~/.config/pmbootstrap-qemu-aarch64.cfg`) and its own rootfs
 (`chroot_rootfs_qemu-aarch64`). The head unit's config, rootfs and packages

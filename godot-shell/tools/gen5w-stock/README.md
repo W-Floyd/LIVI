@@ -22,7 +22,7 @@ gitignored `godot-shell/ref/`).
 ## Reproduce
 
 ```sh
-W=/path/to/work; K=~/Documents/Personal/git/kia-ev6
+W=/path/to/work; K=/path/to/kia-ev6
 export WORK=$W
 ./build-kernel.sh
 BOOT_IMG=$K/scratch/boot_decrypt/boot.img ./build-ramdisk.sh

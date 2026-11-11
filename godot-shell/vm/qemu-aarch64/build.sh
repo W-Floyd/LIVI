@@ -7,7 +7,7 @@
 # and rootfs are untouched; the work dir and package caches are shared.
 set -eu
 cd "$(dirname "$0")"
-NURA_DIR=${NURA_DIR:-/Users/william/Documents/Personal/git/nura-G5W-Android}
+NURA_DIR=${NURA_DIR:?set NURA_DIR to a nura-G5W-Android checkout}
 NURA=$NURA_DIR/nura
 SIZE=${SIZE:-20G}
 SSH_PUBKEY=${SSH_PUBKEY:-$HOME/.ssh/id_ed25519.pub}

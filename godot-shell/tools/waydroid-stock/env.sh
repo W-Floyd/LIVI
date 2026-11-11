@@ -5,8 +5,8 @@ REF="${REF:-$REPO/ref/kia/ev6/2024}"
 OUT="${OUT:-$REF/waydroid}"            # everything derived from Kia assets lives here (gitignored)
 APP="${APP:-HKMC_TAppEV3}"
 API="${API:-16}"                        # firmware is Android 4.2-era Dalvik; api 19+ mis-decodes the odex
-UNBRICK="${UNBRICK:-$HOME/Documents/Personal/git/go-unbrick/unbrick}"
-SYSTEM_EXT4="${SYSTEM_EXT4:-$HOME/Documents/Personal/git/kia-ev6/scratch/ev6_fw/V015/system.ext4}"
+UNBRICK="${UNBRICK:-unbrick}"                # go-unbrick binary
+SYSTEM_EXT4="${SYSTEM_EXT4:-}"                # decrypted V015 system.ext4; 01-fetch.sh needs it
 JARS="$OUT/tools"
 CP="$(ls "$JARS"/*.jar 2>/dev/null | tr "\n" ":" || true)"
 BAKSMALI() { java -cp "$CP" org.jf.baksmali.Main "$@" 2> >(grep -v '^WARNING' >&2); }

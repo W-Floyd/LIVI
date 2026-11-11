@@ -10,6 +10,7 @@ for p in org/smali/baksmali/2.5.2/baksmali-2.5.2 org/smali/dexlib2/2.5.2/dexlib2
   org/antlr/stringtemplate/3.2.1/stringtemplate-3.2.1 antlr/antlr/2.7.7/antlr-2.7.7; do
   f="$JARS/$(basename "$p").jar"; [ -s "$f" ] || curl -sfL -o "$f" "$M/$p.jar"
 done
+: "${SYSTEM_EXT4:?set SYSTEM_EXT4 to the decrypted firmware's system.ext4}"
 cd "$(dirname "$SYSTEM_EXT4")"
 "$UNBRICK" extract -r -f "$SYSTEM_EXT4" -m '^framework/[^/]+\.(odex|jar)$' -o "$OUT/fw"
 "$UNBRICK" extract -r -f "$SYSTEM_EXT4" -m "^(app|priv-app)/[^/]+\.odex$" -o "$OUT/odex"

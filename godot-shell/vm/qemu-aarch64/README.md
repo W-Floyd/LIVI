@@ -2,8 +2,7 @@
 
 A Linux dev VM on the Mac for the Godot shell: postmarketOS edge
 (`qemu-aarch64`, `linux-postmarketos-stable`), GNOME on Wayland, Mesa llvmpipe,
-Rust, clang, Godot 4 and weston. The pmaports tree is a fork, so the OS may
-call itself by the fork's name.
+Rust, clang, Godot 4 and weston.
 
 ## Use
 
@@ -70,28 +69,30 @@ Screenshot, any mode: `echo "screendump $PWD/s.ppm" | nc -U monitor.sock`.
 ./build.sh      # about 1 min with a warm cache; refuses if pmos.qcow2 exists
 ```
 
-The image is built with pmbootstrap in a builder container
-(`PMB_EXEC`: a command that runs its arguments in that container, from the environment or
-`godot-shell/.env`; see `.env.example`).
-It uses its own config (`pmbootstrap.cfg`, copied into the container as
-`~/.config/pmbootstrap-qemu-aarch64.cfg`) and its own rootfs
-(`chroot_rootfs_qemu-aarch64`). The head unit's config, rootfs and packages
-are not touched. The work dir and package caches are shared.
+Needs Docker and `qemu-img`. The image is built with pmbootstrap in the repo's container
+(`tools/pmb`: built on first use, work dir and caches in the `livi-pmb` volume), from upstream
+pmaports at the commit pinned in `tools/pmb/env.sh` (`PMAPORTS_URL`/`PMAPORTS_REF` override it).
+`PMB_EXEC`, from the environment or `godot-shell/.env`, runs it elsewhere (a command that runs
+its arguments where pmbootstrap is). It uses its own config (`pmbootstrap.cfg`, copied in as
+`~/.config/pmbootstrap-qemu-aarch64.cfg`) and its own rootfs (`chroot_rootfs_qemu-aarch64`), so
+another device's in the same work dir are not touched. `tools/pmb/pmb-exec.sh pmbootstrap log`
+shows pmbootstrap's log.
 
 The steps:
 
 1. `pmbootstrap install --no-image` builds the rootfs.
 2. `overlay/` is untarred into it, and `glib-compile-schemas` runs. The Mac's
-   `SSH_PUBKEY` (default `~/.ssh/id_ed25519.pub`) becomes `user`'s
+   `SSH_PUBKEY` (default `~/.ssh/id_ed25519.pub`; skipped if missing) becomes `user`'s
    `authorized_keys`.
 3. `pmbootstrap install --no-split` writes the image.
 4. The raw image is streamed to the Mac, converted to qcow2 and grown to `SIZE`
    (20G).
 
-The build stops if the Mac's free space drops below 15 GB.
+The build stops if free space on this folder's disk drops below 15 GB.
 
 The rootfs is reused between builds. A file removed from `overlay/` stays in
-it until it is deleted from `chroot_rootfs_qemu-aarch64` in the container.
+it until it is deleted from `chroot_rootfs_qemu-aarch64` in the container
+(or `docker volume rm livi-pmb` starts over).
 
 `pmbootstrap shutdown` runs before and after the build, because stale
 `/dev/installp*` nodes from an earlier install make mkfs fail. It also

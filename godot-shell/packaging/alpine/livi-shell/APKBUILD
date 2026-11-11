@@ -34,7 +34,8 @@ depends="
 	seatd
 	xkeyboard-config
 	"
-makedepends_build="rustup clang-dev godot"
+# clang-libclang: see livi-core's APKBUILD.
+makedepends_build="rustup clang-libclang godot"
 makedepends_host="libxkbcommon-dev"
 subpackages="
 	$pkgname-openrc:openrc

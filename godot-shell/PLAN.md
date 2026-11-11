@@ -768,8 +768,8 @@ Every milestone lands with its scenarios.
       under qemu-user (`packaging/scripts/smoke-armv7.sh`): the extension loads, the shell
       connects to the core.
 - [ ] armv7 package: `packaging/alpine/{livi-core,livi-shell}/APKBUILD` are written and their
-      `package()` checked with abuild; the pmbootstrap build from source (builder container,
-      pmaports-kia-ev6) and installing on the unit are not done.
+      `package()` checked with abuild, and built from source with pmbootstrap
+      (`packaging/scripts/pmb-armv7.sh`); installing on the unit is not done.
 - [ ] Measure Android Auto decode plus Godot compositing on the Mali-G51
       (frame rate and latency), idle CPU and GPU with low-processor mode,
       and memory.
@@ -920,7 +920,7 @@ steps:
 An arm64 postmarketOS GNOME VM on the Mac, running in QEMU with HVF, Mesa
 llvmpipe and ssh. Scripts are in [vm/qemu-aarch64/](vm/qemu-aarch64/), with
 the image beside them (not in git); see its README. The image is built with
-a pmbootstrap builder container, under a separate config that leaves
+the repo's pmbootstrap container (`tools/pmb`), under a separate config that leaves
 the unit's untouched. The shell runs nested inside the VM's GNOME. The VM is for
 functional work only; performance is measured on the unit.
 

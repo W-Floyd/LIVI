@@ -3,7 +3,7 @@
 The unit is a Mobis DAudio Plus Gen5 Wide: Telechips TCC8031, Cortex-A53 in AArch32, so
 `armv7-unknown-linux-musleabihf` on postmarketOS (Alpine edge, musl, hard float; the interpreter
 is `/lib/ld-musl-armhf.so.1`). Its aports are in `pmaports-kia-ev6` (branch `2024-kia-ev6`,
-`device/testing/`), built with pmbootstrap in a builder container; the image runs
+`device/testing/`), built with pmbootstrap (`tools/pmb`); the image runs
 systemd (OpenRC units are shipped too).
 
 What the shell needs there:
@@ -66,10 +66,20 @@ buildroot is the sysroot; Alpine's armv7 rust lags). The source is a `git archiv
 repository's HEAD, pinned and checksummed by `make-source.sh`:
 
 ```sh
-git commit ...                                # the tarball is of HEAD
-packaging/scripts/make-source.sh              # -> packaging/out/aports/{livi-core,livi-shell}/
-cp -r packaging/out/aports/* /path/to/pmaports/device/testing/    # the builder's pmaports tree
-pmbootstrap build --arch armv7 livi-core livi-shell                # in the builder container
+git commit ...                          # the tarball is of HEAD
+packaging/scripts/pmb-armv7.sh          # -> packaging/out/pmb/armv7/*.apk
+packaging/scripts/pmb-armv7.sh livi-core
+```
+
+`pmb-armv7.sh` needs only Docker: it runs `make-source.sh`, copies `packaging/out/aports/*` into
+the pmbootstrap container's pmaports (`device/testing/`) and runs
+`pmbootstrap build --force --arch armv7` there (`tools/pmb/pmb-exec.sh pmbootstrap log` for the
+log). The pmaports tree is upstream at the commit pinned in `tools/pmb/env.sh`; the packages
+need nothing of the unit's. For the unit's tree, set in the environment or `godot-shell/.env`:
+
+```sh
+PMAPORTS_URL=https://gitlab.postmarketos.org/W-Floyd/pmaports.git
+PMAPORTS_REF=2024-kia-ev6
 ```
 
 `livi-core` installs beside `livi-headunit`, under `/usr/lib/livi-core`. `livi-shell` installs
@@ -94,8 +104,8 @@ switches.
 
 Status: the APKBUILDs' `package()` and subpackages are checked by `apk-armv7.sh` (abuild,
 prebuilt binaries); the from-source pmbootstrap build, which fetches a Rust toolchain and ~600
-crates and imports the project with the native chroot's `godot`, has not been run (it needs the
-builder container's pmaports tree).
+crates and imports the project with the native chroot's `godot`, is `pmb-armv7.sh`: both build
+(upstream pmaports, ~6 GB in the volume, a few minutes warm); not yet installed on the unit.
 
 ## Engine
 
@@ -124,7 +134,7 @@ is below, untested here (a full armv7 engine compile was not attempted: Alpine's
 the need, and it is hours on this machine).
 
 ```sh
-# in the builder container, or any Linux with an armv7 musl sysroot and clang or gcc cross
+# in the pmbootstrap container, or any Linux with an armv7 musl sysroot and clang or gcc cross
 scons platform=linuxbsd arch=arm32 target=template_release production=yes \
     disable_path_overrides=no lto=none use_static_cpp=no \
     vulkan=no x11=no wayland=yes opengl3=yes \

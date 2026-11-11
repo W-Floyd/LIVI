@@ -36,7 +36,9 @@ depends="
 	pulseaudio-utils
 	util-linux-misc
 	"
-makedepends_build="rustup cmake clang-dev pkgconf perl linux-headers"
+# clang-libclang (bindgen), not clang or clang-dev: with those pmbootstrap installs clang instead
+# of gcc-armv7, the target's C compiler and linker here.
+makedepends_build="rustup cmake clang-libclang pkgconf perl linux-headers"
 makedepends_host="
 	eudev-dev
 	gst-plugins-base-dev

@@ -21,7 +21,10 @@ for p in ${*:-livi-core livi-shell}; do
     sed -i.bak '/^sha512sums=/,$d' "$d/APKBUILD" && rm "$d/APKBUILD.bak"
     {
         echo 'sha512sums="'
-        (cd "$d" && for f in *; do [ "$f" = APKBUILD ] || shasum -a 512 "$f"; done)
+        # in source= order: abuild checks them by position
+        srcs=$(awk '/^source="/ { f = 1 } f { print } f && /"$/ && !/^source="$/ { exit }' "$d/APKBUILD" |
+            sed -e 's/^source=//' -e 's/"//g' -e "s/\$_livi_commit/$c/g")
+        (cd "$d" && for f in $srcs; do shasum -a 512 "$f"; done)
         echo '"'
     } >> "$d/APKBUILD"
     echo "$d ($c)"

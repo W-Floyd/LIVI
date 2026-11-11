@@ -390,6 +390,15 @@ impl WaylandCompositor {
         }
     }
 
+    /// Where hosted apps show, in panel pixels: windows are configured to it (over their scale),
+    /// open ones at once. Projection video keeps the whole panel.
+    #[func]
+    fn set_app_area(&mut self, width: i64, height: i64) {
+        if let Some(s) = self.server.as_mut() {
+            s.state.set_app_area(width as i32, height as i32);
+        }
+    }
+
     /// Scales the window's client now, all its windows.
     #[func]
     fn set_window_scale(&mut self, id: i64, scale: f64) {

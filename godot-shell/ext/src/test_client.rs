@@ -138,6 +138,7 @@ pub struct Opts {
     pub app_id: String,
     pub title: String,
     /// In surface units: the buffer is this times the scale honoured, the pattern drawn to match.
+    /// 0x0: the size of the first configure.
     pub width: u32,
     pub height: u32,
     pub pattern: Pattern,
@@ -181,6 +182,8 @@ struct App {
     wm_base: Option<XdgWmBase>,
     dmabuf: Option<ZwpLinuxDmabufV1>,
     configured: bool,
+    /// The latest toplevel configure's size; 0 when the compositor leaves it to the client.
+    configure_size: (u32, u32),
     closed: bool,
     frame_due: bool,
     /// Per buffer: attached and not yet released.
@@ -235,6 +238,11 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     while !app.configured {
         queue.blocking_dispatch(&mut app).map_err(|e| err(&e))?;
     }
+    let mut sized = opts.clone();
+    if opts.width == 0 || opts.height == 0 {
+        (sized.width, sized.height) = app.configure_size;
+    }
+    let opts = &sized;
 
     let dmabuf = match (opts.dmabuf, app.dmabuf.clone()) {
         (false, _) => None,
@@ -574,8 +582,10 @@ impl Dispatch<XdgSurface, ()> for App {
 
 impl Dispatch<XdgToplevel, ()> for App {
     fn event(app: &mut Self, _: &XdgToplevel, event: xdg_toplevel::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
-        if let xdg_toplevel::Event::Close = event {
-            app.closed = true;
+        match event {
+            xdg_toplevel::Event::Close => app.closed = true,
+            xdg_toplevel::Event::Configure { width, height, .. } => app.configure_size = (width.max(0) as u32, height.max(0) as u32),
+            _ => {}
         }
     }
 }

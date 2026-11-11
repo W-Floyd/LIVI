@@ -1,0 +1,27 @@
+name: nav-rail-app
+# Beside the docked rail a hosted app is configured to the app page's rect (the panel less the
+# rail), so it shows 1:1 with no letterbox, and input lands at its own surface positions.
+clock: 2026-11-09T08:30:00
+nav: true
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - wait: { frames: 2 }
+  - gdscript: |
+      return runner._spawn({role = "app", app_id = "org.livi.test.fill", pattern = "grid", size = "0x0", events = true})
+  - wait: { window: org.livi.test.fill }
+  - page: app
+  - wait: { frames: 2 }
+  - gdscript: |
+      var w: WindowView = shell.get_node("Projection/Window")
+      var r: Rect2 = runner._vp.get_node("NavRail").get_global_rect()
+      var want := Vector2(1920.0 - r.size.x, 720.0)
+      if w.texture == null or w.texture.get_size() != want or w.get_global_rect() != Rect2(Vector2(r.end.x, 0), want) or w.picture_rect() != Rect2(Vector2.ZERO, want):
+          return "the window is %s, drawn at %s in %s; want %s beside the rail" % [w.texture.get_size() if w.texture else null, w.picture_rect(), w.get_global_rect(), want]
+      runner.set_meta("left", r.end.x)
+  - gdscript: |
+      await runner._touch(Vector2(runner.get_meta("left") + 100.0, 200.0))
+  - expect_client:
+      app_id: org.livi.test.fill
+      lines: ["touch down 0 100.0 200.0", "touch up 0"]
+  - screenshot: nav-rail-app-fill

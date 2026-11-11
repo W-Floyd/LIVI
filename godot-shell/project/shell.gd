@@ -67,6 +67,7 @@ var rail_width := 0.0:
 		if v != rail_width:
 			rail_width = v
 			_inset()
+			_tell_app_area()
 
 
 func _init() -> void:
@@ -141,6 +142,7 @@ func _ready() -> void:
 	launcher.show_window.connect(bring_forward)
 	_style()
 	_refresh()
+	_tell_app_area()
 
 
 func _process(_delta: float) -> void:
@@ -195,6 +197,13 @@ func _style() -> void:
 	# The driver's side may have changed.
 	if rail_width > 0.0:
 		_inset()
+
+
+## Hosted apps are configured to the app page's rect (the panel less the rail), whichever page
+## shows, so a page change does not resize them.
+func _tell_app_area() -> void:
+	var vp := get_viewport_rect().size
+	Wayland.set_app_area(roundi(vp.x - rail_width), roundi(vp.y))
 
 
 func _inset() -> void:
@@ -375,7 +384,13 @@ func _own_bar() -> bool:
 func _place_projection(ask := true) -> void:
 	if _projection == null:
 		return
-	var r := Rect2(Vector2.ZERO, size) if (ThemeManager.floating() or _app_page) else Rect2(_slot.global_position - global_position, _slot.size)
+	var r := Rect2(_slot.global_position - global_position, _slot.size)
+	if _app_page:
+		r = Rect2(Vector2.ZERO, size)
+	elif ThemeManager.floating():
+		# Under the floating panel: the whole projection screen, 1:1 with the panel, under a docked
+		# rail too; the shell's own rect would scale it into the rest.
+		r = Rect2(get_viewport_rect().position - global_position, get_viewport_rect().size)
 	_projection.position = r.position
 	_projection.size = r.size
 	# The picture follows the slot every frame; the phone is asked for where it settles.

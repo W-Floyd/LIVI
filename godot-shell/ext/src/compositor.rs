@@ -163,6 +163,9 @@ pub struct State {
     /// Scales by the PID the shell started a client as; a client matches by its own PID or its
     /// process group, so what an app forks is scaled with it.
     pub launch_scales: HashMap<i32, f64>,
+    /// Where hosted apps show, in panel pixels (`set_app_area`): the panel less what the shell
+    /// keeps beside it. Projection video keeps the whole panel.
+    pub app_area: (i32, i32),
     pub windows: Vec<Window>,
     pub events: Vec<WindowEvent>,
     next_id: u64,
@@ -217,9 +220,26 @@ fn integer_scale(s: f64) -> i32 {
     (s.round() as i32).max(1)
 }
 
-/// The window size, in surface units, that fills the panel at scale `s`.
-fn logical_size(s: f64) -> (i32, i32) {
-    ((PANEL_PX.0 as f64 / s).round() as i32, (PANEL_PX.1 as f64 / s).round() as i32)
+/// The window size, in surface units, that fills `area` (panel pixels) at scale `s`.
+fn logical_size(area: (i32, i32), s: f64) -> (i32, i32) {
+    ((area.0 as f64 / s).round() as i32, (area.1 as f64 / s).round() as i32)
+}
+
+/// livi-gst-host's projection video: waylandsink fits it to the configure, and the core's crop and
+/// touch mapping assume the whole panel.
+fn is_video(app_id: &str) -> bool {
+    app_id.starts_with("livi-video")
+}
+
+fn toplevel_app_id(surface: &WlSurface) -> String {
+    with_states(surface, |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|d| d.lock().ok())
+            .and_then(|d| d.app_id.clone())
+            .unwrap_or_default()
+    })
 }
 
 impl ClientData for ClientState {
@@ -253,6 +273,7 @@ impl Server {
             _fractional: FractionalScaleManagerState::new::<State>(&dh),
             dh: dh.clone(),
             launch_scales: HashMap::new(),
+            app_area: PANEL_PX,
             pointer,
             keyboard,
             touch,
@@ -556,6 +577,9 @@ impl CompositorHandler for State {
             return;
         };
         if !self.windows[i].toplevel.is_initial_configure_sent() {
+            // The app_id is set by now, before the first buffer: video or app, sized to match.
+            let size = self.window_size(&self.windows[i]);
+            self.windows[i].toplevel.with_pending_state(|st| st.size = Some(size.into()));
             self.windows[i].toplevel.send_configure();
             return;
         }
@@ -689,8 +713,36 @@ impl State {
                 },
                 |_, _, _| true,
             );
-            w.toplevel.with_pending_state(|st| st.size = Some(logical_size(s).into()));
+        }
+        self.reconfigure(|w| w.toplevel.wl_surface().client().as_ref() == Some(&client));
+    }
+
+    /// The size a window is configured at: the app area (the panel, for projection video) over
+    /// its client's scale.
+    fn window_size(&self, w: &Window) -> (i32, i32) {
+        let video = is_video(&toplevel_app_id(w.toplevel.wl_surface()));
+        logical_size(if video { PANEL_PX } else { self.app_area }, w.scale)
+    }
+
+    /// Configures the matching windows at their size again, those whose size changed.
+    fn reconfigure(&mut self, matches: impl Fn(&Window) -> bool) {
+        for i in 0..self.windows.len() {
+            if !matches(&self.windows[i]) || !self.windows[i].toplevel.is_initial_configure_sent() {
+                continue;
+            }
+            let size = self.window_size(&self.windows[i]);
+            let w = &self.windows[i];
+            w.toplevel.with_pending_state(|st| st.size = Some(size.into()));
             w.toplevel.send_pending_configure();
+        }
+    }
+
+    /// Where hosted apps show, in panel pixels; open windows are configured to it at once.
+    pub fn set_app_area(&mut self, w: i32, h: i32) {
+        let area = (w.clamp(1, PANEL_PX.0), h.clamp(1, PANEL_PX.1));
+        if area != self.app_area {
+            self.app_area = area;
+            self.reconfigure(|_| true);
         }
     }
 
@@ -967,12 +1019,11 @@ impl XdgShellHandler for State {
         let scale = toplevel.wl_surface().client().map_or(1.0, |c| self.client_scale(&c));
         // wl_output's integer scale reaches only surfaces on the output.
         self.output.enter(toplevel.wl_surface());
+        // The size goes with the initial configure, on the first commit, once the app_id is known.
         toplevel.with_pending_state(|s| {
-            s.size = Some(logical_size(scale).into());
             s.states.set(XdgState::Fullscreen);
             s.states.set(XdgState::Activated);
         });
-        toplevel.send_configure();
         let id = self.next_id;
         self.next_id += 1;
         self.windows.push(Window {
@@ -1223,8 +1274,44 @@ mod tests {
         for (view_mm, want) in [(750.0, 1.75), (711.2, 1.75), (600.0, 1.5), (400.0, 1.0), (2000.0, 2.0)] {
             assert_eq!(default_scale(view_mm), want, "{view_mm} mm");
         }
-        for (s, size, int) in [(1.0, (1920, 720), 1), (1.25, (1536, 576), 1), (1.5, (1280, 480), 2), (1.75, (1097, 411), 2), (2.0, (960, 360), 2)] {
-            assert_eq!((logical_size(s), integer_scale(s)), (size, int), "{s}");
+        // The panel, and the area beside a docked rail under the status bar.
+        let beside = (1823, 657);
+        for (area, s, size, int) in [
+            (PANEL_PX, 1.0, (1920, 720), 1),
+            (PANEL_PX, 1.25, (1536, 576), 1),
+            (PANEL_PX, 1.5, (1280, 480), 2),
+            (PANEL_PX, 1.75, (1097, 411), 2),
+            (PANEL_PX, 2.0, (960, 360), 2),
+            (beside, 1.0, (1823, 657), 1),
+            (beside, 1.75, (1042, 375), 2),
+        ] {
+            assert_eq!((logical_size(area, s), integer_scale(s)), (size, int), "{area:?} {s}");
+        }
+    }
+
+    /// A window is configured at the app area over its scale, projection video at the panel's;
+    /// a new area reconfigures open windows. The client draws at what it is configured to.
+    #[test]
+    fn windows_are_configured_to_the_app_area() {
+        let beside = (1823, 657);
+        for (app_id, s, area, want, then) in [
+            ("org.test.app", 1.0, PANEL_PX, (1920, 720), (1823, 657)),
+            ("org.test.app", 1.75, beside, (1042, 375), (1097, 411)),
+            ("livi-video-main", 1.0, beside, (1920, 720), (1920, 720)),
+        ] {
+            let mut server = scaled(s);
+            server.state.set_app_area(area.0, area.1);
+            let mut o = opts(Pattern::Grid, None, false);
+            o.app_id = app_id.into();
+            (o.width, o.height) = (0, 0);
+            let _client = client(&mut server, o);
+            assert!(pump(&mut server, |st| st.events.contains(&WindowEvent::Mapped(1))), "{app_id} {s}");
+            let f = pixels(server.state.windows[0].frame.as_ref().unwrap());
+            assert_eq!((f.width as i32, f.height as i32), want, "{app_id} {s} {area:?}");
+            let next = if area == PANEL_PX { beside } else { PANEL_PX };
+            server.state.set_app_area(next.0, next.1);
+            let size = server.state.windows[0].toplevel.with_pending_state(|st| st.size);
+            assert_eq!(size, Some(then.into()), "{app_id} {s} then {next:?}");
         }
     }
 

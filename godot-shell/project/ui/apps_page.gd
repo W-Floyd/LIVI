@@ -10,7 +10,7 @@ var top_inset := 0.0
 var _title: Label
 var _note: Label
 var _running: HBoxContainer
-var _scroll: ScrollContainer
+var _scroll: DragScroll
 var _grid: GridContainer
 ## App id -> its tile, kept across changes so the grid's scroll stays put.
 var _tiles := {}
@@ -29,14 +29,13 @@ func _init() -> void:
 	_note = UI.label("", "body", "caption", "dim")
 	_note.name = "Note"
 	add_child(_note)
-	_scroll = ScrollContainer.new()
+	# A finger drags the grid; a drag never opens the tile it ends on.
+	_scroll = DragScroll.new()
 	_scroll.name = "Scroll"
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	add_child(_scroll)
 	_grid = GridContainer.new()
 	_grid.name = "Grid"
-	_scroll.add_child(_grid)
+	_scroll.list.add_child(_grid)
 
 
 func _ready() -> void:
@@ -99,7 +98,7 @@ func _update() -> void:
 			t = AppTile.new()
 			t.name = _node_name(a.id)
 			var id: String = a.id
-			t.pressed.connect(func(): launcher.open.call_deferred(id))
+			t.pressed.connect(func(): if not _scroll.dragged: launcher.open.call_deferred(id))
 			_grid.add_child(t)
 			_tiles[a.id] = t
 		t.app_name = a.name
@@ -135,7 +134,7 @@ func _update_running() -> void:
 		_running.add_child(chip)
 
 
-## Tiles are found by app id, '.' as '_' (`Apps/Scroll/Grid/org_livi_test_grid`), which a node
+## Tiles are found by app id, '.' as '_' (`Apps/Scroll/List/Grid/org_livi_test_grid`), which a node
 ## name cannot hold.
 static func _node_name(id: String) -> String:
 	return id.validate_node_name().replace(".", "_")

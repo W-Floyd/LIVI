@@ -56,19 +56,27 @@ steps:
   - gdscript: |
       if shell._page_name != "home":
           return "after the phone gave up the screen: %s" % shell._page_name
-  - expect_action: { Show: { screen: main, front: livi } }
-  # The phone asks for it again (navigation, a call): the projection page.
+  # On home the phone asking for the screen changes nothing: its picture is in the slot.
+  - set: { core: { front: { main: projection } } }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if shell._page_name != "home":
+          return "on home, after the phone asked for the screen: %s" % shell._page_name
+  # Elsewhere (navigation, a call): the projection page.
+  - page: apps
+  - set: { core: { front: { main: livi } } }
+  - wait: { frames: 2 }
   - set: { core: { front: { main: projection } } }
   - wait: { frames: 2 }
   - gdscript: |
       if shell._page_name != "projection":
           return "after the phone asked for the screen: %s" % shell._page_name
-  # The back button over the corner returns and gives the screen back.
-  - tap: { x: 20, y: 20 }
+  # Android Auto's exit again: back to the page before, without asking for the screen back.
+  - set: { core: { front: { main: livi } } }
+  - wait: { frames: 2 }
   - gdscript: |
-      if shell._page_name != "home":
-          return "after back: %s" % shell._page_name
-  - expect_action: { Show: { screen: main, front: livi } }
+      if shell._page_name != "apps":
+          return "after Android Auto's exit: %s" % shell._page_name
   # The car asks for the projection by path.
   - gdscript: |
       var e: String = Core.fake_open_page("/projection")

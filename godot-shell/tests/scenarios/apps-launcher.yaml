@@ -15,10 +15,10 @@ steps:
       var want = ["org.livi.test.grid", "livi-broken", "org.livi.test.bars", "org.livi.test.extra", "zeta"]
       if ids != want:
           return "apps %s, want %s" % [ids, want]
-  - expect_node: { path: Apps/Scroll/Grid/zeta/Name, text: Zeta renamed }
+  - expect_node: { path: Apps/Scroll/List/Grid/zeta/Name, text: Zeta renamed }
   - screenshot: apps-day
   # Matched by app_id, the desktop file ID.
-  - tap: { node: Apps/Scroll/Grid/org_livi_test_grid }
+  - tap: { node: Apps/Scroll/List/Grid/org_livi_test_grid }
   - wait: { window: org.livi.test.grid }
   - wait: { frames: 2 }
   - gdscript: &front_grid |
@@ -27,7 +27,7 @@ steps:
           return "page %s shows %d, want app showing %d" % [shell._page_name, shell._projection.window.window_id, w]
   # Matched by StartupWMClass.
   - page: apps
-  - tap: { node: Apps/Scroll/Grid/org_livi_test_bars }
+  - tap: { node: Apps/Scroll/List/Grid/org_livi_test_bars }
   - wait: { window: bars-window }
   - wait: { frames: 2 }
   - gdscript: |
@@ -44,7 +44,7 @@ steps:
   - gdscript: *front_grid
   # A running app's tile shows its window: no second instance.
   - page: apps
-  - tap: { node: Apps/Scroll/Grid/org_livi_test_grid }
+  - tap: { node: Apps/Scroll/List/Grid/org_livi_test_grid }
   - wait: { frames: 2 }
   - gdscript: |
       if Wayland.window_count() != 2:
@@ -64,7 +64,7 @@ steps:
       if names != ["Colour bars"]:
           return "running %s" % names
   # Exits at once with status 1.
-  - tap: { node: Apps/Scroll/Grid/livi-broken }
+  - tap: { node: Apps/Scroll/List/Grid/livi-broken }
   - gdscript: |
       var until = Time.get_ticks_msec() + 5000
       while shell.launcher.state("livi-broken") != "failed" and Time.get_ticks_msec() < until:
@@ -72,6 +72,6 @@ steps:
       if shell.launcher.state("livi-broken") != "failed":
           return "broken is %s" % shell.launcher.state("livi-broken")
       await runner.frames(2)
-  - expect_node: { path: Apps/Scroll/Grid/livi-broken/Name, text: "Couldn't start" }
+  - expect_node: { path: Apps/Scroll/List/Grid/livi-broken/Name, text: "Couldn't start" }
   - theme: { appearance: night }
   - screenshot: apps-night

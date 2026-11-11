@@ -137,6 +137,12 @@ impl Controller {
 
     fn row_json(&self, r: &Row, state: &Value) -> Value {
         let mut v = plain_row(r);
+        // LIVI's own UI's colours: the shell's colours are its theme's (Look), so not offered here.
+        let mut here = self.stack.clone();
+        here.push(r.node);
+        if self.model.node(&here).and_then(|n| n.route_key()).is_some_and(|k| SHELL_HIDDEN.contains(&k)) {
+            v["hidden"] = json!(true);
+        }
         let opens = r.kind == RowKind::Route
             || r.kind == RowKind::Custom
             || (r.kind == RowKind::Value && self.model.opens(&self.stack, r.node));
@@ -324,6 +330,9 @@ fn kind_name(k: RowKind) -> &'static str {
     }
 }
 
+/// Settings pages the shell leaves out, by their route.
+const SHELL_HIDDEN: &[&str] = &["ui-colors"];
+
 fn plain_row(r: &Row) -> Value {
     json!({
         "kind": kind_name(r.kind),
@@ -438,6 +447,8 @@ mod tests {
         let audio = section(&mut c, &s, "Audio");
         assert!(audio["rows"][row(&audio, "Head Unit")]["slider"]["level"].is_number());
         let v = section(&mut c, &s, "Appearance");
+        assert_eq!(v["rows"][row(&v, "UI Colors")]["hidden"], true);
+        assert!(v["rows"][row(&v, "Dark Mode")].get("hidden").is_none());
         c.open(row(&v, "UI Colors"));
         let colors = c.view(&s);
         assert_eq!((colors["depth"].as_u64(), colors["kind"].as_str()), (Some(2), Some("list")));

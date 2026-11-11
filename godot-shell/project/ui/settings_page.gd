@@ -274,6 +274,9 @@ func _build_livi() -> void:
 			var rows: Array = _view.get("rows", [])
 			for i in rows.size():
 				var r: Dictionary = rows[i]
+				# Skipped, not removed: a row's index is what a touch sends back.
+				if r.get("hidden", false):
+					continue
 				if i == _armed:
 					r = r.duplicate()
 					r.label = "Tap again: %s" % r.label
@@ -640,6 +643,7 @@ func _look_rows() -> Array:
 		{key = "reduced_motion", kind = "switch", label = "Reduced motion", detail = "No animated transitions", checked = ThemeManager.reduced_motion, enabled = true},
 		_look_choice("quality", "3D quality", [["normal", "Normal"], ["low", "Low"]]),
 		_look_choice("ev_page", "Electric vehicle page", [["auto", "Auto"], ["image", "Image"], ["live", "Live"]]),
+		_look_choice("volume_style", "Volume indicator", [["card", "Card"], ["glow", "Line"]]),
 	]
 	return rows
 

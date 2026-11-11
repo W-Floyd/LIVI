@@ -28,6 +28,7 @@ func _ready() -> void:
 		rail.selected.connect(func(page): _open(shell, page))
 		shell.page_changed.connect(rail.show_page)
 		add_child(rail)
+	_restore_page(shell)
 
 
 ## LIVI_SHELL_TIMING prints how long a page takes to open and to draw its first frames.
@@ -55,3 +56,25 @@ func _retry_core() -> void:
 		print("core: connected")
 		return
 	get_tree().create_timer(2.0).timeout.connect(_retry_core)
+
+
+## The page open when the shell last stopped, so a restart lands where the driver was. A hosted
+## app's window ("app") did not survive the restart: its grid instead.
+func _restore_page(shell: Control) -> void:
+	var dir := OS.get_environment("XDG_STATE_HOME")
+	if dir == "":
+		dir = OS.get_environment("HOME").path_join(".local/state")
+	var path := dir.path_join("livi-shell/page")
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f:
+		var page := f.get_as_text().strip_edges()
+		f.close()
+		if page == "app":
+			page = "apps"
+		if page != "" and page != "home":
+			shell.open_page.call_deferred(page)
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	shell.page_changed.connect(func(page):
+		var w := FileAccess.open(path, FileAccess.WRITE)
+		if w:
+			w.store_string(page))

@@ -12,7 +12,8 @@ steps:
   - expect_action: { SetConfig: { patch: { huVolume: 0.56 } } }
   # The core's echo is what the overlay shows.
   - set: { core: { config: { huVolume: 0.56 } } }
-  - wait: { frames: 2 }
+  # Past the level's ease.
+  - wait: { frames: 20 }
   - expect_node: { path: HardKeys/Volume, visible: true }
   - screenshot: hard-keys-volume
   - key: VolumeDown
@@ -39,3 +40,13 @@ steps:
           return "a media key is no volume key"
       if HardKeys.bound_to({next = "MediaTrackNext"}, "F13") != "":
           return "an unbound key is bound"
+  # The glow: a line along the bottom edge lit to the level, and no card.
+  - theme: { volume_style: glow }
+  - set: { core: { config: { huVolume: 0.75 } } }
+  - wait: { frames: 20 }
+  - expect_node: { path: HardKeys/Volume, visible: false }
+  - gdscript: |
+      var line: Control = shell.get_node("HardKeys/VolumeLine")
+      if line.modulate.a < 0.99 or line.size.x < 1920.0:
+          return "the line: alpha %s, size %s" % [line.modulate.a, line.size]
+  - screenshot: hard-keys-volume-glow

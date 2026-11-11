@@ -11,6 +11,10 @@ steps:
   - tap: { node: Settings/Sections/List/Appearance }
   - expect_node: { path: Settings/Heading/Title, text: Appearance }
   - wait: { frames: 3 }
+  # The shell's colours are its theme's (Look): LIVI's own UI Colors is not offered.
+  - gdscript: |
+      if not shell.has_node("Settings/Rows/List/Dark Mode") or shell.has_node("Settings/Rows/List/UI Colors"):
+          return "Appearance rows: %s" % [shell.get_node("Settings/Rows/List").get_children().map(func(n): return n.name)]
   - screenshot: settings-appearance-day
   - tap: { node: Settings/Rows/List/Dark Mode }
   - expect_action: { SetConfig: { patch: { darkMode: false } } }

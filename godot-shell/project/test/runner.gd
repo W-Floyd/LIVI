@@ -496,7 +496,7 @@ func _look_error(look: Dictionary) -> String:
 		theme_name = null, appearance = ["day", "night"], appearance_mode = ["auto", "day", "night"],
 		hand = ["lhd", "rhd"], near = ["projection", "panel"], text_scale = null,
 		material = ["solid", "frosted", "glass"], reduced_motion = [true, false],
-		quality = ["normal", "low"], ev_page = ["auto", "image", "live"], car = ["auto", "procedural"]}
+		quality = ["normal", "low"], ev_page = ["auto", "image", "live"], car = ["auto", "procedural"], volume_style = ["card", "glow"]}
 	for k in look:
 		if not KEYS.has(k):
 			return "theme: unknown key %s" % k

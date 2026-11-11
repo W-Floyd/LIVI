@@ -36,6 +36,18 @@ var _icon: TextureRect
 var _bar: Control
 var _percent: Label
 var _hide: Timer
+## The other overlay: a glowing line along the bottom edge, lit to the level, no text.
+var _glow: Control
+var _glow_tween: Tween
+## Smooth falloffs, white, tinted when drawn: stacked strokes band visibly.
+var _bloom := _falloff(false)
+var _flare := _falloff(true)
+## The level as drawn, eased toward the core's so a step slides instead of jumping.
+var _drawn := 0.0
+var _level_tween: Tween
+## 1 at a change, easing to 0: the line flares up and settles.
+var _pulse := 0.0
+var _pulse_tween: Tween
 
 
 ## The level after `code` from `level`; -1 for a key that is not a volume key.
@@ -75,7 +87,13 @@ func _init() -> void:
 	_hide = Timer.new()
 	_hide.one_shot = true
 	_hide.wait_time = SHOWN_S
-	_hide.timeout.connect(func(): _card.visible = false)
+	_hide.timeout.connect(_hide_overlay)
+	_glow = Control.new()
+	_glow.name = "VolumeLine"
+	_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_glow.modulate.a = 0.0
+	_glow.draw.connect(_draw_glow)
+	add_child(_glow)
 	add_child(_hide)
 
 
@@ -146,18 +164,98 @@ func _on_core_changed(sections: PackedStringArray) -> void:
 	_percent.text = "%d %%" % roundi(clampf(level, 0.0, 1.0) * 100.0)
 	_icon.get_meta("icon")[2] = "dim" if level <= 0.0 else "text"
 	UI.style_icon(_icon)
-	_bar.queue_redraw()
-	_card.visible = true
+	_ease_to(clampf(level, 0.0, 1.0))
+	if ThemeManager.volume_style == "glow":
+		_card.visible = false
+		_glow.queue_redraw()
+		_fade_glow(1.0)
+	else:
+		_glow.modulate.a = 0.0
+		_card.visible = true
 	_place.call_deferred()
 	_hide.start()
+
+
+func _ease_to(level: float) -> void:
+	if _level_tween:
+		_level_tween.kill()
+	# Shown from hidden: start where it is, not slide up from the last time.
+	if ThemeManager.reduced_motion or (not _card.visible and _glow.modulate.a <= 0.01):
+		_set_drawn(level)
+		return
+	if _pulse_tween:
+		_pulse_tween.kill()
+	_pulse_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	_pulse_tween.tween_method(func(v): _pulse = v; _glow.queue_redraw(), 1.0, 0.0, 0.9)
+	_level_tween = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_level_tween.tween_method(_set_drawn, _drawn, level, 0.5)
+
+
+func _set_drawn(v: float) -> void:
+	_drawn = v
+	_bar.queue_redraw()
+	_glow.queue_redraw()
+
+
+func _hide_overlay() -> void:
+	_card.visible = false
+	_fade_glow(0.0)
+
+
+func _fade_glow(to: float) -> void:
+	if _glow_tween:
+		_glow_tween.kill()
+	if ThemeManager.reduced_motion:
+		_glow.modulate.a = to
+		return
+	_glow_tween = create_tween()
+	_glow_tween.tween_property(_glow, "modulate:a", to, 0.18 if to > 0.0 else 0.45)
+
+
+## Lit from the left to the level: a soft bloom rising from the bottom edge, a bright core, and
+## a flare where it ends.
+func _draw_glow() -> void:
+	var w := _glow.size.x
+	var h := _glow.size.y
+	var end := w * _drawn
+	var c: Color = ThemeManager.c.accent
+	_glow.draw_rect(Rect2(0, h - 3.0, w, 3.0), Color(c, 0.15))
+	var rise := h * (0.75 + 0.25 * _pulse)
+	_glow.draw_texture_rect(_bloom, Rect2(0, h - rise, end, rise), false, Color(c.lightened(0.25 * _pulse), 0.7 + 0.3 * _pulse))
+	_glow.draw_rect(Rect2(0, h - 3.0, end, 3.0), c.lightened(0.5))
+	var f := h * 1.3
+	_glow.draw_texture_rect(_flare, Rect2(end - f / 2.0, h - f / 2.0, f, f), false, Color(c.lightened(0.2), 0.35))
+
+
+## A white falloff, alpha easing out from full: up from the bottom edge, or out from the centre.
+static func _falloff(radial: bool) -> GradientTexture2D:
+	var g := Gradient.new()
+	g.offsets = PackedFloat32Array()
+	g.colors = PackedColorArray()
+	for i in 17:
+		var x := i / 16.0
+		g.add_point(x, Color(1, 1, 1, pow(1.0 - x, 2.6)))
+	var tex := GradientTexture2D.new()
+	tex.gradient = g
+	if radial:
+		tex.fill = GradientTexture2D.FILL_RADIAL
+		tex.fill_from = Vector2(0.5, 0.5)
+		tex.fill_to = Vector2(1.0, 0.5)
+		tex.width = 256
+		tex.height = 256
+	else:
+		tex.fill_from = Vector2(0.5, 1.0)
+		tex.fill_to = Vector2(0.5, 0.0)
+		tex.width = 4
+		tex.height = 256
+	return tex
 
 
 func _draw_bar() -> void:
 	var h: float = maxf(4.0, ThemeManager.px.gap * 0.4)
 	var r := Rect2(0, (_bar.size.y - h) / 2.0, _bar.size.x, h)
 	_bar.draw_rect(r, ThemeManager.c.line)
-	var level = _seen if _seen is float else 0.0
-	r.size.x *= clampf(level, 0.0, 1.0)
+	r.size.x *= _drawn
 	_bar.draw_rect(r, ThemeManager.c.accent)
 
 
@@ -176,3 +274,5 @@ func _place() -> void:
 	_card.reset_size()
 	var vp := get_viewport().get_visible_rect().size
 	_card.position = Vector2((vp.x - _card.size.x) / 2.0, ThemeManager.px.status + ThemeManager.px.gap)
+	_glow.position = Vector2(0, vp.y - 60.0)
+	_glow.size = Vector2(vp.x, 60.0)

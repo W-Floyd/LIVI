@@ -36,7 +36,7 @@ var _scene: SceneSkin
 var _page: Control
 var _live_bar := false
 ## The "app" page: the newest hosted window fills the panel, nothing else drawn. "projection"
-## too, with the newest projection video, no rail and only `_back` over it.
+## too, with the newest projection video and nothing over it: Android Auto's own exit leaves it.
 var _app_page := false
 var _projection_page := false
 ## The page showing, as `open_page` resolved it, and where the projection page goes back to.
@@ -44,7 +44,7 @@ var _page_name := "home"
 var _return_to := "home"
 ## Where the settings page goes back to.
 var _settings_from := "home"
-var _back: BackTab
+var _following_front := false
 ## The core's `/front/main` last seen: the phone's video focus.
 var _front := ""
 ## Lists and starts apps, and knows which hosted window is whose (the "apps" page).
@@ -91,23 +91,20 @@ func _init() -> void:
 	launcher = Launcher.new()
 	launcher.name = "Launcher"
 	add_child(launcher)
-	_back = BackTab.new()
-	_back.visible = false
-	_back.pressed.connect(func(): open_page(_return_to))
-	add_child(_back)
 
 
 func _ready() -> void:
 	theme = ThemeManager.godot_theme
 	ThemeManager.changed.connect(_style)
-	Core.welcome.connect(func(_v): _refresh())
+	# A (re)connected core starts from its own idea of the main screen: say what this page shows.
+	Core.welcome.connect(func(_v): _refresh(); _tell_front(); _ask_area(true))
 	Core.changed.connect(_on_core_changed)
 	Core.open_page.connect(_on_core_page)
 	_precondition.icon_name = "therm"
 	_precondition.pressed.connect(_on_precondition)
 	_player.control.connect(func(c): Core.act({kind = "media", control = c}))
 	Wayland.window_mapped.connect(func(id, app_id, title): print("window %d mapped: app_id \"%s\" title \"%s\"" % [id, app_id, title]); _windows.append(id); _app_ids[id] = app_id; _show_app())
-	Wayland.window_unmapped.connect(func(id): _windows.erase(id); _app_ids.erase(id); _show_app())
+	Wayland.window_unmapped.connect(_on_window_unmapped)
 	launcher.show_window.connect(bring_forward)
 	_style()
 	_refresh()
@@ -188,8 +185,9 @@ func open_page(page: String) -> String:
 	$Page.visible = home or page == "apps" or (live and not own_bar)
 	_body.visible = home
 	_projection.visible = home or _app_page
-	if _app_page:
-		_place_projection()
+	# Every page change: leaving the full-panel pages puts the picture back in home's slot.
+	_place_projection()
+	_place_projection.call_deferred()
 	if _scene:
 		_scene.visible = home
 	if live:
@@ -217,10 +215,8 @@ func open_page(page: String) -> String:
 		_page.screen_name = page
 		add_child(_page)
 	_show_app()
-	_back.visible = _projection_page
-	if _projection_page:
-		_back.reveal()
-	_tell_front()
+	if not _following_front:
+		_tell_front()
 	queue_redraw()
 	page_changed.emit(page)
 	return ""
@@ -243,7 +239,25 @@ func _on_projection() -> bool:
 ## As the stock UI does: the phone has video focus while its picture is the page, and gives it
 ## back when the page goes. The core passes touches on only while it does.
 func _tell_front() -> void:
-	Core.act({kind = "show", screen = "main", front = "projection" if _on_projection() else "livi"})
+	Core.act({kind = "show", screen = "main", front = "projection" if _shows_projection() else "livi"})
+
+
+## Pages with the phone's picture on them: home has it in its slot, so the phone keeps video
+## focus there too (and the slot's picture exists only while it does).
+func _shows_projection() -> bool:
+	return _on_projection() or _page_name == "home"
+
+
+## Day or night as the core has it for the main screen's UI: the car's lights (its night mode,
+## through the telemetry) unless LIVI's appearance setting is Day or Night.
+func _follow_night() -> void:
+	var n = Core.get_value("/config/mainUiNightMode")
+	# The look's own Day or Night wins.
+	if n == null or ThemeManager.appearance_mode != "auto":
+		return
+	var want := "night" if n else "day"
+	if ThemeManager.appearance != want:
+		ThemeManager.set_look({appearance = want})
 
 
 ## Follows the core's main screen: the phone asking for it (navigation, a call) opens the
@@ -254,10 +268,18 @@ func _follow_front() -> void:
 		return
 	var was := _front
 	_front = str(f)
-	if _front == "projection" and not _on_projection():
+	# The phone's own choice: follow it without answering, or home (which shows the phone's
+	# slot) would take the screen straight back after Android Auto's exit.
+	_following_front = true
+	if _front == "projection" and not _shows_projection():
 		open_page("projection")
 	elif _front == "livi" and was != "" and _on_projection():
 		open_page(_return_to if _projection_page else "home")
+	_following_front = false
+	# Acknowledge the phone giving the screen up: the core ignores a request equal to the last
+	# one it got, so without this a later "projection" (Full, home) would not reach the phone.
+	if _front == "livi" and was != "":
+		Core.act({kind = "show", screen = "main", front = "livi"})
 
 
 ## The car's own buttons and telemetry open pages by path; the shell has the projection only.
@@ -294,6 +316,24 @@ func _place_projection() -> void:
 	var r := Rect2(Vector2.ZERO, size) if (ThemeManager.floating() or _app_page) else Rect2(_slot.global_position - global_position, _slot.size)
 	_projection.position = r.position
 	_projection.size = r.size
+	_ask_area()
+
+
+## The last area asked of the phone, in the projection screen's pixels.
+var _area_asked := Rect2i()
+
+
+## Android Auto lays its UI out where the page shows it: home's slot (under a floating panel too),
+## else the whole panel. A phone that does not take it is letterboxed (`WindowView`).
+func _ask_area(again := false) -> void:
+	if not _shows_projection():
+		return
+	var home := Rect2(_slot.global_position - global_position, _slot.size)
+	var a: Rect2i = _projection.window.to_screen(home if _page_name == "home" else Rect2(Vector2.ZERO, size))
+	if a.size.x <= 0 or a.size.y <= 0 or (a == _area_asked and not again):
+		return
+	_area_asked = a
+	Core.act({kind = "projectionArea", screen = "main", x = a.position.x, y = a.position.y, width = a.size.x, height = a.size.y})
 
 
 ## Shows every item that has content, then drops the least important until the rest fit.
@@ -320,10 +360,21 @@ func _fit() -> void:
 		print("side panel: left out %s; it holds %d px" % [", ".join(left_out), roundi(room)])
 
 
+func _on_window_unmapped(id: int) -> void:
+	_windows.erase(id)
+	_app_ids.erase(id)
+	# The app page shows hosted apps only: with none left, back to the grid they came from
+	# (not to the phone's video, which is the newest window left).
+	if _page_name == "app" and not _windows.any(func(w): return not _is_projection(w)):
+		open_page("apps")
+		return
+	_show_app()
+
+
 func _show_app() -> void:
 	# Home's slot is the phone's while there is a phone: a launched app is the app page's.
 	var phone := _projection_page or (_page_name == "home" and _windows.any(_is_projection))
-	var shown: Array = _windows.filter(_is_projection) if phone else Array(_windows)
+	var shown: Array = _windows.filter(_is_projection) if phone else _windows.filter(func(w): return not _is_projection(w)) if _page_name == "app" else Array(_windows)
 	var id: int = shown[-1] if not shown.is_empty() else -1
 	_projection.show_window(id, id >= 0 and _is_projection(id))
 
@@ -357,6 +408,8 @@ func _refresh_dirty() -> void:
 func _refresh(sections := {}) -> void:
 	if sections.is_empty() or sections.has("front"):
 		_follow_front()
+	if sections.is_empty() or sections.has("config"):
+		_follow_night()
 	var t := func(p: String): return Core.get_value("/telemetry/" + p)
 	# fuelPct is the charge for an electric car and the tank otherwise.
 	var power := _powertrain()

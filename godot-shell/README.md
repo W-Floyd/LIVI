@@ -272,8 +272,11 @@ The shell serves `org.freedesktop.portal.Settings` itself on the session bus (`p
 appearance, `accent-color` from the theme's accent, `reduced-motion`, with `SettingChanged` when
 they change, so GTK4/libadwaita apps (and Qt 6's portal-aware themes) follow day and night live;
 `org.gnome.desktop.interface` `gtk-theme` does the same for GTK3. The real xdg-desktop-portal
-cannot start for the kiosk (its user unit requires `graphical-session.target`). When another
-portal owns the name, apps get `ADW_DEBUG_COLOR_SCHEME` at launch instead, fixed for their life.
+cannot start for the kiosk (its user unit requires `graphical-session.target`). A thread keeps
+it served: no bus yet, a lost connection or a name another portal owns are retried every 5 s.
+Until it is served, apps get `ADW_DEBUG_COLOR_SCHEME` at launch instead, fixed for their life.
+The launcher's lines, the portal's status among them, also go to
+`~/.local/state/livi-shell/shell.log`: the kiosk service's stdout is the console, not the journal.
 
 ## Settings
 

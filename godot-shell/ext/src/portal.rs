@@ -11,7 +11,8 @@
 //! text scaling 0) are served too, and `gtk-theme` turns GTK3 apps dark.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, mpsc};
+use std::time::Duration;
 
 use zbus::object_server::SignalEmitter;
 use zbus::fdo::{RequestNameFlags, RequestNameReply};
@@ -145,6 +146,7 @@ pub async fn serve(address: Option<&str>, look: Look) -> Result<Connection, Stri
     let conn = b
         .serve_at(PATH, Settings { look })
         .serve_at(PATH, Registry)
+        .method_timeout(Duration::from_secs(5))
         .build()
         .await
         .map_err(|e| format!("session bus: {e}"))?;
@@ -169,36 +171,100 @@ pub async fn update(conn: &Connection, look: Look) -> zbus::Result<()> {
     Ok(())
 }
 
-/// The shell's one portal, for the life of the process.
-static SERVED: Mutex<Option<Connection>> = Mutex::new(None);
+/// Whether the portal is served, and the latest word on it, for the shell to log.
+static STATUS: Mutex<(bool, String)> = Mutex::new((false, String::new()));
+/// The keeper's inbox: each new look.
+static KEEPER: Mutex<Option<mpsc::Sender<Look>>> = Mutex::new(None);
 
-/// Serves the portal on the session bus unless it already is: "" when it is, else why not.
-pub fn start(look: Look) -> String {
-    let mut served = SERVED.lock().unwrap_or_else(|e| e.into_inner());
-    if served.is_some() {
-        return String::new();
+fn set_status(serving: bool, text: String) {
+    *STATUS.lock().unwrap_or_else(|e| e.into_inner()) = (serving, text);
+}
+
+/// Starts the keeper, once per process: a thread that serves the portal on the session bus,
+/// and serves it again whenever it is not (no bus yet at boot, the bus restarted, the name lost
+/// or taken by another portal that may go), checking every few seconds. Its own thread, so a
+/// bus that hangs never stalls the shell's.
+pub fn start(look: Look) {
+    let mut keeper = KEEPER.lock().unwrap_or_else(|e| e.into_inner());
+    if keeper.is_some() {
+        return;
     }
-    match zbus::block_on(serve(None, look)) {
-        Ok(c) => {
-            *served = Some(c);
-            String::new()
+    let (tx, rx) = mpsc::channel();
+    set_status(false, "starting".into());
+    let spawned = std::thread::Builder::new().name("settings-portal".into()).spawn(move || keep(rx, look));
+    match spawned {
+        Ok(_) => *keeper = Some(tx),
+        Err(e) => set_status(false, format!("no thread: {e}")),
+    }
+}
+
+fn keep(rx: mpsc::Receiver<Look>, mut look: Look) {
+    let mut conn: Option<Connection> = None;
+    loop {
+        match &conn {
+            Some(c) if !c.is_closed() => {
+                if let Err(e) = zbus::block_on(still_owner(c)) {
+                    set_status(false, e);
+                    conn = None;
+                    continue;
+                }
+            }
+            _ => {
+                conn = None;
+                let addr = std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap_or_else(|_| "(DBUS_SESSION_BUS_ADDRESS unset)".into());
+                let tried = std::panic::catch_unwind(|| zbus::block_on(serve(None, look)));
+                let tried = tried.unwrap_or_else(|p| {
+                    let why = p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()));
+                    Err(format!("panicked: {}", why.unwrap_or_default()))
+                });
+                match tried {
+                    Ok(c) => {
+                        let me = c.unique_name().map(|n| n.to_string()).unwrap_or_default();
+                        set_status(true, format!("served as {me} on {addr}"));
+                        conn = Some(c);
+                    }
+                    Err(e) => set_status(false, format!("{e} (on {addr}, uid {})", unsafe { libc::getuid() })),
+                }
+            }
         }
-        Err(e) => e,
+        let wait = Duration::from_secs(if conn.is_some() { 30 } else { 5 });
+        match rx.recv_timeout(wait) {
+            Ok(l) => {
+                look = rx.try_iter().last().unwrap_or(l);
+                if let Some(c) = &conn
+                    && let Err(e) = zbus::block_on(update(c, look))
+                {
+                    set_status(false, format!("announcing the look: {e}"));
+                    conn = None;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        }
     }
 }
 
-/// The served portal's new look; nothing when it is not served.
+/// Ok while this connection owns the portal's name.
+async fn still_owner(c: &Connection) -> Result<(), String> {
+    let me = c.unique_name().map(|n| n.to_string()).unwrap_or_default();
+    let m = c
+        .call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus", Some("org.freedesktop.DBus"), "GetNameOwner", &(BUS_NAME,))
+        .await
+        .map_err(|e| format!("lost {BUS_NAME}: {e}"))?;
+    let owner: String = m.body().deserialize().map_err(|e| e.to_string())?;
+    if owner == me { Ok(()) } else { Err(format!("{BUS_NAME} is now {owner}'s, not {me}'s")) }
+}
+
+/// The new look, for the keeper to announce; nothing before `start`.
 pub fn set_look(look: Look) {
-    let served = SERVED.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(c) = served.as_ref()
-        && let Err(e) = zbus::block_on(update(c, look))
-    {
-        eprintln!("portal: {e}");
+    if let Some(tx) = KEEPER.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        let _ = tx.send(look);
     }
 }
 
-pub fn serving() -> bool {
-    SERVED.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+/// (served, what the keeper last found).
+pub fn status() -> (bool, String) {
+    STATUS.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 #[cfg(test)]
@@ -206,8 +272,6 @@ mod tests {
     use super::*;
     use std::io::{BufRead, BufReader};
     use std::process::{Child, Command, Stdio};
-    use std::sync::mpsc;
-    use std::time::Duration;
 
     #[test]
     fn namespace_patterns() {

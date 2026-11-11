@@ -7,6 +7,8 @@ extends Node
 ##   LIVI_SHELL_APPS       the apps file, instead of $XDG_CONFIG_HOME/livi-shell/apps.yaml
 ##   LIVI_SHELL_APP_LOGS   where each app's output goes, instead of $XDG_STATE_HOME/livi-shell/apps
 ##   LIVI_SHELL_PORTAL     "off": no settings portal (another one serves the look)
+## Its lines also go to $XDG_STATE_HOME/livi-shell/shell.log: under the kiosk service the
+## shell's stdout and stderr reach the console, not the journal.
 
 ## The list, the running windows or a launch's state changed.
 signal changed
@@ -35,9 +37,12 @@ var _catalog := AppCatalog.new()
 ## App id -> the PID this launcher started it as; its process group is the same number.
 var _pids := {}
 var _poll_at := 0
-## Why the shell's settings portal is not served ("" when it is): apps then get the look in
-## their environment at launch instead, and do not follow it live.
-var _portal_error := ""
+## Whether the shell keeps a settings portal; while it is not served, apps get the look in their
+## environment at launch instead, and do not follow it live.
+var _portal := false
+## The portal's last status, logged when it changes.
+var _portal_status := ""
+var _log_file: FileAccess
 
 
 func _ready() -> void:
@@ -45,15 +50,28 @@ func _ready() -> void:
 	Wayland.window_unmapped.connect(_on_unmapped)
 	ThemeManager.changed.connect(_rescale)
 	ThemeManager.changed.connect(_send_look)
-	var t0 := Time.get_ticks_usec()
-	if OS.get_environment("LIVI_SHELL_PORTAL") == "off":
-		_portal_error = "LIVI_SHELL_PORTAL is off"
+	_portal = OS.get_environment("LIVI_SHELL_PORTAL") != "off"
+	if _portal:
+		AppearancePortal.start(ThemeManager.appearance == "night", ThemeManager.c.accent, ThemeManager.reduced_motion)
 	else:
-		_portal_error = AppearancePortal.start(ThemeManager.appearance == "night", ThemeManager.c.accent, ThemeManager.reduced_motion)
-	if _portal_error == "":
-		print("launcher: settings portal served (%d ms)" % ((Time.get_ticks_usec() - t0) / 1000))
-	else:
-		print("launcher: no settings portal: %s" % _portal_error)
+		_log("launcher: no settings portal: LIVI_SHELL_PORTAL is off")
+
+
+## A line for the console and shell.log, which starts afresh once it passes 1 MB.
+func _log(line: String) -> void:
+	print(line)
+	if _log_file == null:
+		# Beside the apps' logs: ~/.local/state/livi-shell/shell.log, a scenario's out/ in tests.
+		var path := _log_path("").get_base_dir().get_base_dir().path_join("shell.log")
+		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+		_log_file = FileAccess.open(path, FileAccess.READ_WRITE)
+		if _log_file == null or _log_file.get_length() > 1 << 20:
+			_log_file = FileAccess.open(path, FileAccess.WRITE)
+		if _log_file == null:
+			return
+		_log_file.seek_end()
+	_log_file.store_line("%s %s" % [Time.get_datetime_string_from_system(), line])
+	_log_file.flush()
 
 
 func _exit_tree() -> void:
@@ -146,14 +164,14 @@ func open(id: String) -> void:
 		DISPLAY = null, WAYLAND_SOCKET = null, XDG_CURRENT_DESKTOP = "LIVI",
 		GDK_BACKEND = "wayland", QT_QPA_PLATFORM = "wayland", SDL_VIDEODRIVER = "wayland",
 		CLUTTER_BACKEND = "wayland", MOZ_ENABLE_WAYLAND = "1"}
-	if _portal_error != "":
+	if not (_portal and AppearancePortal.serving()):
 		# libadwaita's override of the portal; fixed for the app's life.
 		env.ADW_DEBUG_COLOR_SCHEME = "prefer-dark" if ThemeManager.appearance == "night" else "prefer-light"
 	var pid: int = _catalog.launch(a.argv, a.cwd, env, _log_path(id))
 	if pid < 0:
 		failed[id] = "could not start %s" % a.argv[0]
 	else:
-		print("launcher: %s started as %d at %d %%: %s" % [id, pid, scale_of(id), " ".join(a.argv)])
+		_log("launcher: %s started as %d at %d %%: %s" % [id, pid, scale_of(id), " ".join(a.argv)])
 		# Before the compositor next dispatches, which is when the client can connect.
 		Wayland.set_process_scale(pid, scale_of(id) / 100.0)
 		_pids[id] = pid
@@ -181,7 +199,7 @@ func close(window: int) -> void:
 	for kill in [false, true]:
 		await get_tree().create_timer(CLOSE_GRACE_S).timeout
 		if windows.has(window) and _pids.get(windows[window].app, -1) == pid:
-			print("launcher: %s did not close, %s" % [windows[window].app, "SIGKILL" if kill else "SIGTERM"])
+			_log("launcher: %s did not close, %s" % [windows[window].app, "SIGKILL" if kill else "SIGTERM"])
 			_catalog.stop(pid, kill)
 
 
@@ -202,6 +220,9 @@ func _process(_delta: float) -> void:
 	if now < _poll_at:
 		return
 	_poll_at = now + 250
+	if _portal and AppearancePortal.status() != _portal_status:
+		_portal_status = AppearancePortal.status()
+		_log("launcher: settings portal: %s" % _portal_status)
 	var dirty := false
 	for id in _pids.keys():
 		# Reaps it. One that hands off and exits 0 (waydroid app launch, a GApplication whose
@@ -213,7 +234,7 @@ func _process(_delta: float) -> void:
 		if launching.has(id):
 			launching[id].exit = code
 			if code == 0:
-				print("launcher: %s's process %d exited 0 before its window: waiting for one from another" % [id, _pids[id]])
+				_log("launcher: %s's process %d exited 0 before its window: waiting for one from another" % [id, _pids[id]])
 		if code > 0:
 			Wayland.set_process_scale(_pids[id], 0)
 			_pids.erase(id)
@@ -223,7 +244,7 @@ func _process(_delta: float) -> void:
 		if st.state == "failed":
 			launching.erase(id)
 			failed[id] = st.reason
-			print("launcher: %s %s" % [id, failed[id]])
+			_log("launcher: %s %s" % [id, failed[id]])
 			dirty = true
 		elif st.state == "slow" and not l.slow:
 			l.slow = true
@@ -243,13 +264,13 @@ func _on_mapped(id: int, app_id: String, title: String) -> void:
 	if launching.has(owner):
 		var l: Dictionary = launching[owner]
 		var from := "" if pid == l.pid else ", from process %d" % pid
-		print("launcher: launched %s in %d ms%s" % [owner, Time.get_ticks_msec() - l.started, from])
+		_log("launcher: launched %s in %d ms%s" % [owner, Time.get_ticks_msec() - l.started, from])
 		launching.erase(owner)
 		# After the shell has the window too: it connected to the same signal later.
 		show_window.emit.call_deferred(id)
 	elif failed.erase(owner):
 		# Given up on, then up after all: running now, but not pulled forward this late.
-		print("launcher: %s's window came after its launch was given up (process %d)" % [owner, pid])
+		_log("launcher: %s's window came after its launch was given up (process %d)" % [owner, pid])
 	changed.emit()
 
 
@@ -309,7 +330,7 @@ func _rescale() -> void:
 
 ## Launched apps follow the shell's look through the portal.
 func _send_look() -> void:
-	if _portal_error == "":
+	if _portal:
 		AppearancePortal.set_look(ThemeManager.appearance == "night", ThemeManager.c.accent, ThemeManager.reduced_motion)
 
 

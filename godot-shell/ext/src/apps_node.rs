@@ -259,17 +259,13 @@ pub struct AppearancePortal {
 
 #[godot_api]
 impl AppearancePortal {
-    /// Serves the portal on the session bus, unless it already is, with this look: "" when it is
-    /// served, else why not (no bus, or another portal owns the name).
+    /// Keeps the portal served on the session bus from now on (`portal::start`), with this look.
     #[func]
-    fn start(dark: bool, accent: Color, reduced_motion: bool) -> GString {
+    fn start(dark: bool, accent: Color, reduced_motion: bool) {
         #[cfg(target_os = "linux")]
-        return gs(crate::portal::start(look(dark, accent, reduced_motion)));
+        crate::portal::start(look(dark, accent, reduced_motion));
         #[cfg(not(target_os = "linux"))]
-        {
-            let _ = (dark, accent, reduced_motion);
-            gs("no portal off Linux")
-        }
+        let _ = (dark, accent, reduced_motion);
     }
 
     /// The new look, announced to apps setting by setting.
@@ -284,9 +280,18 @@ impl AppearancePortal {
     #[func]
     fn serving() -> bool {
         #[cfg(target_os = "linux")]
-        return crate::portal::serving();
+        return crate::portal::status().0;
         #[cfg(not(target_os = "linux"))]
         false
+    }
+
+    /// What the portal's keeper last found: whom it is served as, or why it is not.
+    #[func]
+    fn status() -> GString {
+        #[cfg(target_os = "linux")]
+        return gs(crate::portal::status().1);
+        #[cfg(not(target_os = "linux"))]
+        gs("no portal off Linux")
     }
 }
 

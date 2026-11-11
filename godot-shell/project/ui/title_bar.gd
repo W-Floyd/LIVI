@@ -1,8 +1,8 @@
 class_name TitleBar
 extends Control
-## The page's top bar under the status bar: a back button, the page's title (the page's own
-## label, centered in it) and a button that hides or shows the page's controls so the scene shows
-## whole. A pack with the stock bar supplies its background, shadow and back button images; any
+## The page's top bar under the status bar: a back button (none beside a docked rail), the page's
+## title (the page's own label, centered in it) and a button that hides or shows the page's
+## controls so the scene shows whole. A pack with the stock bar supplies its background, shadow and back button images; any
 ## other theme gets the same bar in its own colors, shapes and icons.
 
 signal back_pressed
@@ -13,6 +13,11 @@ const PACK_BACK := "SystemUI/co_btn_back_1920_%s"
 
 var _back: Button
 var _hide: Button
+## Off where a docked nav rail is the way home.
+var back_shown := true:
+	set(v):
+		back_shown = v
+		_back.visible = v
 var ui_hidden := false:
 	set(v):
 		ui_hidden = v

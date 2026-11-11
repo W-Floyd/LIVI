@@ -134,3 +134,27 @@ steps:
       var s: EvScene = shell.get_node("EvLive/Scene")
       if not is_equal_approx(s.km_on, 90.0):
           return "animated under reduced motion: %s" % s.km_on
+  # The page is kept between visits: what changed while away shows on the next, at once.
+  - page: home
+  - set: { core: { telemetry: { climate: {} } } }
+  - set: { core: { telemetry: { fuelPct: 64, rangeKm: 250, rangeClimateOffKm: 270, climate: { source: car, fanLevel: 2, on: true } }, navigation: { chargingStop: { distanceM: 12000 } } } }
+  - wait: { frames: 2 }
+  - theme: { reduced_motion: false }
+  - page: ev_live
+  - expect_node: { path: EvLive/Battery/Row1/battery_value, text: "64" }
+  - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "250" }
+  - expect_node: { path: EvLive/RangeOn/Row0/on_name, text: "On" }
+  - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "270" }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "12" }
+  - expect_node: { path: EvLive/CarStatus/Row1/Climate, visible: "true" }
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      if not (is_equal_approx(s.km_on, 250.0) and is_equal_approx(s.km_off, 270.0) and is_equal_approx(s.stop_km, 12.0) and is_equal_approx(s.charge, 0.64)):
+          return "a visit eases from the last one, or missed the data: %s %s %s %s" % [s.km_on, s.km_off, s.stop_km, s.charge]
+  - page: home
+  - set: { core: { telemetry: { climate: { fanLevel: 0, on: false } } } }
+  - wait: { frames: 2 }
+  - page: ev_live
+  - expect_node: { path: EvLive/RangeOff, visible: "false" }
+  - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "270" }
+  - expect_node: { path: EvLive/CarStatus/Row1/Climate, visible: "false" }

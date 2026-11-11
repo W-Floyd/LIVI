@@ -86,6 +86,9 @@ var rail_width := 0.0:
 	set(v):
 		if v != rail_width:
 			rail_width = v
+			# The rail is the way home: the EV page's back button only without it.
+			if _ev_live:
+				_ev_live.back_button = v <= 0.0
 			_inset()
 			_tell_app_area()
 
@@ -533,6 +536,7 @@ func _live_page() -> EvLive:
 		_ev_live = EvLive.new()
 		_ev_live.tile_pressed.connect(func(id): ev_action.emit(id))
 		_ev_live.back_pressed.connect(func(): open_page.call_deferred("home"))
+		_ev_live.back_button = rail_width <= 0.0
 	elif _ev_live.get_parent():
 		# Still in warm_up's viewport.
 		_ev_live.get_parent().remove_child(_ev_live)

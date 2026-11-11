@@ -56,6 +56,9 @@ steps:
           var c: Control = page.get_node(n)
           if c.visible and not page.get_global_rect().encloses(c.get_global_rect()):
               return "%s at %s is off the page %s" % [n, c.get_global_rect(), page.get_global_rect()]
+      # The rail is the way home.
+      if page.get_node("TitleBar/Back").visible or not page.get_node("TitleBar/HideUI").visible:
+          return "the title bar's back button beside the docked rail"
   - gdscript: *clear
   - screenshot: nav-rail-ev
   # The rail moves to the driver's side; the pages follow.

@@ -54,6 +54,12 @@ const ROW_LIFT_FROM := 1.9
 
 ## How much of the top the shell's own status bar covers; none when the pack draws its own.
 var top_inset := 0.0
+## The title bar's back button; the shell turns it off while its nav rail is docked.
+var back_button := true:
+	set(v):
+		back_button = v
+		if _bar:
+			_bar.back_shown = v
 
 var _scene: EvScene
 var _spec := {}
@@ -97,6 +103,7 @@ func _ready() -> void:
 	_bar = TitleBar.new()
 	_bar.back_pressed.connect(func(): back_pressed.emit())
 	_bar.hide_toggled.connect(set_ui_hidden)
+	_bar.back_shown = back_button
 	add_child(_bar)
 	_title = UI.label("", "strong", "title")
 	_title.name = "Title"

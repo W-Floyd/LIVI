@@ -11,8 +11,9 @@ use godot::classes::rendering_server::TextureType;
 use godot::classes::{INode, ITexture2D, Image, ImageTexture, Node, RenderingServer, Texture2D};
 use godot::prelude::*;
 
-use crate::compositor::{Content, Frame, Server, WindowEvent};
-use crate::gl_import::GlImporter;
+use crate::compositor::{self, Content, Frame, Server, WindowEvent};
+use crate::gl_import::{DRM_FORMAT_NV12, DRM_FORMAT_YUV420, GlImporter, is_planar_yuv};
+use crate::gl_scene::{self, Scene};
 use crate::gs;
 
 /// Since the last `reset_stats`: what compositing costs the shell's main thread.
@@ -46,6 +47,8 @@ pub struct WindowTexture {
     /// dmabuf frames: a GL texture of ours, re-pointed at each buffer's EGLImage, and the
     /// RenderingServer texture wrapping it.
     native: Option<(Rid, u32, i32, i32)>,
+    /// Scenes (video, planar YUV): the GPU draws the window into this, which Godot samples.
+    target: Option<(Rid, gl_scene::Target)>,
     base: Base<Texture2D>,
 }
 
@@ -82,11 +85,14 @@ impl WindowTexture {
         true
     }
 
-    fn show_image(&mut self, gl: &GlImporter, image: *mut c_void, w: i32, h: i32) {
+    fn show_image(&mut self, gl: &GlImporter, scene: Option<&Scene>, image: *mut c_void, w: i32, h: i32) {
+        if self.target.is_some() {
+            self.free_gl(gl, scene);
+        }
         match self.native {
             Some((_, tex, nw, nh)) if (nw, nh) == (w, h) => gl.attach(tex, image),
             _ => {
-                self.free_native(gl);
+                self.free_gl(gl, scene);
                 let tex = gl.new_texture();
                 gl.attach(tex, image);
                 let rid = RenderingServer::singleton().texture_create_from_native_handle(
@@ -107,12 +113,56 @@ impl WindowTexture {
         self.base_mut().emit_changed();
     }
 
-    fn free_native(&mut self, gl: &GlImporter) {
+    /// Draws `sc` into this window's target, made or resized as needed.
+    fn show_scene(&mut self, gl: &GlImporter, scene: &Scene, sc: &compositor::Scene, layers: &[gl_scene::Layer]) -> bool {
+        let (w, h) = (sc.width as i32, sc.height as i32);
+        if self.target.as_ref().is_none_or(|(_, t)| (t.w, t.h) != (w, h)) {
+            self.free_gl(gl, Some(scene));
+            let t = match scene.new_target(w, h) {
+                Ok(t) => t,
+                Err(e) => {
+                    godot_error!("compositor: {e}");
+                    return false;
+                }
+            };
+            let rid = RenderingServer::singleton().texture_create_from_native_handle(
+                TextureType::TYPE_2D,
+                Format::RGBA8,
+                t.tex as u64,
+                w,
+                h,
+                1,
+            );
+            self.target = Some((rid, t));
+        }
+        let Some((rid, t)) = &mut self.target else { return false };
+        scene.render(t, sc.canvas.as_ref().map(|(g, f)| (*g, &f.rgba[..])), layers);
+        self.rid = *rid;
+        (self.w, self.h) = (w, h);
+        self.base_mut().emit_changed();
+        true
+    }
+
+    /// Frees whatever GL objects and RenderingServer textures this window holds.
+    fn free_gl(&mut self, gl: &GlImporter, scene: Option<&Scene>) {
         if let Some((rid, tex, ..)) = self.native.take() {
             RenderingServer::singleton().free_rid(rid);
             gl.delete_texture(tex);
         }
+        if let Some((rid, t)) = self.target.take() {
+            RenderingServer::singleton().free_rid(rid);
+            if let Some(scene) = scene {
+                scene.free_target(t);
+            }
+        }
     }
+}
+
+/// What a dmabuf imported as: one image per plane for planar YUV, otherwise one. `texs` are the
+/// GL textures the scene renderer samples, made on first use as a layer.
+struct Imported {
+    images: Vec<*mut c_void>,
+    texs: Vec<u32>,
 }
 
 #[derive(GodotClass)]
@@ -124,7 +174,10 @@ pub struct WaylandCompositor {
     /// Why dmabuf is off, or empty when it's on.
     dmabuf_off: String,
     /// EGLImages by buffer key, while the client keeps the buffer.
-    images: HashMap<u64, *mut c_void>,
+    images: HashMap<u64, Imported>,
+    scene: Option<Scene>,
+    /// LIVI_SHELL_YUV_MATRIX=601|709 forces the YUV matrix; by default the buffer size picks it.
+    force_709: Option<bool>,
     stats: Stats,
     base: Base<Node>,
 }
@@ -159,11 +212,35 @@ impl WaylandCompositor {
         let no_dmabuf = std::env::var("LIVI_SHELL_NO_DMABUF").map(|v| !v.is_empty()).unwrap_or(false);
         match if no_dmabuf { Err("disabled by LIVI_SHELL_NO_DMABUF".to_string()) } else { GlImporter::new() } {
             Ok(gl) => {
-                let formats: Vec<(u32, u64)> = gl.formats().iter().map(|f| (f.fourcc, f.modifier)).collect();
+                let scene = match Scene::new(&gl) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        godot_warn!("compositor: planar YUV off: {e}");
+                        None
+                    }
+                };
+                let all = gl.formats();
+                let yuv: Vec<String> = all.iter().filter(|f| is_planar_yuv(f.fourcc)).map(|f| format!("{:08x}:{:x}", f.fourcc, f.modifier)).collect();
+                if scene.is_some() {
+                    godot_print!("compositor: planar YUV dmabuf: {}", if yuv.is_empty() { "none (EGL imports no R8/GR88 planes)".into() } else { yuv.join(" ") });
+                }
+                let formats: Vec<(u32, u64)> = all
+                    .iter()
+                    .filter(|f| scene.is_some() || !is_planar_yuv(f.fourcc))
+                    .map(|f| (f.fourcc, f.modifier))
+                    .collect();
                 match server.enable_dmabuf(&formats, gl.render_node()) {
-                    Ok(()) => self.gl = Some(gl),
+                    Ok(()) => {
+                        self.gl = Some(gl);
+                        self.scene = scene;
+                    }
                     Err(e) => self.dmabuf_off = e.to_string(),
                 }
+                self.force_709 = match std::env::var("LIVI_SHELL_YUV_MATRIX").as_deref() {
+                    Ok("601") => Some(false),
+                    Ok("709") => Some(true),
+                    _ => None,
+                };
             }
             Err(e) => self.dmabuf_off = e,
         }
@@ -322,6 +399,9 @@ impl WaylandCompositor {
             let t = Instant::now();
             match content {
                 Content::Pixels(f) => {
+                    if let Some(gl) = &self.gl {
+                        tex.bind_mut().free_gl(gl, self.scene.as_ref());
+                    }
                     s.bytes += f.rgba.len() as u64;
                     if tex.bind_mut().show_pixels(f) {
                         let took = t.elapsed();
@@ -333,9 +413,12 @@ impl WaylandCompositor {
                 Content::Dmabuf { key, dmabuf } => {
                     let Some(gl) = &self.gl else { continue };
                     let image = match self.images.get(&key) {
-                        Some(&i) => i,
+                        Some(imp) => imp.images[0],
                         None => match gl.import(&dmabuf) {
-                            Ok(i) => *self.images.entry(key).or_insert(i),
+                            Ok(i) => {
+                                self.images.insert(key, Imported { images: vec![i], texs: Vec::new() });
+                                i
+                            }
                             Err(e) => {
                                 godot_error!("compositor: {} ({}): {e}", w.app_id, w.id);
                                 continue;
@@ -344,17 +427,38 @@ impl WaylandCompositor {
                     };
                     use smithay::backend::allocator::Buffer;
                     let size = dmabuf.size();
-                    tex.bind_mut().show_image(gl, image, size.w, size.h);
+                    tex.bind_mut().show_image(gl, self.scene.as_ref(), image, size.w, size.h);
                     let took = t.elapsed();
                     s.imports += 1;
                     s.import += took;
                     s.import_max = s.import_max.max(took);
                 }
+                Content::Scene(sc) => {
+                    let (Some(gl), Some(scene)) = (&self.gl, &self.scene) else { continue };
+                    let layers: Vec<_> = sc
+                        .layers
+                        .iter()
+                        .filter_map(|l| match scene_layer(gl, &mut self.images, l, self.force_709) {
+                            Ok(l) => Some(l),
+                            Err(e) => {
+                                godot_error!("compositor: {} ({}): {e}", w.app_id, w.id);
+                                None
+                            }
+                        })
+                        .collect();
+                    if tex.bind_mut().show_scene(gl, scene, &sc, &layers) {
+                        let took = t.elapsed();
+                        s.imports += 1;
+                        s.import += took;
+                        s.import_max = s.import_max.max(took);
+                    }
+                }
             }
         }
         for key in server.state.gone_buffers.drain(..) {
-            if let (Some(image), Some(gl)) = (self.images.remove(&key), &self.gl) {
-                gl.destroy_image(image);
+            if let (Some(imp), Some(gl)) = (self.images.remove(&key), &self.gl) {
+                imp.texs.iter().for_each(|&t| gl.delete_texture(t));
+                imp.images.iter().for_each(|&i| gl.destroy_image(i));
             }
         }
         let events = std::mem::take(&mut server.state.events);
@@ -373,11 +477,50 @@ impl WaylandCompositor {
                 }
                 WindowEvent::Unmapped(id) => {
                     if let (Some(mut tex), Some(gl)) = (self.textures.remove(&id), &self.gl) {
-                        tex.bind_mut().free_native(gl);
+                        tex.bind_mut().free_gl(gl, self.scene.as_ref());
                     }
                     self.signals().window_unmapped().emit(id as i64);
                 }
             }
         }
     }
+}
+
+/// A scene layer's plane textures, importing the dmabuf on first sight. Each plane's texture is
+/// bound to its EGLImage once: the image tracks the buffer's memory.
+fn scene_layer(gl: &GlImporter, images: &mut HashMap<u64, Imported>, l: &compositor::SceneLayer, force_709: Option<bool>) -> Result<gl_scene::Layer, String> {
+    use smithay::backend::allocator::Buffer;
+    let code = l.dmabuf.format().code as u32;
+    if !images.contains_key(&l.key) {
+        let imgs = if is_planar_yuv(code) { gl.import_planes(&l.dmabuf)? } else { vec![gl.import(&l.dmabuf)?] };
+        images.insert(l.key, Imported { images: imgs, texs: Vec::new() });
+    }
+    let imp = images.get_mut(&l.key).ok_or("no import")?;
+    if imp.texs.is_empty() {
+        imp.texs = imp.images.iter().map(|&i| {
+            let t = gl.new_texture();
+            gl.attach(t, i);
+            t
+        }).collect();
+    }
+    let kind = match code {
+        DRM_FORMAT_NV12 => gl_scene::Kind::Nv12,
+        DRM_FORMAT_YUV420 => gl_scene::Kind::I420,
+        _ => gl_scene::Kind::Rgb { opaque: !smithay::backend::allocator::format::has_alpha(l.dmabuf.format().code) },
+    };
+    let size = l.dmabuf.size();
+    let mut tex = [0; 3];
+    for (t, &n) in tex.iter_mut().zip(&imp.texs) {
+        *t = n;
+    }
+    Ok(gl_scene::Layer {
+        x: l.x,
+        y: l.y,
+        w: l.w,
+        h: l.h,
+        src: l.src,
+        kind,
+        tex,
+        hd: force_709.unwrap_or_else(|| crate::yuv::is_709(size.w as u32, size.h as u32)),
+    })
 }

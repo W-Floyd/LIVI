@@ -7,7 +7,10 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::Instant;
 
+use smithay::backend::allocator::Buffer;
 use smithay::backend::allocator::dmabuf::Dmabuf;
+
+use crate::gl_import::is_planar_yuv;
 use smithay::backend::allocator::{Format as DrmFormat, Fourcc, Modifier};
 use smithay::delegate_compositor;
 use smithay::delegate_dmabuf;
@@ -15,7 +18,7 @@ use smithay::delegate_output;
 use smithay::delegate_viewporter;
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
 use smithay::wayland::output::{OutputHandler, OutputManagerState};
-use smithay::wayland::viewporter::ViewporterState;
+use smithay::wayland::viewporter::{ViewportCachedState, ViewporterState};
 use smithay::delegate_seat;
 use smithay::delegate_shm;
 use smithay::delegate_xdg_shell;
@@ -62,6 +65,40 @@ pub struct Frame {
 pub enum Content {
     Pixels(Frame),
     Dmabuf { key: u64, dmabuf: Dmabuf },
+    /// A window with dmabuf layers (video subsurfaces, planar YUV) that the GPU draws over the
+    /// shm canvas, if any.
+    Scene(Scene),
+}
+
+/// A dmabuf placed in a window, `w` x `h` window pixels at (`x`, `y`) showing `src` (0..1) of the buffer.
+#[derive(Debug, Clone)]
+pub struct SceneLayer {
+    pub key: u64,
+    pub dmabuf: Dmabuf,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub src: [f32; 4],
+}
+
+#[derive(Debug, Clone)]
+pub struct Scene {
+    pub width: u32,
+    pub height: u32,
+    /// The shm layers laid out as one picture, `width` x `height`, with a generation that changes
+    /// whenever the picture does, so it is uploaded once and not per video frame.
+    pub canvas: Option<(u64, Arc<Frame>)>,
+    /// Bottom to top.
+    pub layers: Vec<SceneLayer>,
+}
+
+/// A dmabuf a surface shows, held until a frame has been drawn without it.
+struct DmaLayer {
+    surface: WlSurface,
+    buffer: WlBuffer,
+    key: u64,
+    dmabuf: Dmabuf,
 }
 
 pub struct Window {
@@ -76,6 +113,9 @@ pub struct Window {
     shown: Option<WlBuffer>,
     /// The toplevel surface's own latest shm picture, under its subsurfaces.
     root_frame: Option<Frame>,
+    /// The canvas last handed out in a `Scene`, and the window size it was laid out for.
+    canvas: Option<(u64, Arc<Frame>)>,
+    canvas_size: (u32, u32),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -107,6 +147,9 @@ pub struct State {
     /// Each subsurface's latest shm picture. Android's compositor draws a layer per subsurface and
     /// leaves the toplevel itself a placeholder, so a window is these laid over each other.
     layers: HashMap<ObjectId, Frame>,
+    /// The same for dmabuf pictures: subsurfaces, and a toplevel whose format only the GPU converts.
+    dma_layers: HashMap<ObjectId, DmaLayer>,
+    next_gen: u64,
     next_key: u64,
     /// Keys of dmabufs the client destroyed; the embedder frees what it imported for them.
     pub gone_buffers: Vec<u64>,
@@ -171,6 +214,8 @@ impl Server {
             next_id: 1,
             buffer_keys: HashMap::new(),
             layers: HashMap::new(),
+            dma_layers: HashMap::new(),
+            next_gen: 1,
             next_key: 1,
             gone_buffers: Vec::new(),
             release_next: Vec::new(),
@@ -251,6 +296,7 @@ impl Server {
     /// Tells every window its frame was shown, so it may draw the next one, and hands back the
     /// dmabufs a frame has since been drawn without.
     pub fn frame_done(&mut self) {
+        self.state.dma_layers.retain(|_, d| d.surface.is_alive());
         for b in self.state.release_now.drain(..) {
             b.release();
         }
@@ -442,17 +488,24 @@ impl CompositorHandler for State {
         });
         match assignment {
             Some(BufferAssignment::NewBuffer(buffer)) => {
+                let mut shm = false;
                 let content = if let Ok(dmabuf) = get_dmabuf(&buffer) {
                     let dmabuf = dmabuf.clone();
-                    let key = *self.buffer_keys.entry(buffer.id()).or_insert_with(|| {
-                        self.next_key += 1;
-                        self.next_key
-                    });
-                    // Read by the GPU until a frame is drawn with its successor.
-                    if let Some(old) = self.windows[i].shown.replace(buffer) {
-                        self.release_next.push(old);
+                    let key = self.buffer_key(&buffer);
+                    if is_planar_yuv(dmabuf.format().code as u32) {
+                        // Drawn by the GPU as a layer, which also converts it.
+                        if let Some(old) = self.windows[i].shown.take() {
+                            self.release_next.push(old);
+                        }
+                        self.set_dma_layer(surface, buffer, key, dmabuf);
+                        None
+                    } else {
+                        // Read by the GPU until a frame is drawn with its successor.
+                        if let Some(old) = self.windows[i].shown.replace(buffer) {
+                            self.release_next.push(old);
+                        }
+                        Some(Content::Dmabuf { key, dmabuf })
                     }
-                    Content::Dmabuf { key, dmabuf }
                 } else {
                     let frame = read_shm(&buffer);
                     // Copied out, so the client may reuse it at once.
@@ -460,9 +513,13 @@ impl CompositorHandler for State {
                     if let Some(old) = self.windows[i].shown.take() {
                         self.release_next.push(old);
                     }
+                    if let Some(old) = self.dma_layers.remove(&surface.id()) {
+                        self.release_next.push(old.buffer);
+                    }
                     let Some(frame) = frame else { return };
                     self.windows[i].root_frame = Some(frame.clone());
-                    Content::Pixels(frame)
+                    shm = true;
+                    Some(Content::Pixels(frame))
                 };
                 let window = &mut self.windows[i];
                 let (app_id, title) = with_states(surface, |states| {
@@ -480,13 +537,15 @@ impl CompositorHandler for State {
                 });
                 window.app_id = app_id;
                 window.title = title;
-                window.frame = Some(content);
-                if !window.mapped {
-                    window.mapped = true;
-                    let id = window.id;
-                    self.events.push(WindowEvent::Mapped(id));
+                if content.is_some() {
+                    window.frame = content;
+                    if !window.mapped {
+                        window.mapped = true;
+                        let id = window.id;
+                        self.events.push(WindowEvent::Mapped(id));
+                    }
                 }
-                self.recomposite(i);
+                self.recomposite(i, shm);
             }
             Some(BufferAssignment::Removed) if self.windows[i].mapped => {
                 let window = &mut self.windows[i];
@@ -512,9 +571,15 @@ impl State {
         let assignment = with_states(surface, |states| {
             states.cached_state.get::<SurfaceAttributes>().current().buffer.take()
         });
+        let mut shm_changed = false;
         match assignment {
             Some(BufferAssignment::NewBuffer(buffer)) => {
-                if get_dmabuf(&buffer).is_err() {
+                if let Ok(dmabuf) = get_dmabuf(&buffer) {
+                    let dmabuf = dmabuf.clone();
+                    let key = self.buffer_key(&buffer);
+                    self.set_dma_layer(surface, buffer, key, dmabuf);
+                    shm_changed = self.layers.remove(&surface.id()).is_some();
+                } else {
                     match read_shm(&buffer) {
                         Some(f) => {
                             self.layers.insert(surface.id(), f);
@@ -523,20 +588,46 @@ impl State {
                             self.layers.remove(&surface.id());
                         }
                     }
+                    buffer.release();
+                    shm_changed = true;
+                    if let Some(old) = self.dma_layers.remove(&surface.id()) {
+                        self.release_next.push(old.buffer);
+                    }
                 }
-                buffer.release();
             }
             Some(BufferAssignment::Removed) => {
-                self.layers.remove(&surface.id());
+                shm_changed = self.layers.remove(&surface.id()).is_some();
+                if let Some(old) = self.dma_layers.remove(&surface.id()) {
+                    self.release_next.push(old.buffer);
+                }
             }
             None => {}
         }
-        self.recomposite(i);
+        self.recomposite(i, shm_changed);
+    }
+
+    fn buffer_key(&mut self, buffer: &WlBuffer) -> u64 {
+        *self.buffer_keys.entry(buffer.id()).or_insert_with(|| {
+            self.next_key += 1;
+            self.next_key
+        })
+    }
+
+    /// `surface` now shows this dmabuf; the one it showed is released a frame later.
+    fn set_dma_layer(&mut self, surface: &WlSurface, buffer: WlBuffer, key: u64, dmabuf: Dmabuf) {
+        let layer = DmaLayer { surface: surface.clone(), buffer, key, dmabuf };
+        if let Some(old) = self.dma_layers.insert(surface.id(), layer) {
+            if old.buffer != self.dma_layers[&surface.id()].buffer {
+                self.release_next.push(old.buffer);
+            }
+        }
     }
 
     /// Window `i` as its toplevel's own picture with every subsurface's over it, bottom to top; the
     /// window is as big as the toplevel's picture, or where the layers reach if that is a placeholder.
-    fn recomposite(&mut self, i: usize) {
+    /// Dmabuf layers go to the GPU as a `Scene` over the shm picture; `shm_changed` says whether
+    /// that picture needs laying out again.
+    fn recomposite(&mut self, i: usize, shm_changed: bool) {
         let root = self.windows[i].toplevel.wl_surface().clone();
         let mut placed: Vec<(ObjectId, Point<i32, Logical>)> = Vec::new();
         with_surface_tree_downward(
@@ -546,74 +637,131 @@ impl State {
                 let sub = states.cached_state.get::<SubsurfaceCachedState>().current().location;
                 TraversalAction::DoChildren(*loc + sub)
             },
-            |surf, _, loc| placed.push((surf.id(), *loc)),
+            // The state passed down is the parent's: a surface's own offset is added here.
+            |surf, states, loc| {
+                let own = states.cached_state.get::<SubsurfaceCachedState>().current().location;
+                placed.push((surf.id(), *loc + own))
+            },
             |_, _, _| true,
         );
         let root_id = root.id();
         let has_layers = placed.iter().any(|(id, _)| *id != root_id && self.layers.contains_key(id));
-        if !has_layers {
+        let dma: Vec<(Point<i32, Logical>, &DmaLayer)> =
+            placed.iter().filter_map(|(id, loc)| Some((*loc, self.dma_layers.get(id)?))).collect();
+        if !has_layers && dma.is_empty() {
             return;
         }
         let base = self.windows[i].root_frame.clone();
-        let mut w = base.as_ref().map(|f| f.width).unwrap_or(0);
-        let mut h = base.as_ref().map(|f| f.height).unwrap_or(0);
-        if w <= 1 && h <= 1 {
-            w = 0;
-            h = 0;
-        }
+        let real_base = base.as_ref().filter(|f| f.width > 1 || f.height > 1);
+        let (mut w, mut h) = real_base.map_or((0, 0), |f| (f.width, f.height));
         for (id, loc) in &placed {
             if let Some(f) = self.layers.get(id) {
                 w = w.max((loc.x.max(0) as u32) + f.width);
                 h = h.max((loc.y.max(0) as u32) + f.height);
             }
         }
+        let mut layers = Vec::new();
+        for (loc, d) in &dma {
+            let (lw, lh, src) = layer_geometry(d);
+            w = w.max((loc.x.max(0) + lw) as u32);
+            h = h.max((loc.y.max(0) + lh) as u32);
+            layers.push(SceneLayer { key: d.key, dmabuf: d.dmabuf.clone(), x: loc.x, y: loc.y, w: lw, h: lh, src });
+        }
+        if !dma.is_empty() && real_base.is_none() {
+            // A video window's toplevel is a placeholder scaled to the whole window by viewporter.
+            if let Some(d) = with_states(&root, |s| s.cached_state.get::<ViewportCachedState>().current().dst) {
+                w = w.max(d.w.max(0) as u32);
+                h = h.max(d.h.max(0) as u32);
+            }
+        }
         if w == 0 || h == 0 {
             return;
         }
-        let mut canvas = vec![0u8; (w * h * 4) as usize];
-        let mut blit = |f: &Frame, x0: i32, y0: i32| {
-            for y in 0..f.height as i32 {
-                let dy = y0 + y;
-                if dy < 0 || dy >= h as i32 {
-                    continue;
-                }
-                for x in 0..f.width as i32 {
-                    let dx = x0 + x;
-                    if dx < 0 || dx >= w as i32 {
-                        continue;
-                    }
-                    let s = ((y as u32 * f.width + x as u32) * 4) as usize;
-                    let d = ((dy as u32 * w + dx as u32) * 4) as usize;
-                    let a = f.rgba[s + 3] as u32;
-                    if a == 255 {
-                        canvas[d..d + 4].copy_from_slice(&f.rgba[s..s + 4]);
-                    } else if a > 0 {
-                        for k in 0..3 {
-                            canvas[d + k] = ((f.rgba[s + k] as u32 * a + canvas[d + k] as u32 * (255 - a)) / 255) as u8;
-                        }
-                        canvas[d + 3] = (a + canvas[d + 3] as u32 * (255 - a) / 255).min(255) as u8;
-                    }
-                }
+        let needs_canvas = has_layers || real_base.is_some();
+        let placed_shm: Vec<(Point<i32, Logical>, &Frame)> =
+            placed.iter().filter(|(id, _)| *id != root_id).filter_map(|(id, loc)| Some((*loc, self.layers.get(id)?))).collect();
+        let build = || {
+            let mut canvas = vec![0u8; (w * h * 4) as usize];
+            if let Some(f) = real_base {
+                blit(&mut canvas, w, h, f, 0, 0);
             }
+            for (loc, f) in &placed_shm {
+                blit(&mut canvas, w, h, f, loc.x, loc.y);
+            }
+            Frame { width: w, height: h, rgba: canvas }
         };
-        if let Some(f) = base.as_ref().filter(|f| f.width > 1 || f.height > 1) {
-            blit(f, 0, 0);
-        }
-        for (id, loc) in &placed {
-            if *id != root_id {
-                if let Some(f) = self.layers.get(id) {
-                    blit(f, loc.x, loc.y);
-                }
+        let content = if layers.is_empty() {
+            self.windows[i].canvas = None;
+            self.windows[i].canvas_size = (0, 0);
+            Content::Pixels(build())
+        } else {
+            let win = &self.windows[i];
+            if shm_changed || win.canvas_size != (w, h) {
+                let canvas = needs_canvas.then(|| {
+                    self.next_gen += 1;
+                    (self.next_gen, Arc::new(build()))
+                });
+                let win = &mut self.windows[i];
+                win.canvas = canvas;
+                win.canvas_size = (w, h);
             }
-        }
+            Content::Scene(Scene { width: w, height: h, canvas: self.windows[i].canvas.clone(), layers })
+        };
         let window = &mut self.windows[i];
-        window.frame = Some(Content::Pixels(Frame { width: w, height: h, rgba: canvas }));
+        window.frame = Some(content);
         if !window.mapped {
             window.mapped = true;
             let id = window.id;
             self.events.push(WindowEvent::Mapped(id));
         }
     }
+}
+
+/// Source over destination into `canvas`, w x h RGBA, with `f` at (x0, y0).
+fn blit(canvas: &mut [u8], w: u32, h: u32, f: &Frame, x0: i32, y0: i32) {
+    for y in 0..f.height as i32 {
+        let dy = y0 + y;
+        if dy < 0 || dy >= h as i32 {
+            continue;
+        }
+        for x in 0..f.width as i32 {
+            let dx = x0 + x;
+            if dx < 0 || dx >= w as i32 {
+                continue;
+            }
+            let s = ((y as u32 * f.width + x as u32) * 4) as usize;
+            let d = ((dy as u32 * w + dx as u32) * 4) as usize;
+            let a = f.rgba[s + 3] as u32;
+            if a == 255 {
+                canvas[d..d + 4].copy_from_slice(&f.rgba[s..s + 4]);
+            } else if a > 0 {
+                for k in 0..3 {
+                    canvas[d + k] = ((f.rgba[s + k] as u32 * a + canvas[d + k] as u32 * (255 - a)) / 255) as u8;
+                }
+                canvas[d + 3] = (a + canvas[d + 3] as u32 * (255 - a) / 255).min(255) as u8;
+            }
+        }
+    }
+}
+
+/// A dmabuf layer's size in window pixels and the 0..1 part of the buffer it shows, from its
+/// viewporter state (source crop, destination size) and buffer scale.
+fn layer_geometry(d: &DmaLayer) -> (i32, i32, [f32; 4]) {
+    let buf = d.dmabuf.size();
+    with_states(&d.surface, |states| {
+        let vp = *states.cached_state.get::<ViewportCachedState>().current();
+        let scale = states.cached_state.get::<SurfaceAttributes>().current().buffer_scale.max(1) as f64;
+        let (bw, bh) = (buf.w as f64 / scale, buf.h as f64 / scale);
+        let (src, size) = match vp.src {
+            Some(r) => (
+                [(r.loc.x / bw) as f32, (r.loc.y / bh) as f32, ((r.loc.x + r.size.w) / bw) as f32, ((r.loc.y + r.size.h) / bh) as f32],
+                (r.size.w.round() as i32, r.size.h.round() as i32),
+            ),
+            None => ([0.0, 0.0, 1.0, 1.0], (bw.round() as i32, bh.round() as i32)),
+        };
+        let (w, h) = vp.dst.map_or(size, |d| (d.w, d.h));
+        (w.max(1), h.max(1), src)
+    })
 }
 
 impl DmabufHandler for State {
@@ -653,6 +801,8 @@ impl XdgShellHandler for State {
             mapped: false,
             shown: None,
             root_frame: None,
+            canvas: None,
+            canvas_size: (0, 0),
         });
     }
 
@@ -714,8 +864,10 @@ mod tests {
 
     use wayland_client::Connection;
 
+    use std::os::fd::AsRawFd;
+
     use super::*;
-    use crate::test_client::{self, Opts, Pattern};
+    use crate::test_client::{self, Format as BufFormat, Opts, Pattern};
 
     /// Dispatches and completes frames until `done` holds; false after five seconds.
     fn pump(server: &mut Server, mut done: impl FnMut(&State) -> bool) -> bool {
@@ -755,6 +907,8 @@ mod tests {
             pattern,
             animate,
             dmabuf,
+            format: BufFormat::Xrgb8888,
+            video: false,
             events: None,
         }
     }
@@ -762,9 +916,9 @@ mod tests {
     /// A frame's pixels whichever way they came; a dmabuf is read through a CPU mapping.
     fn pixels(content: &Content) -> Frame {
         match content {
+            Content::Scene(_) => panic!("a scene has no single picture"),
             Content::Pixels(f) => f.clone(),
             Content::Dmabuf { dmabuf, .. } => {
-                use smithay::backend::allocator::Buffer;
                 use std::os::fd::AsRawFd;
                 let size = dmabuf.size();
                 let stride = dmabuf.strides().next().unwrap() as usize;
@@ -797,6 +951,39 @@ mod tests {
             for (x, y) in [(0, 0), (70, 0), (70, 63), (95, 63)] {
                 assert_eq!(at(x, y), Pattern::Grid.pixel(x, y, 96), "dmabuf={dmabuf} ({x}, {y})");
             }
+        }
+    }
+
+    /// Video as waylandsink sends it: a placeholder toplevel scaled to the panel, with the
+    /// planar YUV dmabuf in a viewporter-scaled subsurface, reaches the embedder as a scene with
+    /// the layer where the client put it, whatever the plane layout.
+    #[test]
+    fn a_planar_video_subsurface_becomes_a_scene_layer() {
+        const NV12: u32 = 0x3231_564e;
+        const YU12: u32 = 0x3231_5559;
+        for (format, planes) in [(BufFormat::Nv12, 2), (BufFormat::I420, 3)] {
+            let mut server = Server::new().unwrap();
+            server.enable_dmabuf(&[(XRGB8888, LINEAR), (NV12, LINEAR), (YU12, LINEAR)], None).unwrap();
+            let mut o = opts(Pattern::Bars, None, true);
+            (o.format, o.video) = (format, true);
+            let _client = client(&mut server, o);
+            assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))), "{format:?}");
+            let Some(Content::Scene(sc)) = &server.state.windows[0].frame else { panic!("{format:?}: not a scene") };
+            assert_eq!((sc.width, sc.height), (1920, 720));
+            assert!(sc.canvas.is_none());
+            let [l] = &sc.layers[..] else { panic!("{format:?}: {} layers", sc.layers.len()) };
+            assert_eq!((l.x, l.y, l.w, l.h, l.src), (888, 312, 144, 96, [0.0, 0.0, 1.0, 1.0]));
+            assert_eq!(l.dmabuf.num_planes(), planes);
+            // Luma of the first (white) and last (black) bars, through a CPU mapping.
+            let (offset, stride) = (l.dmabuf.offsets().next().unwrap() as usize, l.dmabuf.strides().next().unwrap() as usize);
+            let len = offset + stride * 64;
+            let fd = l.dmabuf.handles().next().unwrap().as_raw_fd();
+            // SAFETY: a read-only mapping of the client's buffer, unmapped below.
+            let map = unsafe { libc::mmap(std::ptr::null_mut(), len.next_multiple_of(4096), libc::PROT_READ, libc::MAP_SHARED, fd, 0) };
+            assert_ne!(map, libc::MAP_FAILED, "mmap of the dmabuf");
+            let y = unsafe { std::slice::from_raw_parts(map as *const u8, len) };
+            assert_eq!((y[offset], y[offset + 95]), (235, 16), "{format:?}");
+            unsafe { libc::munmap(map, len.next_multiple_of(4096)) };
         }
     }
 

@@ -5,6 +5,8 @@ pub mod compositor;
 pub mod fake_core;
 #[cfg(target_os = "linux")]
 mod gl_import;
+#[cfg(target_os = "linux")]
+mod gl_scene;
 pub mod golden;
 pub mod keys;
 pub mod scenario;
@@ -12,6 +14,7 @@ pub mod scenario;
 pub mod test_client;
 #[cfg(target_os = "linux")]
 mod wayland_node;
+pub mod yuv;
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};

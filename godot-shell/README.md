@@ -32,8 +32,9 @@ Goldens are lossless WebP, a third of PNG's size. Captures are compared in memor
 (as PNG) only on a mismatch, `--update-goldens`, `--shots-only` or `compare: false`.
 
 Scenario fixtures: `core` (a partial state) and `clients`: `{ role: app, app_id, pattern:
-grid|bars, size: WxH, animate: N, buffer: shm|dmabuf, events: true }` runs the test client
-(`events` logs the input it gets, for `expect_client`), `{ role: command, run: [...] }` any
+grid|bars, size: WxH, animate: N, buffer: shm|dmabuf|nv12|i420, video: true, events: true }` runs the test client
+(`events` logs the input it gets, for `expect_client`; `video` sends the picture as waylandsink does, a
+viewporter-scaled subsurface under a placeholder toplevel), `{ role: command, run: [...] }` any
 Wayland program.
 
 Steps: `page: home | ev | ev_live | <pack screen>` (see "Electric vehicle page"), `compare_reference` (below), `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`
@@ -189,6 +190,25 @@ and `ld.lld`. No pmbootstrap. The unit's engine is Alpine's `godot` 4.7.2 for ar
 APKBUILDs for `livi-core` and `livi-shell` (launcher, systemd and OpenRC units, 1920x720 config)
 are in `packaging/alpine/`; see [packaging/README.md](packaging/README.md) for the commands,
 what runs where, and what is left for the unit.
+
+## Video on the unit
+
+The compositor takes planar YUV dmabufs (NV12, I420) from clients, as `livi-gst-host`'s
+`waylandsink` sends them from the CODA decoder. EGL lists NV12 external-only, which Godot's
+canvas shaders cannot sample, so each plane is imported as its own plain image (R8 luma, GR88
+chroma) and `gl_scene.rs` converts to RGB on the GPU (limited range; BT.709 from 720 lines up, else
+BT.601; `LIVI_SHELL_YUV_MATRIX=601|709` forces one) into the window's texture, with viewporter
+crop/scale and subsurface placement. No CPU copy. Dmabuf subsurfaces are drawn over any shm
+layers. At startup the shell logs `compositor: planar YUV dmabuf: <fourcc>:<modifier> ...`; none
+means EGL imports no R8/GR88 planes.
+
+With the shell running on the unit:
+
+```sh
+export XDG_RUNTIME_DIR=/run/livi-shell WAYLAND_DISPLAY=livi-shell
+gst-launch-1.0 videotestsrc ! video/x-raw,format=NV12,width=1920,height=1080 ! waylandsink
+# the decoder's path: ... ! v4l2h264dec ! waylandsink
+```
 
 ## A car model
 

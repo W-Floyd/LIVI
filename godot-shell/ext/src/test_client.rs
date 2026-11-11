@@ -11,12 +11,16 @@ use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::wl_shm::{self, WlShm};
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
+use wayland_client::protocol::wl_subcompositor::WlSubcompositor;
+use wayland_client::protocol::wl_subsurface::WlSubsurface;
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::wl_keyboard::{self, WlKeyboard};
 use wayland_client::protocol::wl_pointer::{self, WlPointer};
 use wayland_client::protocol::wl_seat::{self, WlSeat};
 use wayland_client::protocol::wl_touch::{self, WlTouch};
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, delegate_noop};
+use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
+use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1};
 use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1;
 use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
@@ -63,6 +67,46 @@ impl Pattern {
     }
 }
 
+/// Pixel layout of a dmabuf; planar ones are limited-range YUV, BT.601 or BT.709 by size as the
+/// compositor picks.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Format {
+    Xrgb8888,
+    Nv12,
+    I420,
+}
+
+impl Format {
+    fn fourcc(self) -> u32 {
+        match self {
+            Format::Xrgb8888 => XRGB8888,
+            Format::Nv12 => 0x3231_564e,
+            Format::I420 => 0x3231_5559,
+        }
+    }
+
+    /// (offset, stride) of each plane, and the buffer's size in bytes, for a `w` x `h` picture.
+    pub fn planes(self, w: u32, h: u32) -> (Vec<(u32, u32)>, usize) {
+        // Hardware strides are aligned; the compositor must honour them rather than assume w.
+        let ys = match self {
+            Format::Xrgb8888 => w * 4,
+            _ => w.next_multiple_of(64),
+        };
+        let planes = match self {
+            Format::Xrgb8888 => vec![(0, ys)],
+            Format::Nv12 => vec![(0, ys), (ys * h, ys)],
+            Format::I420 => {
+                let cs = ys / 2;
+                vec![(0, ys), (ys * h, cs), (ys * h + cs * h.div_ceil(2), cs)]
+            }
+        };
+        let (off, stride) = *planes.last().unwrap();
+        let rows = if self == Format::Xrgb8888 { h } else { h.div_ceil(2) };
+        // udmabuf takes whole pages.
+        (planes, ((off + stride * rows) as usize).next_multiple_of(4096))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Opts {
     pub app_id: String,
@@ -73,8 +117,13 @@ pub struct Opts {
     /// Redraw on every frame callback with a white column at `frame % width`; stop after this
     /// many frames. Without it, one frame and then idle until closed.
     pub animate: Option<u32>,
-    /// Send linear XRGB dmabufs (from /dev/udmabuf) instead of shm.
+    /// Send linear dmabufs (from /dev/udmabuf) instead of shm.
     pub dmabuf: bool,
+    /// What the dmabufs hold.
+    pub format: Format,
+    /// Show the picture as waylandsink does: a subsurface scaled 1.5x by viewporter and centred
+    /// under a placeholder toplevel scaled to the 1920x720 panel.
+    pub video: bool,
     /// Also append each input event, one line each, to this file as it arrives.
     pub events: Option<std::path::PathBuf>,
 }
@@ -90,6 +139,8 @@ pub struct Report {
 #[derive(Default)]
 struct App {
     compositor: Option<WlCompositor>,
+    subcompositor: Option<WlSubcompositor>,
+    viewporter: Option<WpViewporter>,
     shm: Option<WlShm>,
     wm_base: Option<XdgWmBase>,
     dmabuf: Option<ZwpLinuxDmabufV1>,
@@ -142,13 +193,38 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     }
 
     let (w, h) = (opts.width, opts.height);
-    let stride = w * 4;
-    // udmabuf takes whole pages.
-    let size = ((stride * h) as usize).next_multiple_of(4096);
+    let (planes, size) = if opts.dmabuf { opts.format.planes(w, h) } else { Format::Xrgb8888.planes(w, h) };
+    let stride = planes[0].1;
     let dmabuf = match (opts.dmabuf, app.dmabuf.clone()) {
         (false, _) => None,
         (true, Some(d)) => Some(d),
         (true, None) => return Err(io::Error::other("compositor lacks zwp_linux_dmabuf_v1")),
+    };
+    // Where the picture goes: the toplevel, or in video mode a subsurface scaled by viewporter
+    // under a placeholder toplevel, with the toplevel's own picture a transparent pixel.
+    let mut keep = Vec::new();
+    let target = if opts.video {
+        let (Some(sub), Some(vp)) = (app.subcompositor.clone(), app.viewporter.clone()) else {
+            return Err(io::Error::other("compositor lacks wl_subcompositor or wp_viewporter"));
+        };
+        let video = compositor.create_surface(&qh, ());
+        let subsurface = sub.get_subsurface(&video, &surface, &qh, ());
+        let (dw, dh) = (w * 3 / 2, h * 3 / 2);
+        subsurface.set_position((PANEL.0 as i32 - dw as i32) / 2, (PANEL.1 as i32 - dh as i32) / 2);
+        subsurface.set_desync();
+        let video_vp = vp.get_viewport(&video, &qh, ());
+        video_vp.set_destination(dw as i32, dh as i32);
+        let root_vp = vp.get_viewport(&surface, &qh, ());
+        root_vp.set_destination(PANEL.0 as i32, PANEL.1 as i32);
+        let pool_file = memfd(4096, false)?;
+        let pool = shm.create_pool(pool_file.as_fd(), 4096, &qh, ());
+        let pixel = pool.create_buffer(0, 1, 1, 4, wl_shm::Format::Argb8888, &qh, usize::MAX);
+        surface.attach(Some(&pixel), 0, 0);
+        surface.commit();
+        keep.push((subsurface, video_vp, root_vp, pool, pixel, pool_file));
+        video
+    } else {
+        surface.clone()
     };
     // Three buffers, each reused only once the compositor has released it, as Mesa's clients
     // do: a dmabuf comes back a frame after its successor is shown, so two would halve the rate.
@@ -166,9 +242,11 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
             Some(d) => {
                 let fd = udmabuf(&file, size)?;
                 let params = d.create_params(&qh, ());
-                // LINEAR: modifier 0.
-                params.add(fd.as_fd(), 0, 0, stride, 0, 0);
-                let buffer = params.create_immed(w as i32, h as i32, XRGB8888, zwp_linux_buffer_params_v1::Flags::empty(), &qh, i);
+                // LINEAR: modifier 0. One fd for every plane.
+                for (n, &(offset, stride)) in planes.iter().enumerate() {
+                    params.add(fd.as_fd(), n as u32, offset, stride, 0, 0);
+                }
+                let buffer = params.create_immed(w as i32, h as i32, opts.format.fourcc(), zwp_linux_buffer_params_v1::Flags::empty(), &qh, i);
                 params.destroy();
                 (buffer, None)
             }
@@ -194,16 +272,20 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
         };
         let Some(i) = i else { break };
         // SAFETY: slot i's mapping, which the compositor has released.
-        let pixels = unsafe { std::slice::from_raw_parts_mut(slots[i].2 as *mut u8, (stride * h) as usize) };
-        draw(pixels, opts, drawn);
+        let pixels = unsafe { std::slice::from_raw_parts_mut(slots[i].2 as *mut u8, size) };
+        if opts.dmabuf && opts.format != Format::Xrgb8888 {
+            draw_yuv(pixels, opts, drawn, &planes);
+        } else {
+            draw(&mut pixels[..(stride * h) as usize], opts, drawn);
+        }
         app.busy[i] = true;
-        surface.attach(Some(&slots[i].0), 0, 0);
-        surface.damage_buffer(0, 0, w as i32, h as i32);
+        target.attach(Some(&slots[i].0), 0, 0);
+        target.damage_buffer(0, 0, w as i32, h as i32);
         if opts.animate.is_some() {
-            surface.frame(&qh, ());
+            target.frame(&qh, ());
             app.frame_due = false;
         }
-        surface.commit();
+        target.commit();
         drawn += 1;
         if opts.animate.is_some_and(|n| drawn >= n) {
             break;
@@ -218,6 +300,16 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
         }
     }
     let _ = conn.flush();
+    for (subsurface, video_vp, root_vp, pool, pixel, _) in keep {
+        pixel.destroy();
+        pool.destroy();
+        video_vp.destroy();
+        root_vp.destroy();
+        subsurface.destroy();
+    }
+    if opts.video {
+        target.destroy();
+    }
     toplevel.destroy();
     xdg.destroy();
     surface.destroy();
@@ -234,6 +326,7 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
 }
 
 const XRGB8888: u32 = 0x3432_5258;
+const PANEL: (u32, u32) = (1920, 720);
 
 /// A dmabuf over the memfd's pages, through /dev/udmabuf: CPU memory any importer can take,
 /// which needs no GPU allocator in the client.
@@ -273,6 +366,37 @@ fn draw(px: &mut [u8], opts: &Opts, frame: u32) {
     }
 }
 
+/// A planar YUV picture: luma per pixel, chroma from the top-left pixel of each 2x2 block.
+fn draw_yuv(buf: &mut [u8], opts: &Opts, frame: u32, planes: &[(u32, u32)]) {
+    let (w, h) = (opts.width, opts.height);
+    let marker = opts.animate.map(|_| frame % w);
+    let hd = crate::yuv::is_709(w, h);
+    let yuv = |x: u32, y: u32| {
+        let [r, g, b, _] = if marker == Some(x) { [255; 4] } else { opts.pattern.pixel(x, y, w) };
+        crate::yuv::rgb_to_yuv([r, g, b], hd)
+    };
+    let (yo, ys) = (planes[0].0 as usize, planes[0].1 as usize);
+    for y in 0..h {
+        for x in 0..w {
+            buf[yo + y as usize * ys + x as usize] = yuv(x, y)[0];
+        }
+    }
+    for cy in 0..h.div_ceil(2) {
+        for cx in 0..w.div_ceil(2) {
+            let [_, u, v] = yuv((cx * 2).min(w - 1), (cy * 2).min(h - 1));
+            let (cx, cy) = (cx as usize, cy as usize);
+            if planes.len() == 2 {
+                let at = planes[1].0 as usize + cy * planes[1].1 as usize + cx * 2;
+                buf[at] = u;
+                buf[at + 1] = v;
+            } else {
+                buf[planes[1].0 as usize + cy * planes[1].1 as usize + cx] = u;
+                buf[planes[2].0 as usize + cy * planes[2].1 as usize + cx] = v;
+            }
+        }
+    }
+}
+
 /// `sealed`: udmabuf refuses a memfd that could still shrink.
 fn memfd(size: usize, sealed: bool) -> io::Result<File> {
     let flags = libc::MFD_CLOEXEC | if sealed { libc::MFD_ALLOW_SEALING } else { 0 };
@@ -303,6 +427,8 @@ impl Dispatch<WlRegistry, ()> for App {
         };
         match interface.as_str() {
             "wl_compositor" => app.compositor = Some(registry.bind(name, version.min(4), qh, ())),
+            "wl_subcompositor" => app.subcompositor = Some(registry.bind(name, 1, qh, ())),
+            "wp_viewporter" => app.viewporter = Some(registry.bind(name, 1, qh, ())),
             "wl_shm" => app.shm = Some(registry.bind(name, 1, qh, ())),
             "xdg_wm_base" => app.wm_base = Some(registry.bind(name, 1, qh, ())),
             "zwp_linux_dmabuf_v1" => app.dmabuf = Some(registry.bind(name, version.min(3), qh, ())),
@@ -348,12 +474,18 @@ impl Dispatch<WlCallback, ()> for App {
 impl Dispatch<WlBuffer, usize> for App {
     fn event(app: &mut Self, _: &WlBuffer, event: wl_buffer::Event, i: &usize, _: &Connection, _: &QueueHandle<Self>) {
         if let wl_buffer::Event::Release = event {
-            app.busy[*i] = false;
+            if let Some(b) = app.busy.get_mut(*i) {
+                *b = false;
+            }
         }
     }
 }
 
 delegate_noop!(App: WlCompositor);
+delegate_noop!(App: WlSubcompositor);
+delegate_noop!(App: WlSubsurface);
+delegate_noop!(App: WpViewporter);
+delegate_noop!(App: WpViewport);
 delegate_noop!(App: WlShmPool);
 delegate_noop!(App: ignore WlShm);
 delegate_noop!(App: ignore WlSurface);

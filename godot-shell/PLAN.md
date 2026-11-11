@@ -680,6 +680,9 @@ Every milestone lands with its scenarios.
       `weston-terminal` shows as a texture.
 - [x] Test clients, `fixtures.clients`, and the `measure` step.
 - [x] dmabuf, through EGLImage and a native GL texture.
+- [x] Planar YUV dmabuf (NV12, I420) and dmabuf subsurfaces: per-plane EGLImages, converted and
+      composited on the GPU into the window's texture (`gl_scene.rs`). Verified in the VM with
+      udmabuf clients; the Mali and the CODA's buffers are untested.
 - [x] Input: pointer, touch and keyboard, through `wl_seat`.
 - [ ] Scroll (pointer axis), and explicit sync (`drm_syncobj`) for clients that use it.
 

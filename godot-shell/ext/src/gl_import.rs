@@ -26,6 +26,15 @@ const PLANE_ATTRS: [[i32; 5]; 4] = [
     [0x3440, 0x3441, 0x3442, 0x3449, 0x344A],
 ];
 const DRM_FORMAT_MOD_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
+pub const DRM_FORMAT_R8: u32 = 0x2020_3852;
+pub const DRM_FORMAT_GR88: u32 = 0x3838_5247;
+pub const DRM_FORMAT_NV12: u32 = 0x3231_564e;
+pub const DRM_FORMAT_YUV420: u32 = 0x3231_5559;
+
+/// Formats imported as one image per plane and converted to RGB by `gl_scene`.
+pub fn is_planar_yuv(fourcc: u32) -> bool {
+    fourcc == DRM_FORMAT_NV12 || fourcc == DRM_FORMAT_YUV420
+}
 
 const GL_TEXTURE_2D: u32 = 0x0DE1;
 const GL_TEXTURE_BINDING_2D: u32 = 0x8069;
@@ -57,6 +66,7 @@ struct Fns {
 pub struct GlImporter {
     f: Fns,
     display: Display,
+    gpa: unsafe extern "C" fn(*const c_char) -> *mut c_void,
 }
 
 /// A dmabuf format the importer can sample as an ordinary 2D texture.
@@ -120,13 +130,12 @@ impl GlImporter {
                 glGetIntegerv: req!(c"glGetIntegerv"),
             };
             let display = (f.eglGetCurrentDisplay)();
-            Ok(GlImporter { f, display })
+            Ok(GlImporter { f, display, gpa })
         }
     }
 
-    /// Formats and modifiers EGL imports that a `sampler2D` can read; external-only ones are
-    /// left out, as Godot's canvas shaders cannot sample them.
-    pub fn formats(&self) -> Vec<Format> {
+    /// Every (fourcc, modifier, external-only) EGL can import.
+    fn all_formats(&self) -> Vec<(u32, u64, bool)> {
         let (Some(qf), Some(qm)) = (self.f.eglQueryDmaBufFormatsEXT, self.f.eglQueryDmaBufModifiersEXT)
         else {
             return Vec::new();
@@ -145,19 +154,40 @@ impl GlImporter {
                 qm(self.display, fourcc, 0, std::ptr::null_mut(), std::ptr::null_mut(), &mut m);
                 if m <= 0 {
                     // Only implicit modifiers.
-                    out.push(Format { fourcc: fourcc as u32, modifier: DRM_FORMAT_MOD_INVALID });
+                    out.push((fourcc as u32, DRM_FORMAT_MOD_INVALID, false));
                     continue;
                 }
                 let mut mods = vec![0u64; m as usize];
                 let mut ext = vec![0u32; m as usize];
                 qm(self.display, fourcc, m, mods.as_mut_ptr(), ext.as_mut_ptr(), &mut m);
                 for i in 0..m as usize {
-                    if ext[i] == 0 {
-                        out.push(Format { fourcc: fourcc as u32, modifier: mods[i] });
-                    }
+                    out.push((fourcc as u32, mods[i], ext[i] != 0));
                 }
             }
         }
+        out
+    }
+
+    /// Formats and modifiers EGL imports that a `sampler2D` can read; external-only ones are
+    /// left out, as Godot's canvas shaders cannot sample them. The exception is planar YUV, which
+    /// is external-only as one image: NV12 and I420 are listed when each plane imports as a plain
+    /// R8 or GR88 image under the same modifier (see `import_planes`).
+    pub fn formats(&self) -> Vec<Format> {
+        let all = self.all_formats();
+        let mut out: Vec<Format> = all
+            .iter()
+            .filter(|f| !f.2)
+            .map(|f| Format { fourcc: f.0, modifier: f.1 })
+            .collect();
+        let plain = |fourcc: u32, modifier: u64| all.iter().any(|f| *f == (fourcc, modifier, false));
+        for &(_, modifier, _) in all.iter().filter(|f| f.0 == DRM_FORMAT_R8 && !f.2) {
+            if plain(DRM_FORMAT_GR88, modifier) {
+                out.push(Format { fourcc: DRM_FORMAT_NV12, modifier });
+            }
+            out.push(Format { fourcc: DRM_FORMAT_YUV420, modifier });
+        }
+        out.sort_by_key(|f| (f.fourcc, f.modifier));
+        out.dedup();
         out
     }
 
@@ -201,6 +231,55 @@ impl GlImporter {
             return Err(format!("EGL refused a {}x{} dmabuf, format {:?}", size.w, size.h, format));
         }
         Ok(image)
+    }
+
+    /// A planar YUV dmabuf as one plain image per plane, which a `sampler2D` can read where the
+    /// whole buffer, external-only on Mali, cannot: NV12 is R8 luma and GR88 chroma at half size
+    /// (U in red, V in green); I420 is three R8 planes.
+    pub fn import_planes(&self, dmabuf: &Dmabuf) -> Result<Vec<Image>, String> {
+        let size = dmabuf.size();
+        let format = dmabuf.format();
+        let modifier: u64 = format.modifier.into();
+        let (cw, ch) = ((size.w + 1) / 2, (size.h + 1) / 2);
+        let plane_fmts: &[(u32, i32, i32)] = match format.code as u32 {
+            DRM_FORMAT_NV12 => &[(DRM_FORMAT_R8, size.w, size.h), (DRM_FORMAT_GR88, cw, ch)],
+            DRM_FORMAT_YUV420 => &[(DRM_FORMAT_R8, size.w, size.h), (DRM_FORMAT_R8, cw, ch), (DRM_FORMAT_R8, cw, ch)],
+            _ => return Err(format!("{format:?} is not planar YUV")),
+        };
+        let planes: Vec<_> = dmabuf.handles().zip(dmabuf.offsets()).zip(dmabuf.strides()).collect();
+        if planes.len() < plane_fmts.len() {
+            return Err(format!("{format:?} dmabuf has {} planes", planes.len()));
+        }
+        let mut images = Vec::new();
+        for (n, (&(fourcc, w, h), ((fd, offset), stride))) in plane_fmts.iter().zip(planes).enumerate() {
+            let a = PLANE_ATTRS[0];
+            let mut attrs = vec![
+                EGL_WIDTH, w, EGL_HEIGHT, h, EGL_LINUX_DRM_FOURCC_EXT, fourcc as i32,
+                a[0], fd.as_raw_fd(), a[1], offset as i32, a[2], stride as i32,
+            ];
+            if dmabuf.has_modifier() {
+                attrs.extend([a[3], (modifier & 0xffff_ffff) as i32, a[4], (modifier >> 32) as i32]);
+            }
+            attrs.push(EGL_NONE);
+            // SAFETY: attribute list is EGL_NONE-terminated; the fd stays open for the call.
+            let image = unsafe {
+                (self.f.eglCreateImageKHR)(self.display, std::ptr::null_mut(), EGL_LINUX_DMA_BUF_EXT, std::ptr::null_mut(), attrs.as_ptr())
+            };
+            if image.is_null() {
+                for i in images {
+                    self.destroy_image(i);
+                }
+                return Err(format!("EGL refused plane {} ({fourcc:#x} {w}x{h}) of a {}x{} {:?} dmabuf", n, size.w, size.h, format));
+            }
+            images.push(image);
+        }
+        Ok(images)
+    }
+
+    /// An EGL or GL entry point by name, for the scene renderer.
+    pub fn proc_address(&self, name: &CStr) -> *mut c_void {
+        // SAFETY: eglGetProcAddress on a static name.
+        unsafe { (self.gpa)(name.as_ptr()) }
     }
 
     pub fn destroy_image(&self, image: Image) {

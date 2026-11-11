@@ -1,0 +1,18 @@
+name: home-video-i420
+# home-video with three-plane I420: the same golden.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: org.livi.test.video420, pattern: bars, size: 640x360, buffer: i420, video: true }
+steps:
+  - gdscript: |
+      if Wayland.dmabuf_status() != "":
+          return "dmabuf is off: %s" % Wayland.dmabuf_status()
+      Wayland.reset_stats()
+  - wait: { window: org.livi.test.video420 }
+  - gdscript: |
+      var s: Dictionary = Wayland.stats()
+      if s.imports == 0 or s.uploads != 0:
+          return "expected scene renders and no shm uploads, got %s" % s
+  - screenshot: { name: home-video, tolerance: 8 }

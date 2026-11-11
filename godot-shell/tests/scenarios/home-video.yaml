@@ -1,0 +1,20 @@
+name: home-video
+# What waylandsink sends: an NV12 dmabuf in a subsurface that viewporter scales, under a
+# placeholder toplevel. The GPU converts it (BT.601, limited range) and lays it out in the
+# 1920x720 window, so it shows the bars of home-app, scaled 1.5x and centred, and no shm upload.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: org.livi.test.video, pattern: bars, size: 640x360, buffer: nv12, video: true }
+steps:
+  - gdscript: |
+      if Wayland.dmabuf_status() != "":
+          return "dmabuf is off: %s" % Wayland.dmabuf_status()
+      Wayland.reset_stats()
+  - wait: { window: org.livi.test.video }
+  - gdscript: |
+      var s: Dictionary = Wayland.stats()
+      if s.imports == 0 or s.uploads != 0:
+          return "expected scene renders and no shm uploads, got %s" % s
+  - screenshot: { name: home-video, tolerance: 8 }

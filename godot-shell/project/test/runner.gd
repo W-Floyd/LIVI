@@ -152,7 +152,7 @@ func _run_one(path: String) -> String:
 	return ""
 
 
-## `{ role: app, app_id, pattern, size: WxH, animate: N }` as a test client process, or
+## `{ role: app, app_id, pattern, size: WxH, animate: N, buffer: shm|dmabuf|nv12|i420, video: true }` as a test client process, or
 ## `{ role: command, run: [program, args...] }` for a real one, such as weston-terminal.
 func _spawn(c: Dictionary) -> String:
 	var bin := _client_bin
@@ -168,6 +168,8 @@ func _spawn(c: Dictionary) -> String:
 				args.append_array(["--animate", str(int(c.animate))])
 			if c.has("buffer"):
 				args.append_array(["--buffer", c.buffer])
+			if c.get("video", false):
+				args.append("--video")
 			if c.get("events", false):
 				DirAccess.make_dir_recursive_absolute(_out.path_join(_scenario))
 				args.append_array(["--events", _client_events(c.get("app_id", "org.livi.test"))])

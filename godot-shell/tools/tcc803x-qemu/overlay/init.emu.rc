@@ -11,3 +11,9 @@ on post-fs
     mount tmpfs tmpfs /system/vendor/lib/egl nosuid nodev
     mount none /system/lib/hw/gralloc.default.so /system/lib/hw/gralloc.tcc803x.so bind
     mount none /dev/null /system/lib/hw/hwcomposer.tcc803x.so bind
+
+# No VIOC: opening the image-enhancement device writes its LUT registers and oopses the kernel into a
+# panic (tcc_set_lut_table). Stock opens it on a day/night change, e.g. once GPS has set the time. /dev/null
+# over it (mount: init's chmod would open it, and panic, itself).
+on init
+    mount none /dev/null /dev/display_image_enhancement bind

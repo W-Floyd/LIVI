@@ -26,12 +26,13 @@ def load_yaml(path):
 
 class Machine:
     """run.sh resumed from LOADVM, its console on a pipe, its monitor and micom UART on sockets."""
-    MON, MICOM = "/tmp/tccq.mon", "/tmp/tccq.micom"  # unix socket paths are limited to ~100 bytes
+    MON, MICOM, GPS = "/tmp/tccq.mon", "/tmp/tccq.micom", "/tmp/tccq.gps"  # unix socket paths are limited to ~100 bytes
     def __init__(self, log):
-        env = dict(os.environ, MON=self.MON, MICOM="unix:%s,server=on,wait=off" % self.MICOM, TIMEOUT=os.environ.get("TIMEOUT", "14400"))
+        env = dict(os.environ, MON=self.MON, MICOM="unix:%s,server=on,wait=off" % self.MICOM, GPS="unix:%s,server=on,wait=off" % self.GPS,
+                   TIMEOUT=os.environ.get("TIMEOUT", "14400"))
         self.p = subprocess.Popen([os.path.join(os.path.dirname(os.path.abspath(__file__)), "run.sh")], stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
-        self.buf, self.log, self.fake = bytearray(), open(log, "wb"), None
+        self.buf, self.log, self.fake, self.gps = bytearray(), open(log, "wb"), None, None
         threading.Thread(target=self._read, daemon=True).start()
         time.sleep(3)
     def _read(self):
@@ -69,8 +70,16 @@ class Machine:
         if os.environ.get("MICOM_CAPTURE") and state.get("still"):
             args += ["-replay", os.environ["MICOM_CAPTURE"], "-still", state["still"]]
         self.fake = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=open(out + ".micom.log", "w"))
+        # The GNSS module (HIPPO_FAKE, go-hippod's hippo-fake): a still point or a GPX track.
+        if self.gps: self.gps.terminate(); self.gps.wait(); self.gps = None
+        g = state.get("gps")
+        if g and os.environ.get("HIPPO_FAKE"):
+            pos = ["-gpx", g["gpx"], "-loop"] if "gpx" in g else ["-point", g["point"]]
+            self.gps = subprocess.Popen([os.environ["HIPPO_FAKE"], "-connect", "unix:" + self.GPS] + pos,
+                                        stdout=subprocess.DEVNULL, stderr=open(out + ".gps.log", "w"))
     def close(self):
         if self.fake: self.fake.terminate()
+        if self.gps: self.gps.terminate()
         self.p.terminate()
 
 def flow_view(m):

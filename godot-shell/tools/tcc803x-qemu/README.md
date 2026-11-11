@@ -165,6 +165,10 @@ also sends it at connect). Then `onMicomReady` runs: HEVService's start-up reads
 the launcher's EV widget and the EV app show the car's state of charge and range (range only once `VCU ready` is 1), and
 the EV settings round-trip through the fake (charge limits, AC current, battery conditioning; their frames are in the commit
 that added this). Without the fake the link stays silent and the EV pages show `--`.
+The EV page's departure and schedule tiles need two more things a parked car has: a real system time
+(`TimePolicyManager.isRealTimeSet`, from GPS here: "GNSS link") and the driving regulation off (`0x8103 [00]`; the
+North American app refuses its schedule dialogs under it). With both, stock writes 0x0C06/0x0C05 from its dialogs
+and shows the fake's reflected readbacks.
 
 ## Performance
 
@@ -233,8 +237,11 @@ Recommended for golden screenshots: one cold boot to `boot_completed` + `am forc
 The stock kernel's `dupttyd` opens it at boot and makes `/dev/ttyGPS0-2` of it, which the HAL (`gps.tcc803x.so`) opens. go-hippod's
 `cmd/hippo-fake -connect unix:$SOCK -gpx route.gpx` plays the module: the HAL takes its version reply and LocationManager's `gps` fixes
 (`dumpsys location`) follow the track with its time, speed and heading. Start the fake before the HAL stops draining: after its feed
-went away once, the HAL stopped reading and QEMU kept the dead connection; a new boot recovers. Flows with a position need a snapshot
-taken with `GPS` attached (the `ui` one predates it).
+went away once, the HAL stopped reading and QEMU kept the dead connection; a new boot recovers. Once the time is set,
+stock opens `/dev/display_image_enhancement` (day/night), whose LUT write oopses the kernel into a panic without VIOC;
+`overlay/init.emu.rc` binds `/dev/null` over it (its `chmod` would open it, and panic, itself). The `ui` snapshot is taken with
+`GPS` attached and the time set. It also keeps the schedules last set from the EV app (in `/data`): after a reboot the app
+shows those, not what the micom reports, so goldens of the schedule screens depend on the snapshot.
 
 ## Stock UI flows
 
@@ -245,8 +252,9 @@ state, applies its modes, walks the shortest path from the start screen, checks 
 the target. Screens it cannot reach are listed in the YAML with why.
 
 ```sh
-. ../../scripts/dotenv.sh        # TCC_QEMU, TCC_BOOT_DIR, TCC_EMMC (qcow2 with the snapshot), MICOM_FAKE, MICOM_CAPTURE
-# once: boot with the micom attached (MICOM, above), dismiss the welcome, consent and first-run screens, HOME, then
+. ../../scripts/dotenv.sh        # TCC_QEMU, TCC_BOOT_DIR, TCC_EMMC (qcow2 with the snapshot), MICOM_FAKE, MICOM_CAPTURE, HIPPO_FAKE
+# once: boot with the micom and GNSS attached (MICOM, GPS, above) until GPS has set the time, dismiss the welcome,
+# consent and first-run screens, HOME, then
 # savevm ui (monitor) or drive.py's #savevm
 QEMU=$TCC_QEMU EMMC=$TCC_EMMC LOADVM=ui BOOT_DIR=$TCC_BOOT_DIR RAMDISK=ramdisk.emu.gz ./drive.py --flow stock-ui.yaml all $OUT
 ```

@@ -189,6 +189,10 @@ func _ready() -> void:
 	_projection.visible = false
 	_precondition.icon_name = "therm"
 	_precondition.pressed.connect(_on_precondition)
+	var auto := AutoChip.new("Auto")
+	auto.name = "Auto"
+	auto.pressed.connect(_on_auto_precondition)
+	_precondition.trailing = auto
 	_player.control.connect(func(c): now_playing.pressed(c); Core.act({kind = "media", control = c}))
 	_player.opened.connect(func(): open_page.call_deferred("media"))
 	_player.now_playing = now_playing
@@ -1263,12 +1267,35 @@ func _refresh(sections := {}) -> void:
 	_status.phone = "Pixel"
 
 	var on := _preconditioning()
+	var auto: AutoChip = _precondition.trailing
+	var allowed: bool = Core.get_value("/config/batteryPreconditioning") != "off"
+	var state = t.call("preconditionState")
+	var why = t.call("preconditionWhy")
+	var mins = Core.get_value("/config/batteryPreconditioningManualMinutes")
+	var detail := "for %d min" % (int(mins) if mins != null else 30)
+	var stop = Core.get_value("/navigation/chargingStop")
 	_precondition.set_pressed_no_signal(on)
+	# Off in LIVI's settings is off for the manual request too (the core refuses it).
+	_precondition.disabled = not allowed and not on
 	_precondition.label = "Warming battery" if on else "Precondition battery"
-	_precondition.detail = "on" if on else "for 30 min"
+	if on:
+		detail = "on"
+	elif state == "running" and stop is Dictionary:
+		_precondition.label = "Warming for charger"
+		detail = "%d kW · %s" % [int(stop.get("powerW", 0) / 1000), Units.range_text(float(stop.get("distanceM", 0)) / 1000.0)]
+	elif state == null:
+		detail += " · no auto"
+	elif not allowed:
+		detail = "off in settings"
+	elif stop is Dictionary and why is String and why != "":
+		detail = "auto: " + why.trim_prefix("the charger is ")
+	# Off in settings stays switchable even when the car link reports nothing.
+	auto.disabled = state == null and allowed
+	auto.set_pressed_no_signal(allowed)
+	auto._style()
+	_precondition.detail = detail
 	_precondition._style()
 
-	var stop = Core.get_value("/navigation/chargingStop")
 	if stop is Dictionary:
 		var cap = t.call("batteryCapacityKwh")
 		if stop.get("arrivalWh") != null and cap:
@@ -1329,3 +1356,14 @@ func _on_precondition() -> void:
 	var err: String = Core.act({kind = "preconditionBattery", on = want})
 	if err != "":
 		push_error("precondition: %s" % err)
+
+
+## LIVI's preconditioning setting, which the car link reads with the route (automatic for a fast
+## charger on it). Like the row, it shows the core's state, not the tap.
+func _on_auto_precondition() -> void:
+	var auto: AutoChip = _precondition.trailing
+	var want := "off" if Core.get_value("/config/batteryPreconditioning") != "off" else "auto"
+	auto.set_pressed_no_signal(want == "off")
+	var err: String = Core.act({kind = "setConfig", patch = {batteryPreconditioning = want}})
+	if err != "":
+		push_error("auto precondition: %s" % err)

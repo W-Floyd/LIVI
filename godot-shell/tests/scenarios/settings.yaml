@@ -120,3 +120,22 @@ steps:
   - tap: { node: Settings/Header/Back }
   - wait: { frames: 2 }
   - expect_node: { path: Page/Body, visible: true }
+  # Battery preconditioning: automatic on a route, as the car link reports it, and its threshold.
+  - set: { core: { telemetry: { preconditionState: armed, preconditionWhy: "the charger is 11 kW, not above 50" } } }
+  - page: settings
+  - tap: { node: Settings/Sections/List/Car }
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("Settings/Rows")
+      if not rows.list.has_node("Battery Preconditioning"):
+          return "no Battery Preconditioning in %s" % [rows.list.get_children().map(func(n): return n.name)]
+      rows.reveal(rows.list.get_node("Battery Preconditioning"))
+  - wait: { frames: 2 }
+  - tap: { node: Settings/Rows/List/Battery Preconditioning }
+  - expect_node: { path: Settings/Heading/Title, text: Battery Preconditioning }
+  - gdscript: |
+      var names = shell.get_node("Settings/Rows").list.get_children().map(func(n): return n.name)
+      for row in ["On a Route to a Fast Charger", "Automatic_ Chargers Above"]:
+          if not row in names:
+              return "no %s in %s" % [row, names]
+  - wait: { frames: 3 }
+  - screenshot: settings-preconditioning

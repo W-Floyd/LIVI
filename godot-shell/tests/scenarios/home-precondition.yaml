@@ -21,3 +21,31 @@ steps:
           return "shows %s, the core has %s" % [shown, mirrored]
   - tap: { node: Page/Body/Side/Panel/Precondition }
   - expect_action: { PreconditionBattery: { on: false } }
+  - set: { core: { precondition: { manualUntil: null } } }
+  # Automatic, for a fast charger on the route: on in LIVI, but no car link reports it.
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition/Auto, disabled: true, button_pressed: true }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, detail: "for 30 min · no auto" }
+  - set: { core: { telemetry: { preconditionState: armed, preconditionWhy: no route } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition/Auto, disabled: false, button_pressed: true }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, detail: for 30 min }
+  # A route to a slow charger: why it waits.
+  - set: { core: { navigation: { chargingStop: {} } } }
+  - set: { core: { telemetry: { preconditionWhy: "the charger is 11 kW, not above 50" }, navigation: { chargingStop: { powerW: 11000, distanceM: 12000, timeS: 900 } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, detail: "auto: 11 kW, not above 50" }
+  - set: { core: { telemetry: { preconditionState: running, preconditionWhy: "" }, navigation: { chargingStop: { powerW: 350000, distanceM: 42000, timeS: 1800 } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, label: Warming for charger, detail: 350 kW · 42 km, button_pressed: false }
+  - screenshot: home-precondition-auto
+  - tap: { node: Page/Body/Side/Panel/Precondition/Auto }
+  - expect_action: { SetConfig: { patch: { batteryPreconditioning: "off" } } }
+  # Off in LIVI is off for the manual request too; the chip turns it back on.
+  - set: { core: { config: { batteryPreconditioning: "off" }, telemetry: { preconditionState: "off", preconditionWhy: "off in LIVI's settings" }, navigation: { chargingStop: null } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition, disabled: true, detail: off in settings }
+  - expect_node: { path: Page/Body/Side/Panel/Precondition/Auto, disabled: false, button_pressed: false }
+  - screenshot: home-precondition-auto-off
+  - tap: { node: Page/Body/Side/Panel/Precondition/Auto }
+  - expect_action: { SetConfig: { patch: { batteryPreconditioning: auto } } }

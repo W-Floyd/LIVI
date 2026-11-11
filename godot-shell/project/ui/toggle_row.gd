@@ -12,6 +12,16 @@ var detail := "":
 	set(v):
 		detail = v
 		if _detail: _detail.text = v
+## A control at the row's end with its own taps, such as an AutoChip; the text gives way to it.
+var trailing: Control:
+	set(v):
+		if trailing:
+			remove_child(trailing)
+		trailing = v
+		if v:
+			add_child(v)
+		if _label:
+			_style()
 
 var _icon: TextureRect
 var _label: Label
@@ -64,8 +74,15 @@ func _style() -> void:
 	var m := roundi(ThemeManager.px.gap * 1.2)
 	row.offset_left = m
 	row.offset_right = -m
+	if trailing and trailing.visible:
+		var t := trailing.get_combined_minimum_size()
+		trailing.size = t
+		trailing.position = Vector2(size.x - m - t.x, (size.y - t.y) * 0.5).round()
+		row.offset_right = -(m + t.x + ThemeManager.px.gap)
 	# Foreground follows the state: on-accent over the accent fill.
 	var on := button_pressed
 	_label.add_theme_color_override("font_color", ThemeManager.c.on_accent if on else ThemeManager.c.text)
 	_detail.add_theme_color_override("font_color", ThemeManager.c.on_accent if on else ThemeManager.c.dim)
 	_icon.modulate = ThemeManager.c.on_accent if on else ThemeManager.c.text
+	if trailing and "on_accent" in trailing:
+		trailing.on_accent = on

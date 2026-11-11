@@ -51,6 +51,8 @@ pub mod media_msg {
     pub const MICROPHONE_RESPONSE: u16 = Id::MicrophoneResponse as u16;
     pub const VIDEO_FOCUS_REQUEST: u16 = Id::VideoFocusRequest as u16;
     pub const VIDEO_FOCUS_NOTIFICATION: u16 = Id::VideoFocusNotification as u16;
+    pub const UPDATE_UI_CONFIG_REQUEST: u16 = Id::UpdateUiConfigRequest as u16;
+    pub const UPDATE_UI_CONFIG_REPLY: u16 = Id::UpdateUiConfigReply as u16;
 }
 
 pub mod sensor_msg {

@@ -1343,6 +1343,10 @@ async fn the_phone_hands_the_screen_back() {
         active: false,
     });
     assert_eq!(rig.front(), Front::Livi);
+    // A UI asking again for what it last asked (a restarted UI, or one that did not answer the
+    // hand-back) means it: the phone gets the screen back.
+    rig.want(Front::Projection);
+    assert_eq!(rig.front(), Front::Projection);
 }
 
 #[tokio::test]
@@ -1471,6 +1475,56 @@ async fn android_auto_takes_the_screen_like_carplay() {
     assert_eq!(rig.sessions(), (None, 0, 0));
     rig.p.on_aa(AaEvent::Connected { id: 9 });
     assert_eq!(rig.p.sessions[0].transport, Transport::Wifi);
+}
+
+#[tokio::test]
+async fn the_shells_area_reaches_android_auto_and_what_it_took_the_state() {
+    use livi_aa_stack::config::Area as AaArea;
+    use livi_core_proto::state::Area;
+    let mut rig = Rig::new();
+    rig.aa_connect(5, true);
+    rig.aa_connect(6, false);
+    rig.aa_drain();
+    let slot = Area {
+        x: 680,
+        y: 80,
+        width: 1240,
+        height: 640,
+    };
+    let full = Area {
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 720,
+    };
+    let aa_area = |a: Area| AaArea {
+        x: a.x,
+        y: a.y,
+        width: a.width,
+        height: a.height,
+    };
+    rig.p.projection_area(slot);
+    assert_eq!(rig.aa_drain(), [AaCmd::UiArea(aa_area(slot))]);
+    let area = |rig: &Rig| rig.hub.watch().borrow().sessions.area;
+    // (session, what it took, the state's area after): only the phone in front's shows.
+    let cases = [
+        (5, Some(slot), Some(slot)),
+        (6, Some(full), Some(slot)),
+        (5, None, None),
+        (5, Some(full), Some(full)),
+    ];
+    for (id, took, want) in cases {
+        rig.p.on_aa(AaEvent::UiArea {
+            id,
+            area: took.map(aa_area),
+        });
+        assert_eq!(area(&rig), want, "{id} took {took:?}");
+    }
+    rig.p.activate_next();
+    assert_eq!(area(&rig), Some(full), "the next phone's own");
+    rig.p.on_aa(AaEvent::Disconnected { id: 6 });
+    rig.p.on_aa(AaEvent::Disconnected { id: 5 });
+    assert_eq!(area(&rig), None);
 }
 
 #[tokio::test]

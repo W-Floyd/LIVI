@@ -58,6 +58,15 @@ pub struct Insets {
     pub right: u32,
 }
 
+/// A rectangle of the projection screen, in its pixels.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Area {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Codecs {
     pub hevc: bool,
@@ -359,11 +368,143 @@ impl Geometry {
             i64::from(self.tier_height) - i64::from(self.inset.top) - i64::from(self.inset.bottom);
         (w.max(1), h.max(1))
     }
+
+    /// The content insets that keep the phone's UI inside `area` of a `screen`-sized projection
+    /// screen, relative to the display the phone has (the visible area less the view area), and
+    /// never inside `safe`.
+    pub fn content_insets(&self, screen: (u32, u32), area: Area, safe: Insets) -> Insets {
+        let (vis_w, vis_h) = (
+            f64::from(self.tier_width - self.width_margin),
+            f64::from(self.tier_height - self.height_margin),
+        );
+        if screen.0 == 0 || screen.1 == 0 {
+            return safe;
+        }
+        let (sx, sy) = (vis_w / f64::from(screen.0), vis_h / f64::from(screen.1));
+        let edge = |from_vis: f64, view: u32| {
+            (round_half_up(from_vis.max(0.0)) as i64 - i64::from(view)).max(0) as u32
+        };
+        let view_l = self.inset.left - self.width_margin / 2;
+        let view_t = self.inset.top - self.height_margin / 2;
+        let view_r = self.inset.right - (self.width_margin - self.width_margin / 2);
+        let view_b = self.inset.bottom - (self.height_margin - self.height_margin / 2);
+        let (x, y) = (f64::from(area.x), f64::from(area.y));
+        let (r, b) = (x + f64::from(area.width), y + f64::from(area.height));
+        Insets {
+            left: edge(x * sx, view_l).max(safe.left),
+            top: edge(y * sy, view_t).max(safe.top),
+            right: edge(vis_w - r * sx, view_r).max(safe.right),
+            bottom: edge(vis_h - b * sy, view_b).max(safe.bottom),
+        }
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn content_insets_hold_the_ui_in_an_area() {
+        let none = Insets::default();
+        let safe = Insets {
+            top: 10,
+            bottom: 10,
+            left: 10,
+            right: 10,
+        };
+        let area = |x, y, width, height| Area {
+            x,
+            y,
+            width,
+            height,
+        };
+        let i = |top, bottom, left, right| Insets {
+            top,
+            bottom,
+            left,
+            right,
+        };
+        // (tier, screen, view area, safe area, area, content insets)
+        let cases = [
+            // The unit: 1920x720 in the 1920x1080 tier; the home page's slot right of the panel.
+            (
+                (1920, 1080),
+                (1920, 720),
+                none,
+                none,
+                area(0, 0, 1920, 720),
+                none,
+            ),
+            (
+                (1920, 1080),
+                (1920, 720),
+                none,
+                none,
+                area(680, 80, 1240, 640),
+                i(80, 0, 680, 0),
+            ),
+            (
+                (1920, 1080),
+                (1920, 720),
+                none,
+                none,
+                area(0, 80, 1240, 640),
+                i(80, 0, 0, 680),
+            ),
+            // The safe area stays where the area reaches the edge.
+            (
+                (1920, 1080),
+                (1920, 720),
+                none,
+                safe,
+                area(0, 0, 1920, 720),
+                safe,
+            ),
+            (
+                (1920, 1080),
+                (1920, 720),
+                none,
+                safe,
+                area(680, 80, 1240, 640),
+                i(80, 10, 680, 10),
+            ),
+            // Insets are the display's: the view area is not the phone's to lay out in.
+            (
+                (1920, 1080),
+                (1920, 720),
+                i(0, 0, 100, 0),
+                none,
+                area(680, 0, 1240, 720),
+                i(0, 0, 580, 0),
+            ),
+            (
+                (1920, 1080),
+                (1920, 720),
+                i(0, 0, 100, 0),
+                none,
+                area(50, 0, 1870, 720),
+                none,
+            ),
+            // A screen smaller than its tier scales into it.
+            (
+                (1280, 720),
+                (1024, 600),
+                none,
+                none,
+                area(512, 0, 512, 300),
+                i(0, 360, 614, 0),
+            ),
+            ((1280, 720), (0, 0), none, safe, area(10, 10, 10, 10), safe),
+        ];
+        for (tier, screen, view, safe, area, want) in cases {
+            let g = Geometry::new(tier, screen, view);
+            assert_eq!(
+                g.content_insets(screen, area, safe),
+                want,
+                "{area:?} of {screen:?} in {tier:?}"
+            );
+        }
+    }
 
     #[test]
     fn tiers_and_densities() {

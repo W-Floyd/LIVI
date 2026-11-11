@@ -181,7 +181,7 @@ fn frame_rate(fps: u32) -> VideoFrameRate {
     }
 }
 
-fn display_insets(i: Insets) -> DisplayInsets {
+pub(crate) fn display_insets(i: Insets) -> DisplayInsets {
     DisplayInsets {
         top: Some(i.top),
         bottom: Some(i.bottom),

@@ -755,6 +755,8 @@ fn session_event_json(e: &SessionEvent) -> Option<Json> {
         SessionEvent::MediaMetadata(m) => json!(["media-metadata", metadata_json(m)]),
         SessionEvent::MediaStatus(s) => json!(["media-status", status_json(s)]),
         SessionEvent::Navigation(n) => nav_event_json(n),
+        // Not in the TS stack.
+        SessionEvent::UiArea(_) => return None,
     })
 }
 
@@ -1081,6 +1083,7 @@ fn report_json(r: &Report) -> Vec<Json> {
             o.insert("rawUtf8".into(), json!(""));
             vec![message("NavigationData", o)]
         }
+        Report::UiArea(_) => Vec::new(),
     }
 }
 

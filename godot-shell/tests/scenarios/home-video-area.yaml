@@ -1,0 +1,75 @@
+name: home-video-area
+# Android Auto lays its UI out where the shell shows it: home asks for its slot, the projection
+# page for the whole panel (`ProjectionArea`, in the projection screen's pixels). Once the phone
+# took the slot (`/sessions/area`), the slot shows that part of the stream 1:1 and a tap lands
+# where it is over the whole screen; a phone that took something else, or nothing, is letterboxed.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: livi-video-main, pattern: grid, size: 1920x1080, buffer: nv12, video: true }
+steps:
+  - set: { core: { config: { projectionWidth: 1920, projectionHeight: 720 } } }
+  - wait: { window: livi-video-main }
+  - page: projection
+  - gdscript: |
+      var asked := func():
+          var got := []
+          for m in Core.fake_sent():
+              if m.get("type") == "action" and m.action.kind == "projectionArea":
+                  got.append(Rect2i(m.action.x, m.action.y, m.action.width, m.action.height))
+          return got
+      if not Rect2i(0, 0, 1920, 720) in asked.call():
+          return "the projection page asked %s, not the whole panel" % [asked.call()]
+      Core.fake_clear()
+      shell.open_page("home")
+      await runner.frames(2)
+      var slot: Control = shell.get_node("Page/Body/Slot")
+      var want := Rect2i(slot.get_global_rect())
+      if asked.call() != [want]:
+          return "home asked %s, not its slot %s" % [asked.call(), want]
+      runner.set_meta("slot", want)
+  # No answer yet: the whole visible area, letterboxed in the slot.
+  - gdscript: |
+      var w: WindowView = shell.get_node("Projection/Window")
+      var r := w.picture_rect()
+      if not is_equal_approx(r.size.x / r.size.y, 1920.0 / 720.0):
+          return "before the phone answered the slot shows %s" % r
+  # The phone took the slot.
+  - gdscript: |
+      var s: Rect2i = runner.get_meta("slot")
+      var e: String = Core.fake_set("sessions/area", {x = s.position.x, y = s.position.y, width = s.size.x, height = s.size.y})
+      if e != "":
+          return e
+      await runner.frames(2)
+      var w: WindowView = shell.get_node("Projection/Window")
+      if not w.picture_rect().is_equal_approx(Rect2(Vector2.ZERO, w.size)) or not w.texture.get_size().is_equal_approx(Vector2(s.size)):
+          return "the slot shows %s of %s, not its own area 1:1" % [w.picture_rect(), w.texture.get_size()]
+      var img: Image = runner._vp.get_texture().get_image()
+      # The stream's grid edges at their panel pixels (the stream's row 180 is the panel's 0).
+      var dark := func(x, y): return img.get_pixel(x, y).get_luminance() < 0.4
+      for c in [[1000, 203, true], [1000, 204, false], [1023, 300, true], [1024, 300, false]]:
+          if dark.call(c[0], c[1]) != c[2]:
+              return "(%d, %d) is %s" % [c[0], c[1], img.get_pixel(c[0], c[1])]
+      Core.fake_clear()
+      var at := Vector2(s.position) + Vector2(s.size) * Vector2(0.25, 0.75)
+      await runner._tap(at)
+      for m in Core.fake_sent():
+          if m.get("type") == "input":
+              var p: Dictionary = m.input.points[0]
+              if not (is_equal_approx(p.x, at.x / 1920.0) and is_equal_approx(p.y, at.y / 720.0)):
+                  return "a tap at %s reached the core as %s, %s" % [at, p.x, p.y]
+              return ""
+      return "no input sent from the slot"
+  - screenshot: { name: home-video-area, tolerance: 8 }
+  # What the phone took is not the slot (the whole screen, or nothing): letterboxed again.
+  - gdscript: |
+      var w: WindowView = shell.get_node("Projection/Window")
+      for area in [{x = 0, y = 0, width = 1920, height = 720}, null]:
+          var e: String = Core.fake_set("sessions/area", area)
+          if e != "":
+              return e
+          await runner.frames(2)
+          var r := w.picture_rect()
+          if not is_equal_approx(r.size.x / r.size.y, 1920.0 / 720.0):
+              return "with %s taken the slot shows %s" % [area, r]

@@ -23,6 +23,10 @@ var to_core := false:
 var _raw: Texture2D
 var _crop: AtlasTexture
 var _cropped_size := Vector2.ZERO
+## The part of the visible area shown, from 0 to 1: this view's own place on the panel while the
+## phone lays its UI out for exactly that (`/sessions/area`), so it shows 1:1; else all of it,
+## letterboxed, as for a phone that does not take an area.
+var _region := Rect2(0, 0, 1, 1)
 
 
 func _init() -> void:
@@ -33,7 +37,9 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	Core.changed.connect(func(sections): if sections.has("config"): _fit_crop(true))
+	Core.changed.connect(func(sections): if sections.has("config") or sections.has("sessions"): _fit_crop(true))
+	resized.connect(_fit_crop.bind(true))
+	set_notify_transform(true)
 
 
 ## The part of a `stream`-sized projection frame that the phone fills for a `screen`-sized
@@ -69,7 +75,9 @@ func _fit_crop(force := false) -> void:
 	if _crop == null or _raw == null or (_raw.get_size() == _cropped_size and not force):
 		return
 	_cropped_size = _raw.get_size()
-	_crop.region = projection_crop(_cropped_size, _projection_screen())
+	var visible_area := projection_crop(_cropped_size, _projection_screen())
+	_region = _shown_region()
+	_crop.region = Rect2(visible_area.position + _region.position * visible_area.size, _region.size * visible_area.size)
 
 
 ## The core's projection screen size, which its crop and touch mapping use; else the panel's.
@@ -79,6 +87,27 @@ func _projection_screen() -> Vector2:
 	if w != null and h != null and w > 0 and h > 0:
 		return Vector2(w, h)
 	return get_viewport_rect().size
+
+
+## `r`, a rectangle of the panel, in the projection screen's pixels: what the core's
+## `projectionArea` takes.
+func to_screen(r: Rect2) -> Rect2i:
+	var s := _projection_screen() / get_viewport_rect().size
+	var from := (r.position * s).round()
+	return Rect2i(Vector2i(from), Vector2i((r.end * s).round() - from))
+
+
+func _shown_region() -> Rect2:
+	var all := Rect2(0, 0, 1, 1)
+	var a = Core.get_value("/sessions/area")
+	if not to_core or not a is Dictionary or not is_inside_tree():
+		return all
+	var mine := to_screen(get_global_rect())
+	var took := Rect2i(int(a.x), int(a.y), int(a.width), int(a.height))
+	if mine != took:
+		return all
+	var screen := _projection_screen()
+	return Rect2(Vector2(mine.position) / screen, Vector2(mine.size) / screen).intersection(all)
 
 
 ## Where the picture is drawn in the view: the texture fitted and centred.
@@ -161,9 +190,10 @@ func _core_input(event: InputEvent) -> void:
 	accept_event()
 
 
+## The point goes over the whole visible area, as the core maps it into the stream.
 func _to_core(index: int, at: Vector2, phase: String) -> void:
 	var r := picture_rect()
-	var p: Vector2 = ((at - r.position) / r.size).clamp(Vector2.ZERO, Vector2.ONE)
+	var p: Vector2 = _region.position + ((at - r.position) / r.size).clamp(Vector2.ZERO, Vector2.ONE) * _region.size
 	var err: String = Core.input({kind = "pointer", screen = "main", points = [{id = index, x = p.x, y = p.y, phase = phase}]})
 	if err != "":
 		push_warning("projection touch: %s" % err)
@@ -185,6 +215,8 @@ func _focus() -> void:
 
 func _notification(what: int) -> void:
 	match what:
+		NOTIFICATION_TRANSFORM_CHANGED:
+			_fit_crop(true)
 		NOTIFICATION_MOUSE_EXIT:
 			if _pointer_inside:
 				_pointer_inside = false

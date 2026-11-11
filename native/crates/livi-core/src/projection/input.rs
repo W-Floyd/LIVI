@@ -121,6 +121,16 @@ impl Projection {
         }
     }
 
+    /// Android Auto only: CarPlay's view area is fixed for its session.
+    pub(super) fn projection_area(&self, area: Area) {
+        self.aa.send(AaCmd::UiArea(livi_aa_stack::config::Area {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: area.height,
+        }));
+    }
+
     pub(super) fn open_app(&self, target: &str) {
         let Some(link) = self.active().map(|e| e.link) else {
             return;

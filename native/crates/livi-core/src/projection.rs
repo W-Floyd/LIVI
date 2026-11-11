@@ -21,7 +21,8 @@ use livi_core_proto::ids::Ids;
 use livi_core_proto::input::{Input, Phase, Point};
 use livi_core_proto::message::{MediaControl, Radio};
 use livi_core_proto::state::{
-    Front, Navigation, NowPlaying, PerScreen, Protocol, Screen, Sessions, State, VideoPlayback,
+    Area, Front, Navigation, NowPlaying, PerScreen, Protocol, Screen, Sessions, State,
+    VideoPlayback,
 };
 use livi_core_proto::theme::{AppearancePreference, Cluster, LayoutSlot, Theme, livi_theme};
 use livi_cp::hid::{KnobState, media_button, telephony_button};
@@ -162,6 +163,8 @@ struct Entry {
     now_playing: NowPlaying,
     video_playback: Option<VideoPlayback>,
     navigation: Navigation,
+    /// The area the phone took, its UI laid out there.
+    area: Option<Area>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -426,6 +429,7 @@ pub enum UiCommand {
     ForgetDevice(String),
     CameraFound(bool),
     OpenApp(String),
+    ProjectionArea(Area),
 }
 
 fn kept_cluster(cfg: &Config, theme: Theme) -> Cluster {
@@ -688,6 +692,7 @@ impl Projection {
                     UiCommand::ForgetDevice(id) => self.forget_device(&id),
                     UiCommand::CameraFound(found) => self.camera_found(found),
                     UiCommand::OpenApp(target) => self.open_app(&target),
+                    UiCommand::ProjectionArea(area) => self.projection_area(area),
                 },
                 Some(input) = asks.input.recv() => self.input(input),
                 Some(done) = asks.goodbye.recv() => self.goodbye(done),

@@ -14,7 +14,7 @@ use crate::commands::{
     Action, Command, InputCommand, TouchAction, TouchItem, command_action, input_key, multi_touch,
     single_touch_action, touch_point,
 };
-use crate::config::AaConfig;
+use crate::config::{AaConfig, Area};
 use crate::discovery::VideoCodec;
 use crate::link::{Link, LinkItem, LinkReader};
 use crate::log::detail;
@@ -46,6 +46,7 @@ pub enum SessionCmd {
         ramp_ms: u32,
     },
     Sensor(Sensor),
+    UiArea(Area),
     Close,
     PowerDown,
 }
@@ -360,6 +361,7 @@ impl<M: AaMedia> Phone<M> {
                 Vec::new()
             }
             SessionCmd::Sensor(s) => self.session.send_sensor(&s),
+            SessionCmd::UiArea(area) => self.session.set_ui_area(area),
             SessionCmd::Close => {
                 self.begin_close(BYEBYE_USER_SELECTION);
                 Vec::new()

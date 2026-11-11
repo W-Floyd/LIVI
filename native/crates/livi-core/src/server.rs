@@ -187,6 +187,13 @@ impl Core {
                 self.asks.wants.send_modify(|w| *w.get_mut(screen) = front);
                 Ok(())
             }
+            Action::ProjectionArea { screen, area } => {
+                if screen != livi_core_proto::state::Screen::Main {
+                    return Err("only the main screen has a projection area".into());
+                }
+                let _ = self.asks.commands.send(UiCommand::ProjectionArea(area));
+                Ok(())
+            }
             Action::Media { control } => {
                 self.media(control);
                 Ok(())

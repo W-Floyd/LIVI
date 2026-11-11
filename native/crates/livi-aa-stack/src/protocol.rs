@@ -12,8 +12,8 @@ use livi_aa_proto::{
     AuthCompleteNotification, BluetoothPairingRequest, BluetoothPairingResponse,
     ChannelOpenResponse, KeyBindingResponse, MediaConfigResponse, MediaConfigStatus,
     MediaSetupRequest, MessageStatus, PhoneStatusNotification, PingRequest, SensorRequest,
-    SensorResponse, VideoFocusMode, VideoFocusNotification, WifiAccessPointType,
-    WifiCredentialsResponse, WifiCredentialsSecurityMode,
+    SensorResponse, UiConfig, UpdateUiConfigRequest, VideoFocusMode, VideoFocusNotification,
+    WifiAccessPointType, WifiCredentialsResponse, WifiCredentialsSecurityMode,
 };
 use livi_wifi::Security;
 
@@ -27,7 +27,7 @@ use crate::channels::navigation::{NavigationChannel, NavigationEvent};
 use crate::channels::video::{VideoChannel, VideoChannelEvent};
 use crate::channels::{Emit, Frame};
 use crate::codec::{check_nested, decode, encode};
-use crate::config::{AaConfig, Geometry};
+use crate::config::{AaConfig, Area, Geometry, Insets};
 use crate::control::{ControlChannel, ControlEvent, ControlOut};
 use crate::discovery::{self, VideoCodec};
 use crate::log::{debug, detail, trace};
@@ -42,6 +42,8 @@ const PING_TIMEOUT: Duration = Duration::from_millis(5000);
 const WATCHDOG: Duration = Duration::from_secs(30);
 const KEYFRAME_FOLLOW_UP: Duration = Duration::from_millis(60);
 const SHUTDOWN_ACK: Duration = Duration::from_secs(1);
+// The phone answers an UpdateUiConfigRequest at once when it takes it.
+const UI_AREA_REPLY: Duration = Duration::from_millis(1500);
 
 pub const BYEBYE_USER_SELECTION: u8 = 1;
 pub const BYEBYE_POWER_DOWN: u8 = 7;
@@ -71,6 +73,7 @@ pub enum Timer {
     MainKeyframe,
     ClusterKeyframe,
     ShutdownTimeout,
+    UiAreaReply(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +161,9 @@ pub enum SessionEvent {
     MediaMetadata(MediaPlaybackMetadata),
     MediaStatus(MediaPlaybackStatus),
     Navigation(NavigationEvent),
+    /// The area of the projection screen the phone lays its UI out for; `None` once it did not
+    /// take one, for the rest of the session.
+    UiArea(Option<Area>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -221,6 +227,27 @@ fn is_frame_channel(c: u8) -> bool {
     )
 }
 
+/// The runtime projection area (UpdateUiConfigRequest's content insets).
+#[derive(Debug, Default)]
+struct UiArea {
+    wanted: Option<Area>,
+    /// The content insets the phone lays out for; `None`: the discovery's.
+    applied: Option<Insets>,
+    reported: Option<Area>,
+    pending: Option<(u32, Area, Insets)>,
+    seq: u32,
+    off: bool,
+}
+
+fn insets_of(d: &livi_aa_proto::DisplayInsets) -> Insets {
+    Insets {
+        top: d.top.unwrap_or(0),
+        bottom: d.bottom.unwrap_or(0),
+        left: d.left.unwrap_or(0),
+        right: d.right.unwrap_or(0),
+    }
+}
+
 fn is_ping_pong(c: u8, msg_id: u16) -> bool {
     c == ch::CONTROL && (msg_id == ctrl_msg::PING_REQUEST || msg_id == ctrl_msg::PING_RESPONSE)
 }
@@ -257,6 +284,7 @@ pub struct Session {
     // phone's night sensor start, which comes after the replay on connect,
     // answers with it.
     night_mode: Option<bool>,
+    ui_area: UiArea,
 }
 
 impl Session {
@@ -298,6 +326,7 @@ impl Session {
             cluster_stream_wanted: true,
             shutdowns_waiting: 0,
             night_mode: None,
+            ui_area: UiArea::default(),
         };
         (session, vec![Out::After(WATCHDOG, Timer::Watchdog)])
     }
@@ -493,6 +522,10 @@ impl Session {
                 ctrl_msg::CHANNEL_OPEN_RESPONSE,
                 resp,
             );
+            return out;
+        }
+        if c == ch::VIDEO && msg_id == media_msg::UPDATE_UI_CONFIG_REPLY {
+            self.on_ui_config_reply(&mut out, payload);
             return out;
         }
         if c == ch::VIDEO || c == ch::CLUSTER_VIDEO {
@@ -896,8 +929,128 @@ impl Session {
                     self.finish_shutdown(&mut out, "fallback timeout (no ByeByeResponse)");
                 }
             }
+            Timer::UiAreaReply(seq) => {
+                if self.ui_area.pending.is_some_and(|(s, ..)| s == seq) {
+                    self.ui_area_off(
+                        &mut out,
+                        &format!("no reply in {}ms", UI_AREA_REPLY.as_millis()),
+                    );
+                }
+            }
         }
         out
+    }
+
+    /// Asks the phone to lay its UI out for `area` of the projection screen, without a
+    /// reconnect. The latest ask wins; one is in flight at a time.
+    pub fn set_ui_area(&mut self, area: Area) -> Vec<Out> {
+        let mut out = Vec::new();
+        self.ui_area.wanted = Some(area);
+        self.send_ui_area(&mut out);
+        out
+    }
+
+    fn ui_config(&self, content: Insets) -> UiConfig {
+        let cfg = self.config();
+        let content = discovery::display_insets(content);
+        UiConfig {
+            margins: Some(discovery::display_insets(Geometry::main(&cfg).inset)),
+            content_insets: Some(content),
+            stable_content_insets: Some(content),
+            ..Default::default()
+        }
+    }
+
+    fn send_ui_area(&mut self, out: &mut Vec<Out>) {
+        let u = &self.ui_area;
+        if self.state != State::Running || u.off || u.pending.is_some() {
+            return;
+        }
+        let Some(area) = u.wanted else {
+            return;
+        };
+        let cfg = self.config();
+        let insets = Geometry::main(&cfg).content_insets(
+            (cfg.display_width, cfg.display_height),
+            area,
+            cfg.main_safe_area,
+        );
+        if insets == u.applied.unwrap_or(cfg.main_safe_area) {
+            if u.reported != Some(area) {
+                self.ui_area.reported = Some(area);
+                self.event(out, SessionEvent::UiArea(Some(area)));
+            }
+            return;
+        }
+        self.ui_area.seq += 1;
+        let seq = self.ui_area.seq;
+        self.ui_area.pending = Some((seq, area, insets));
+        let req = encode(&UpdateUiConfigRequest {
+            ui_config: Some(self.ui_config(insets)),
+        });
+        self.send_to(
+            out,
+            ch::VIDEO,
+            frame_flags::ENC_SIGNAL,
+            media_msg::UPDATE_UI_CONFIG_REQUEST,
+            req,
+        );
+        out.push(Out::After(UI_AREA_REPLY, Timer::UiAreaReply(seq)));
+        println!("[Session] UpdateUiConfigRequest: area {area:?}, content insets {insets:?}");
+    }
+
+    // The phone sends its UI config back in the request's own shape (0x800A).
+    fn on_ui_config_reply(&mut self, out: &mut Vec<Out>, payload: &[u8]) {
+        let Some((_, area, insets)) = self.ui_area.pending else {
+            detail!("[Session] UpdateUiConfig reply with nothing asked, ignored");
+            return;
+        };
+        let got = match decode::<UpdateUiConfigRequest>(payload, &[]) {
+            Ok(r) => r
+                .ui_config
+                .and_then(|c| c.content_insets)
+                .map(|i| insets_of(&i)),
+            Err(e) => {
+                self.ui_area_off(out, &format!("unreadable reply ({e})"));
+                return;
+            }
+        };
+        if let Some(got) = got.filter(|g| *g != insets) {
+            self.ui_area_off(out, &format!("phone answered content insets {got:?}"));
+            return;
+        }
+        println!("[Session] phone took the projection area {area:?}");
+        self.ui_area.pending = None;
+        self.ui_area.applied = Some(insets);
+        self.ui_area.reported = Some(area);
+        self.event(out, SessionEvent::UiArea(Some(area)));
+        self.send_ui_area(out);
+    }
+
+    /// The phone did not take an area: the stream stays laid out for the whole screen, and the
+    /// shell letterboxes it, until the session ends.
+    fn ui_area_off(&mut self, out: &mut Vec<Out>, why: &str) {
+        println!(
+            "[Session] projection area off for this session ({why}): the phone lays out for the whole screen"
+        );
+        let u = &mut self.ui_area;
+        u.off = true;
+        u.pending = None;
+        u.applied = None;
+        u.reported = None;
+        // In case it took one silently.
+        let safe = self.config().main_safe_area;
+        let req = encode(&UpdateUiConfigRequest {
+            ui_config: Some(self.ui_config(safe)),
+        });
+        self.send_to(
+            out,
+            ch::VIDEO,
+            frame_flags::ENC_SIGNAL,
+            media_msg::UPDATE_UI_CONFIG_REQUEST,
+            req,
+        );
+        self.event(out, SessionEvent::UiArea(None));
     }
 
     fn on_av_setup_request(&mut self, out: &mut Vec<Out>, c: u8, payload: &[u8]) {
@@ -998,6 +1151,7 @@ impl Session {
             );
             self.transition(out, State::Running, "");
             self.event(out, SessionEvent::Connected);
+            self.send_ui_area(out);
         } else if c == ch::CLUSTER_VIDEO {
             self.request_cluster_stream(out);
         }
@@ -1470,6 +1624,129 @@ pub(crate) mod tests {
         let (mut off, _tx) = running(AaConfig::default());
         let out = off.on_message(ch::TELEPHONY_AUDIO, media_msg::SETUP, &[0x08, 0x01]);
         assert!(events(&out).is_empty());
+    }
+
+    #[test]
+    fn the_projection_area_goes_to_the_phone_live() {
+        let cfg = AaConfig {
+            video_width: Some(1920),
+            video_height: Some(1080),
+            display_width: 1920,
+            display_height: 720,
+            ..Default::default()
+        };
+        let slot = Area {
+            x: 680,
+            y: 80,
+            width: 1240,
+            height: 640,
+        };
+        let full = Area {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 720,
+        };
+        let asked = |out: &[Out]| {
+            frames(out)
+                .into_iter()
+                .filter(|f| f.ch == ch::VIDEO && f.msg_id == media_msg::UPDATE_UI_CONFIG_REQUEST)
+                .map(|f| {
+                    let c = UpdateUiConfigRequest::decode(f.payload.as_slice())
+                        .unwrap()
+                        .ui_config
+                        .unwrap();
+                    assert_eq!(c.content_insets, c.stable_content_insets);
+                    insets_of(&c.content_insets.unwrap())
+                })
+                .collect::<Vec<_>>()
+        };
+        let in_slot = Insets {
+            left: 680,
+            top: 80,
+            ..Default::default()
+        };
+        let whole = Insets::default();
+        // margins 180/180/0/0, content and stable content 80/0/680/0
+        let wire = "0a220a0a08b40110b4011800200012090850100018a80520001a090850100018a8052000";
+        let reply = |c: Insets| {
+            encode(&UpdateUiConfigRequest {
+                ui_config: Some(UiConfig {
+                    content_insets: Some(discovery::display_insets(c)),
+                    ..Default::default()
+                }),
+            })
+        };
+        // The phone's answer, and whether it took the area.
+        let cases: [(&str, Option<Vec<u8>>, bool); 5] = [
+            ("echo", Some(reply(in_slot)), true),
+            ("bare", Some(Vec::new()), true),
+            ("other insets", Some(reply(whole)), false),
+            ("unreadable", Some(vec![0x0a, 0x05]), false),
+            ("silence", None, false),
+        ];
+        for (name, answer, took) in cases {
+            let (mut s, _tx) = session(cfg.clone());
+            assert!(
+                s.set_ui_area(slot).is_empty(),
+                "{name}: asked before running"
+            );
+            s.on_link_control(&serde_json::json!({ "type": "ready" }));
+            s.on_message(ch::CONTROL, ctrl_msg::SERVICE_DISCOVERY_REQUEST, &[]);
+            let out = s.on_message(ch::VIDEO, media_msg::SETUP, &[0x08, 0x03]);
+            assert_eq!(asked(&out), [in_slot], "{name}: sent once running");
+            let sent = frames(&out)
+                .into_iter()
+                .find(|f| f.msg_id == media_msg::UPDATE_UI_CONFIG_REQUEST);
+            assert_eq!(crate::log::hex(&sent.unwrap().payload), wire, "{name}");
+            assert!(out.contains(&Out::After(UI_AREA_REPLY, Timer::UiAreaReply(1))));
+            // One in flight: a newer ask waits for the answer.
+            assert!(
+                asked(&s.set_ui_area(full)).is_empty(),
+                "{name}: second in flight"
+            );
+            assert!(
+                asked(&s.set_ui_area(slot)).is_empty(),
+                "{name}: second in flight"
+            );
+            let out = match answer {
+                Some(a) => s.on_message(ch::VIDEO, media_msg::UPDATE_UI_CONFIG_REPLY, &a),
+                None => s.on_timer(Timer::UiAreaReply(1)),
+            };
+            let area = took.then_some(slot);
+            assert_eq!(events(&out), [SessionEvent::UiArea(area)], "{name}");
+            // Not taken: the phone is set back to the whole screen.
+            assert_eq!(
+                asked(&out),
+                if took { vec![] } else { vec![whole] },
+                "{name}"
+            );
+            // Taken, the next area goes out; not, nothing more this session.
+            let out = s.set_ui_area(full);
+            assert_eq!(
+                asked(&out),
+                if took { vec![whole] } else { vec![] },
+                "{name}"
+            );
+            assert!(
+                s.on_timer(Timer::UiAreaReply(1)).is_empty(),
+                "{name}: stale timer"
+            );
+            assert!(
+                s.on_message(ch::VIDEO, media_msg::UPDATE_UI_CONFIG_REPLY, &[])
+                    .iter()
+                    .all(|o| took || !matches!(o, Out::Event(_))),
+                "{name}: late reply"
+            );
+        }
+        // What the phone already lays out for needs no ask.
+        let (mut s, _tx) = running(cfg);
+        let out = s.set_ui_area(full);
+        assert_eq!(
+            (asked(&out), events(&out)),
+            (vec![], vec![SessionEvent::UiArea(Some(full))])
+        );
+        assert!(s.set_ui_area(full).is_empty());
     }
 
     #[test]

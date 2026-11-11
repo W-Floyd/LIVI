@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::input::Input;
 use crate::patch::PatchOp;
-use crate::state::{Front, Screen, State};
+use crate::state::{Area, Front, Screen, State};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -59,6 +59,13 @@ pub enum Action {
     Show {
         screen: Screen,
         front: Front,
+    },
+    /// Where on `screen` the shell shows the phone: it lays its UI out there, live, if it can
+    /// (`/sessions/area` says once it did).
+    ProjectionArea {
+        screen: Screen,
+        #[serde(flatten)]
+        area: Area,
     },
     Media {
         control: MediaControl,
@@ -251,6 +258,22 @@ mod tests {
         let wire = json!({ "type": "spectrum", "bands": [0.5, 1.0] });
         assert_eq!(serde_json::to_value(&frame).unwrap(), wire);
         assert_eq!(serde_json::from_value::<FromCore>(wire).unwrap(), frame);
+    }
+
+    #[test]
+    fn the_projection_area_is_flat() {
+        let area = Action::ProjectionArea {
+            screen: Screen::Main,
+            area: Area {
+                x: 680,
+                y: 80,
+                width: 1240,
+                height: 640,
+            },
+        };
+        let wire = json!({ "kind": "projectionArea", "screen": "main", "x": 680, "y": 80, "width": 1240, "height": 640 });
+        assert_eq!(serde_json::to_value(&area).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<Action>(wire).unwrap(), area);
     }
 
     #[test]

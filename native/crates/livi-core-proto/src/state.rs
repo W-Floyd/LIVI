@@ -428,6 +428,19 @@ pub struct Sessions {
     pub held: bool,
     pub position: u32,
     pub total: u32,
+    /// The area of the main screen the active phone lays its UI out for, once it took one
+    /// (`Action::ProjectionArea`); else it lays out for the whole screen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<Area>,
+}
+
+/// A rectangle of a projection screen, in its pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Area {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -590,6 +603,7 @@ mod tests {
             held: false,
             position: 1,
             total: 2,
+            area: None,
         };
         assert_eq!(
             serde_json::to_string(&sessions).unwrap(),

@@ -93,6 +93,30 @@ impl Projection {
                 }
             }
             AaEvent::VideoCodec { .. } => {}
+            AaEvent::UiArea { id, area } => {
+                let area = area.map(|a| Area {
+                    x: a.x,
+                    y: a.y,
+                    width: a.width,
+                    height: a.height,
+                });
+                match area {
+                    Some(a) => {
+                        println!("[core] Android Auto lays out for {a:?} of the main screen")
+                    }
+                    None => println!(
+                        "[core] Android Auto keeps the whole main screen: the shell letterboxes it"
+                    ),
+                }
+                let link = Link::Aa(id);
+                let Some(entry) = self.by_link(link) else {
+                    return;
+                };
+                entry.area = area;
+                if self.is_active(link) {
+                    self.publish();
+                }
+            }
             AaEvent::NowPlaying { id, now_playing } => self.aa_now_playing(id, now_playing),
             AaEvent::Navigation { id, navigation } => self.aa_navigation(id, navigation),
             AaEvent::NavigationImage { id, image } => {

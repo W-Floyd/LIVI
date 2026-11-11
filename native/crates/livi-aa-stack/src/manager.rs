@@ -12,7 +12,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::bridge::{Navigation, NowPlaying, PhoneStatus, Report};
 use crate::channels::audio::AudioChannelType;
-use crate::config::AaConfig;
+use crate::config::{AaConfig, Area};
 use crate::discovery::VideoCodec;
 use crate::driver::{self, SessionCmd};
 use crate::helper_sock::{AaHelperSock, Feed};
@@ -98,6 +98,11 @@ pub enum AaEvent {
         id: SessionId,
         image: Vec<u8>,
     },
+    /// The area the phone lays its UI out for; `None`: it did not take one this session.
+    UiArea {
+        id: SessionId,
+        area: Option<Area>,
+    },
 }
 
 impl AaEvent {
@@ -146,19 +151,27 @@ impl AaEvent {
             Report::NowPlaying(now_playing) => Self::NowPlaying { id, now_playing },
             Report::Navigation(navigation) => Self::Navigation { id, navigation },
             Report::NavigationImage(image) => Self::NavigationImage { id, image },
+            Report::UiArea(area) => Self::UiArea { id, area },
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AaCmd {
-    Session { id: SessionId, cmd: SessionCmd },
+    Session {
+        id: SessionId,
+        cmd: SessionCmd,
+    },
     Sensor(Sensor),
     ClusterActive(bool),
+    /// The main screen's area the shell shows the phone in, for every session now and later.
+    UiArea(Area),
     StopWireless,
     Detach,
     Attach,
-    Close { id: SessionId },
+    Close {
+        id: SessionId,
+    },
 }
 
 #[derive(Clone)]
@@ -214,6 +227,7 @@ struct Manager<M: AaMedia> {
     sessions: HashMap<SessionId, Entry>,
     attached: bool,
     cluster_stream_active: bool,
+    ui_area: Option<Area>,
     night_mode: Option<bool>,
 }
 
@@ -259,6 +273,7 @@ async fn run<M: AaMedia>(
         sessions: HashMap::new(),
         attached: true,
         cluster_stream_active: true,
+        ui_area: None,
         night_mode,
     };
     let mut feed = Some(m.helper.subscribe(HELPER_RESUBSCRIBE));
@@ -391,6 +406,9 @@ impl<M: AaMedia> Manager<M> {
         });
         self.phones.send_modify(|n| *n += 1);
         let phones = self.phones.clone();
+        if let Some(area) = self.ui_area {
+            let _ = self.sessions[&id].cmds.send(SessionCmd::UiArea(area));
+        }
         let phone = driver::run(
             id,
             link,
@@ -463,6 +481,10 @@ impl<M: AaMedia> Manager<M> {
             AaCmd::ClusterActive(active) => {
                 self.cluster_stream_active = active;
                 self.each(SessionCmd::ClusterActive(active));
+            }
+            AaCmd::UiArea(area) => {
+                self.ui_area = Some(area);
+                self.each(SessionCmd::UiArea(area));
             }
             AaCmd::StopWireless => {
                 for entry in self.sessions.values().filter(|e| !e.wired) {
@@ -674,6 +696,21 @@ mod tests {
         assert_eq!(pa.until(1, 0x8003).await.payload, [0x42, 0x02, 0x08, 0x05]);
         rig.handle.send(AaCmd::ClusterActive(false));
         assert_eq!(pa.until(19, 0x8008).await.payload, [0x08, 0x02]);
+        // The area goes to every session, and to one that comes later.
+        let area = Area {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        rig.handle.send(AaCmd::UiArea(area));
+        let taken = |id| AaEvent::UiArea {
+            id,
+            area: Some(area),
+        };
+        rig.until(|e| *e == taken(a)).await;
+        rig.running(b, &mut pb).await;
+        rig.until(|e| *e == taken(b)).await;
         rig.cfg.send_modify(|c| c.initial_night_mode = Some(true));
         assert_eq!(pa.until(1, 0x8003).await.payload, [0x52, 0x02, 0x08, 0x01]);
         rig.cfg.send_modify(|c| c.hevc_supported = true);

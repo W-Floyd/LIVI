@@ -11,7 +11,7 @@ use crate::channels::nav_maneuver::{
 use crate::channels::navigation::{
     EnergyForecastUpdate, NavigationEvent, NavigationState, NextDestination,
 };
-use crate::config::AaConfig;
+use crate::config::{AaConfig, Area};
 use crate::discovery::VideoCodec;
 use crate::log::detail;
 use crate::media::AudioKind;
@@ -133,6 +133,7 @@ pub enum Report {
     NowPlaying(NowPlaying),
     Navigation(Navigation),
     NavigationImage(Vec<u8>),
+    UiArea(Option<Area>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -372,6 +373,7 @@ impl Bridge {
             SessionEvent::MediaMetadata(m) => self.metadata(&mut out, m),
             SessionEvent::MediaStatus(s) => self.status(&mut out, s),
             SessionEvent::Navigation(n) => self.navigation(&mut out, n),
+            SessionEvent::UiArea(area) => report(&mut out, Report::UiArea(area)),
         }
         out
     }

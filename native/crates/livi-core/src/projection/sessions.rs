@@ -42,6 +42,7 @@ impl Projection {
                     now_playing: NowPlaying::default(),
                     video_playback: None,
                     navigation: Navigation::default(),
+                    area: None,
                 };
                 entry.device.merge(device);
                 self.sessions.push(entry);
@@ -338,6 +339,7 @@ impl Projection {
             held: video && active == Some(Protocol::Airplay) && !self.cp_telemetry.video_allowed(),
             position: position.map_or(0, |i| i as u32 + 1),
             total: self.sessions.len() as u32,
+            area: position.and_then(|i| self.sessions[i].area),
         };
         let (now_playing, video_playback, mut navigation) = self
             .active()

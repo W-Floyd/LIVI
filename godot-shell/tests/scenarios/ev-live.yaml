@@ -6,9 +6,13 @@ fixtures:
   core: fixtures/ev6-main.json
 theme: { theme_name: instrument, appearance: night }
 steps:
+  # The blower running and the car's climate-off range, as stock's example (243 / 253): both rows.
+  - set: { core: { telemetry: { climate: {} } } }
+  - set: { core: { telemetry: { rangeClimateOffKm: 253, climate: { source: car, fanLevel: 3, on: true } } } }
   - page: ev
   - expect_node: { path: EvLive/Title, text: Electric vehicle }
   - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "243" }
+  - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "253" }
   - expect_node: { path: EvLive/Battery/Row1/battery_value, text: "50" }
   - screenshot: ev-live-instrument-night
   - theme: { appearance: day }

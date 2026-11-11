@@ -13,10 +13,10 @@ signal tile_pressed(id: String)
 signal back_pressed
 
 
-## The range with climate off has no field in the telemetry yet. Until it does: this much over
-## the range with climate on, about what the EV6 shows.
-const RANGE_OFF_FALLBACK := 0.12
+## The car's range were the climate off; `rangeKm` is the range as it runs.
 const RANGE_OFF_PATH := "/telemetry/rangeClimateOffKm"
+## A climate LIVI filled in itself, not one a car or program reported.
+const CLIMATE_UNREPORTED := ["default", "saved"]
 const TILES := ["next_departure", "scheduled", "v2l"]
 
 ## English defaults; a pack's screen overrides them where it has the string.
@@ -73,6 +73,7 @@ var _row_top := 0.0
 var _numeral_base := {}   # label -> its font size before any fitting
 var _leader := []   # [the road end, the nearest point of its label]
 var _show_on := false
+var _show_off := false
 var _show_charger := false
 
 
@@ -399,8 +400,17 @@ func _bind() -> void:
 	var km = Core.get_value("/telemetry/rangeKm")
 	var off = Core.get_value(RANGE_OFF_PATH)
 	var stop = Core.get_value("/navigation/chargingStop")
-	var on_km := float(km) if km != null else 0.0
-	var off_km := float(off) if off != null else on_km * (1.0 + RANGE_OFF_FALLBACK)
+	# As stock: the climate-on range only while the blower runs, else the climate-off one alone.
+	# Lacking that, the car's range alone, under no climate name.
+	var blower := _blower_running()
+	var shown = km if blower or off == null else off
+	var range_name := ""
+	if blower:
+		range_name = _str("on")
+	elif off != null:
+		range_name = _str("off")
+	var on_km := float(shown) if shown != null else 0.0
+	var off_km := float(off) if blower and off != null else on_km
 	var stop_km := -1.0
 	var stop_name := ""
 	if stop is Dictionary:
@@ -412,7 +422,8 @@ func _bind() -> void:
 	_bound = true
 	(_battery.box as Control).visible = true
 	_l(_battery, "battery_value").text = "–" if soc == null else str(roundi(float(soc)))
-	_show_on = km != null
+	_show_on = shown != null
+	_show_off = blower and off != null
 	_l(_on, "on_value").text = str(Units.range_value(on_km))
 	_l(_off, "off_value").text = str(Units.range_value(off_km))
 	# The pack's unit string is km.
@@ -420,11 +431,13 @@ func _bind() -> void:
 	_l(_on, "on_unit").text = unit
 	_l(_off, "off_unit").text = unit
 	var low := on_km <= EvScene.LOW_RANGE_KM
-	_l(_on, "on_name").text = _str("on")
+	_l(_on, "on_name").text = range_name
+	_l(_on, "on_name").visible = range_name != ""
 	# Low range says so in an icon as well as the warning color.
 	var on_icon: TextureRect = (_on.box as Control).find_child("fan", true, false)
 	on_icon.get_meta("icon")[0] = "warn" if low else "fan"
 	on_icon.get_meta("icon")[2] = "warn" if low else "accent"
+	on_icon.visible = low or range_name != ""
 	UI.style_icon(on_icon)
 	var warn: Color = ThemeManager.c.warn
 	for n in ["on_value", "on_unit", "on_name"]:
@@ -444,6 +457,17 @@ func _bind() -> void:
 		nm.text = stop_name
 		nm.visible = stop_name != ""
 	_place()
+
+
+## Whether the car's blower runs (stock: its level 1 to 14). False when nothing reported it.
+func _blower_running() -> bool:
+	var c = Core.get_value("/telemetry/climate")
+	if not c is Dictionary or str(c.get("source", "")) in CLIMATE_UNREPORTED:
+		return false
+	var level = c.get("fanLevel")
+	if level != null:
+		return float(level) > 0.0
+	return c.get("on") == true
 
 
 # ---- layout ----
@@ -569,13 +593,13 @@ func _place() -> void:
 		_clear(ch, placed, bounds)
 		placed.append(Rect2(ch.position, ch.size))
 	var off: Control = _off.box
-	off.visible = _show_on
+	off.visible = _show_off
 	var off_y: float = (a.off as Vector2).y + gap * 0.7
 	if off_y + off.size.y > room_bottom:
 		off_y = (a.off_far as Vector2).y - gap - off.size.y
 	off.position = Vector2(a.off.x + gap * LABEL_GAP * side - (off.size.x if side < 0 else 0.0), off_y)
 	_fit_in(off, bounds)
-	if _show_on:
+	if _show_off:
 		_clear(off, placed, bounds)
 		placed.append(Rect2(off.position, off.size))
 	var on: Control = _on.box

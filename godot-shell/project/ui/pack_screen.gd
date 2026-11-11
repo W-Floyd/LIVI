@@ -218,6 +218,11 @@ func _bind() -> void:
 		_set_text("mainview_text_climateon_range_value", str(Units.range_value(km)))
 		if Units.imperial():
 			_set_text("mainview_text_climateon_range_unit", Units.range_unit())
+	var off = Core.get_value("/telemetry/rangeClimateOffKm")
+	if off != null:
+		_set_text("mainview_text_climateoff_range_value", str(Units.range_value(off)))
+		if Units.imperial():
+			_set_text("mainview_text_climateoff_range_unit", Units.range_unit())
 	var stop = Core.get_value("/navigation/chargingStop")
 	if stop is Dictionary:
 		var m = stop.get("distanceM")

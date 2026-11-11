@@ -26,6 +26,8 @@ pub struct App {
     pub app_ids: Vec<String>,
     pub source: &'static str,
     pub timeout_s: u32,
+    /// apps.yaml's `scale`, a percentage; else the shell's own choice.
+    pub scale: Option<u32>,
 }
 
 /// The `[Desktop Entry]` group's keys, values unescaped at the string level.
@@ -287,6 +289,7 @@ pub fn desktop_app(id: &str, file: &Path, text: &str, data_dirs: &[PathBuf], lan
         app_ids,
         source: "desktop",
         timeout_s: if id.starts_with("waydroid.") { WAYDROID_TIMEOUT_S } else { TIMEOUT_S },
+        scale: None,
     })
 }
 
@@ -354,6 +357,7 @@ pub fn waydroid_apps(list: &str, icons_dir: &Path) -> Vec<App> {
             app_ids: vec![format!("waydroid.{pkg}")],
             source: "waydroid",
             timeout_s: WAYDROID_TIMEOUT_S,
+            scale: None,
         });
     };
     for line in list.lines() {
@@ -386,10 +390,14 @@ pub struct Overlay {
     pub app_id: Option<String>,
     pub hidden: bool,
     pub timeout_s: Option<u32>,
+    pub scale: Option<u32>,
 }
 
+/// Percentages `scale` may be: the compositor's range, in its steps or not.
+pub const SCALE_PCT: std::ops::RangeInclusive<u64> = 50..=400;
+
 /// `order: [id, ...]`, `waydroid: bool`, `apps: { <id>: { name, icon, exec, app_id, hidden,
-/// timeout_s } }`. Unknown keys are errors, so a typo does not pass silently.
+/// timeout_s, scale } }`. Unknown keys are errors, so a typo does not pass silently.
 pub fn parse_config(text: &str) -> Result<Config, String> {
     let mut cfg = Config { waydroid: true, ..Default::default() };
     let v: Value = serde_norway::from_str(text).map_err(|e| e.to_string())?;
@@ -414,6 +422,10 @@ pub fn parse_config(text: &str) -> Result<Config, String> {
                             "app_id" => ov.app_id = Some(s(fv, f)?),
                             "hidden" => ov.hidden = fv.as_bool().ok_or(format!("apps.{id}.hidden: not true or false"))?,
                             "timeout_s" => ov.timeout_s = Some(fv.as_u64().ok_or(format!("apps.{id}.timeout_s: not a number"))? as u32),
+                            "scale" => {
+                                let pct = fv.as_u64().filter(|p| SCALE_PCT.contains(p));
+                                ov.scale = Some(pct.ok_or(format!("apps.{id}.scale: not a percentage from 50 to 400"))? as u32);
+                            }
                             _ => return Err(format!("apps.{id}: unknown key {f}")),
                         }
                     }
@@ -447,6 +459,7 @@ pub fn merge(found: Vec<App>, cfg: &Config, data_dirs: &[PathBuf]) -> Vec<App> {
                     app_ids: vec![id.clone()],
                     source: "config",
                     timeout_s: TIMEOUT_S,
+                    scale: None,
                 });
                 apps.len() - 1
             }
@@ -469,6 +482,7 @@ pub fn merge(found: Vec<App>, cfg: &Config, data_dirs: &[PathBuf]) -> Vec<App> {
         if let Some(t) = o.timeout_s {
             a.timeout_s = t;
         }
+        a.scale = o.scale.or(a.scale);
     }
     apps.retain(|a| !cfg.apps.get(&a.id).is_some_and(|o| o.hidden));
     let rank = |a: &App| cfg.order.iter().position(|o| o == &a.id).unwrap_or(usize::MAX);
@@ -655,13 +669,13 @@ mod tests {
     }
 
     fn app(id: &str, name: &str) -> App {
-        App { id: id.into(), name: name.into(), icon: None, argv: vec![id.into()], cwd: None, app_ids: vec![id.into()], source: "desktop", timeout_s: TIMEOUT_S }
+        App { id: id.into(), name: name.into(), icon: None, argv: vec![id.into()], cwd: None, app_ids: vec![id.into()], source: "desktop", timeout_s: TIMEOUT_S, scale: None }
     }
 
     #[test]
     fn config_merge() {
         let cfg = parse_config(
-            "order: [z, new]\nwaydroid: false\napps:\n  a: { name: Renamed, app_id: a-window, timeout_s: 5 }\n  b: { hidden: true }\n  new: { name: New, exec: \"run --x %U\" }\n  ghost: { name: Ghost }\n",
+            "order: [z, new]\nwaydroid: false\napps:\n  a: { name: Renamed, app_id: a-window, timeout_s: 5, scale: 150 }\n  b: { hidden: true }\n  new: { name: New, exec: \"run --x %U\" }\n  ghost: { name: Ghost }\n",
         )
         .unwrap();
         assert!(!cfg.waydroid);
@@ -670,10 +684,13 @@ mod tests {
         let ids: Vec<&str> = got.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, ["z", "new", "c", "a"]);
         let a = got.iter().find(|a| a.id == "a").unwrap();
-        assert_eq!((a.name.as_str(), a.app_ids.clone(), a.timeout_s), ("Renamed", vec!["a".to_string(), "a-window".to_string()], 5));
+        assert_eq!((a.name.as_str(), a.app_ids.clone(), a.timeout_s, a.scale), ("Renamed", vec!["a".to_string(), "a-window".to_string()], 5, Some(150)));
         let n = got.iter().find(|a| a.id == "new").unwrap();
         assert_eq!((n.argv.clone(), n.source), (vec!["run".to_string(), "--x".to_string()], "config"));
         assert!(parse_config("bogus: 1\n").is_err());
+        for bad in ["1.5", "20", "x"] {
+            assert!(parse_config(&format!("apps:\n  a: {{ scale: {bad} }}\n")).is_err(), "scale {bad}");
+        }
         assert!(parse_config("").unwrap().waydroid);
         assert!(parse_config("order: [a]\n").unwrap().waydroid);
     }

@@ -376,6 +376,40 @@ impl WaylandCompositor {
         }
     }
 
+    /// Clients whose PID or process group is `pid` get scale `scale` (wp_fractional_scale, else
+    /// the nearest whole scale), and windows the panel's size divided by it; 0 forgets the PID.
+    /// Before the process connects: a client's scale is looked up once.
+    #[func]
+    fn set_process_scale(&mut self, pid: i64, scale: f64) {
+        if let Some(s) = self.server.as_mut() {
+            if scale > 0.0 {
+                s.state.launch_scales.insert(pid as i32, scale);
+            } else {
+                s.state.launch_scales.remove(&(pid as i32));
+            }
+        }
+    }
+
+    /// Scales the window's client now, all its windows.
+    #[func]
+    fn set_window_scale(&mut self, id: i64, scale: f64) {
+        if let Some(s) = self.server.as_mut() {
+            s.state.set_window_scale(id as u64, scale);
+        }
+    }
+
+    /// The scale asked of the window's client, or 0 for no window.
+    #[func]
+    fn window_scale(&self, id: i64) -> f64 {
+        self.server.as_ref().and_then(|s| s.state.windows.iter().find(|w| w.id == id as u64)).map_or(0.0, |w| w.scale)
+    }
+
+    /// The app scale for a viewer `view_mm` from the panel (`compositor::default_scale`).
+    #[func]
+    fn default_app_scale(view_mm: f64) -> f64 {
+        compositor::default_scale(view_mm)
+    }
+
     /// The PID of the window's client, or -1.
     #[func]
     fn window_pid(&self, id: i64) -> i64 {

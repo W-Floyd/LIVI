@@ -6,5 +6,6 @@ apps:
   hideme: { hidden: true }
   org.livi.test.extra:
     name: Extra command
-    exec: livi-shell-test-client --app-id org.livi.test.extra
+    exec: livi-shell-test-client --app-id org.livi.test.extra --honour fractional
     icon: livi-extra
+    scale: 150

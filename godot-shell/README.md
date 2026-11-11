@@ -32,9 +32,11 @@ Goldens are lossless WebP, a third of PNG's size. Captures are compared in memor
 (as PNG) only on a mismatch, `--update-goldens`, `--shots-only` or `compare: false`.
 
 Scenario fixtures: `core` (a partial state) and `clients`: `{ role: app, app_id, pattern:
-grid|bars, size: WxH, animate: N, buffer: shm|dmabuf|nv12|i420, video: true, events: true }` runs the test client
+grid|bars, size: WxH, animate: N, buffer: shm|dmabuf|nv12|i420, video: true, events: true,
+honour: none|fractional|integer, scale: percent }` runs the test client
 (`events` logs the input it gets, for `expect_client`; `video` sends the picture as waylandsink does, a
-viewporter-scaled subsurface under a placeholder toplevel), `{ role: command, run: [...] }` any
+viewporter-scaled subsurface under a placeholder toplevel; `scale` is what the compositor asks of it,
+`honour` which protocol it draws by, `size` then in surface units), `{ role: command, run: [...] }` any
 Wayland program. `apps: <dir under tests/>` is the launcher's only data dir, with its `apps.yaml`
 (see "App launcher").
 

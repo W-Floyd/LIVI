@@ -572,6 +572,25 @@ child it starts):
   and reports a failure if no window appears within a timeout.
 - Each app's stdout and stderr go to a per-app log.
 
+**Scale:**
+- Each launched app has a scale, so desktop apps are legible on the panel.
+  The default makes a logical pixel subtend CSS's reference pixel (1/96 in at
+  28 in) from `view_mm`: `px_per_mm × 25.4 / 96 × view_mm / 711.2`, to the
+  nearest 25 % from 100 to 200: 1.83, so 175 %, for this panel at 750 mm.
+- Settings → Look → "App size" overrides it; apps.yaml's `scale: <percent>`
+  sets one app's, and holding its tile picks one over that (kept in
+  look.json's `app_scales`). A change reaches running windows at once.
+- The compositor scales per client, matched by the launch's PID or process
+  group: `wp_fractional_scale_v1` with viewporter (GTK ≥ 4.14, Qt ≥ 6.5,
+  Firefox, Chromium), else `wl_surface.preferred_buffer_scale` and the
+  client's own `wl_output.scale` at the nearest whole scale (GTK 3, Qt 5,
+  SDL). Windows are configured at the panel's size divided by the scale, so
+  a client that honours neither still gets that layout, stretched. Frames are
+  in buffer pixels and input is mapped back to surface units by what each
+  window's buffer turned out to be.
+- No toolkit env (`GDK_SCALE`, `QT_SCALE_FACTOR`): those multiply with the
+  protocol's scale rather than stand in for it.
+
 **Lifecycle:**
 - One instance per app by default. Launching an app that is running
   brings its window forward.

@@ -1,7 +1,8 @@
 class_name AppsPage
 extends Control
 ## The launcher's page: every app as a tile, and the running windows in a strip by the title to
-## bring forward or close. Tapping an app starts it, or shows its window when it runs.
+## bring forward or close. Tapping an app starts it, or shows its window when it runs; holding it
+## opens its menu, the app's size on the panel.
 
 var launcher: Launcher
 ## The status bar's height, which the page leaves clear.
@@ -14,6 +15,8 @@ var _scroll: DragScroll
 var _grid: GridContainer
 ## App id -> its tile, kept across changes so the grid's scroll stays put.
 var _tiles := {}
+## An app's menu while it shows.
+var _menu: Control
 
 
 func _init() -> void:
@@ -41,6 +44,7 @@ func _init() -> void:
 func _ready() -> void:
 	ThemeManager.changed.connect(_style)
 	resized.connect(_layout)
+	visibility_changed.connect(close_menu)
 	launcher.changed.connect(_update)
 	launcher.refresh()
 	_style()
@@ -98,7 +102,8 @@ func _update() -> void:
 			t = AppTile.new()
 			t.name = _node_name(a.id)
 			var id: String = a.id
-			t.pressed.connect(func(): if not _scroll.dragged: launcher.open.call_deferred(id))
+			t.pressed.connect(func(): if not _scroll.dragged and not t.held: launcher.open.call_deferred(id))
+			t.long_pressed.connect(func(): if not _scroll.dragged: open_menu(id))
 			_grid.add_child(t)
 			_tiles[a.id] = t
 		t.app_name = a.name
@@ -132,6 +137,79 @@ func _update_running() -> void:
 		chip.pressed.connect(func(): launcher.bring.call_deferred(w))
 		chip.close_pressed.connect(func(): launcher.close.call_deferred(w))
 		_running.add_child(chip)
+
+
+## The app's menu over the page: its size on the panel, `Default` (apps.yaml's, else the shell's)
+## or one of `Launcher.SCALES`, each a button `Menu/Panel/Box/Sizes/s<percent>` (`s0` the default).
+## A tap beside it closes it.
+func open_menu(id: String) -> void:
+	close_menu()
+	var a := launcher.app(id)
+	if a.is_empty():
+		return
+	var g: float = ThemeManager.px.gap
+	_menu = Control.new()
+	_menu.name = "Menu"
+	_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_menu.mouse_filter = Control.MOUSE_FILTER_STOP
+	_menu.gui_input.connect(func(e: InputEvent):
+		if (e is InputEventMouseButton or e is InputEventScreenTouch) and e.pressed:
+			close_menu.call_deferred())
+	_menu.draw.connect(func(): _menu.draw_rect(Rect2(Vector2.ZERO, _menu.size), Color(0, 0, 0, 0.45)))
+	var panel := PanelContainer.new()
+	panel.name = "Panel"
+	var box := _flat(ThemeManager.c.surface2)
+	box.set_content_margin_all(g * 4.0)
+	panel.add_theme_stylebox_override("panel", box)
+	var sizes := UI.hbox([], 1.0)
+	sizes.name = "Sizes"
+	var own := int(a.get("scale", 0))
+	var chosen := int(ThemeManager.app_scales.get(id, 0))
+	for p in [0] + Launcher.SCALES:
+		var b := Button.new()
+		b.name = "s%d" % p
+		b.text = "Default (%d %%)" % (own if own > 0 else Launcher.default_scale()) if p == 0 else "%d %%" % p
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(ThemeManager.px.touch * 1.6, ThemeManager.px.touch)
+		b.add_theme_font_size_override("font_size", ThemeManager.font_size("body"))
+		b.add_theme_color_override("font_color", ThemeManager.c.text)
+		b.add_theme_color_override("font_hover_color", ThemeManager.c.text)
+		b.add_theme_color_override("font_pressed_color", ThemeManager.c.text)
+		var fill: Color = ThemeManager.c.accent.lerp(ThemeManager.c.surface2, 0.6) if p == chosen else ThemeManager.c.surface
+		for state in ["normal", "hover", "pressed", "focus"]:
+			var sb := _flat(fill)
+			sb.set_content_margin_all(g * 1.5)
+			sb.set_border_width_all(2)
+			sb.border_color = ThemeManager.c.accent if p == chosen else ThemeManager.c.line
+			b.add_theme_stylebox_override(state, sb)
+		var pct: int = p
+		b.pressed.connect(func():
+			launcher.set_app_scale(id, pct)
+			close_menu.call_deferred())
+		sizes.add_child(b)
+	var col := UI.vbox([UI.label(a.name, "display", "title"), UI.label("Size on the panel", "body", "caption", "dim"), sizes], 1.5)
+	col.name = "Box"
+	panel.add_child(col)
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	_menu.add_child(panel)
+	add_child(_menu)
+	UI.restyle(_menu)
+
+
+func close_menu() -> void:
+	if _menu:
+		_menu.queue_free()
+		_menu = null
+
+
+func _flat(fill: Color) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = fill
+	sb.set_corner_radius_all(roundi(ThemeManager.px.radius * 2.0))
+	sb.anti_aliasing = true
+	return sb
 
 
 ## Tiles are found by app id, '.' as '_' (`Apps/Scroll/List/Grid/org_livi_test_grid`), which a node

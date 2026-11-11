@@ -4,6 +4,10 @@ extends BaseButton
 ## As a `chip`, a running window in the switcher: icon, name and a close button in a row.
 
 signal close_pressed
+## Held for `HOLD_S`: the app's menu, instead of a tap.
+signal long_pressed
+
+const HOLD_S := 0.6
 
 var app_name := "":
 	set(v):
@@ -19,6 +23,8 @@ var state := "":
 		state = v
 		_refresh()
 var chip := false
+## A hold fired since the last press, so its release is no tap.
+var held := false
 
 var _icon: AppIcon
 var _name: Label
@@ -36,6 +42,19 @@ func _init() -> void:
 	add_child(_name)
 	button_down.connect(queue_redraw)
 	button_up.connect(queue_redraw)
+	var hold := Timer.new()
+	hold.name = "Hold"
+	hold.one_shot = true
+	hold.wait_time = HOLD_S
+	hold.timeout.connect(func():
+		if is_pressed():
+			held = true
+			long_pressed.emit())
+	add_child(hold)
+	button_down.connect(func():
+		held = false
+		hold.start())
+	button_up.connect(hold.stop)
 
 
 func _ready() -> void:

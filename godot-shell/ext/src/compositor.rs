@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use smithay::backend::allocator::Buffer;
@@ -17,6 +17,8 @@ use smithay::delegate_dmabuf;
 use smithay::delegate_output;
 use smithay::delegate_viewporter;
 use smithay::delegate_data_device;
+use smithay::delegate_fractional_scale;
+use smithay::wayland::fractional_scale::{FractionalScaleHandler, FractionalScaleManagerState, with_fractional_scale};
 use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler};
 use smithay::output::{Mode, Output, PhysicalProperties, Subpixel};
@@ -30,10 +32,11 @@ use smithay::input::keyboard::{FilterResult, KeyboardHandle, Keycode, XkbConfig}
 use smithay::input::pointer::{ButtonEvent, MotionEvent as PointerMotion, PointerHandle};
 use smithay::input::touch::{DownEvent as TouchDown, MotionEvent as TouchMotion, TouchHandle, UpEvent as TouchUp};
 use smithay::input::{Seat, SeatHandler, SeatState};
-use smithay::utils::{Logical, Point, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, SERIAL_COUNTER, Transform};
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::backend::{ClientData, ClientId, DisconnectReason, ObjectId};
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_shm::Format;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -42,8 +45,8 @@ use smithay::utils::Serial;
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
-    SubsurfaceCachedState, SurfaceAttributes, TraversalAction, get_parent, with_states,
-    with_surface_tree_downward,
+    SubsurfaceCachedState, SurfaceAttributes, TraversalAction, get_parent, send_surface_state,
+    with_states, with_surface_tree_downward,
 };
 use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
@@ -123,6 +126,12 @@ pub struct Window {
     /// and scaled it: projection video, which waylandsink fits to the 1920x720 configure and the
     /// shell crops 1:1 as the core's touch mapping assumes.
     native: bool,
+    /// The scale asked of the client (`State::set_window_scale`); its windows are configured at
+    /// the panel's size divided by it.
+    pub scale: f64,
+    /// Buffer pixels per surface unit, as the toplevel's last real buffer came: the window's
+    /// frames are in buffer pixels and input is in surface units, whatever the client honoured.
+    pub buffer_scale: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -144,11 +153,16 @@ pub struct State {
     dmabuf: DmabufState,
     dmabuf_global: Option<DmabufGlobal>,
     // Kept alive: the globals vanish with them. Clients (Waydroid's) ask for an output to size themselves.
-    _output: Output,
+    output: Output,
     _output_manager: OutputManagerState,
     _viewporter: ViewporterState,
     // GTK 4 will not use a compositor without wl_data_device_manager.
     data_device: DataDeviceState,
+    _fractional: FractionalScaleManagerState,
+    dh: DisplayHandle,
+    /// Scales by the PID the shell started a client as; a client matches by its own PID or its
+    /// process group, so what an app forks is scaled with it.
+    pub launch_scales: HashMap<i32, f64>,
     pub windows: Vec<Window>,
     pub events: Vec<WindowEvent>,
     next_id: u64,
@@ -178,6 +192,34 @@ pub struct Server {
 #[derive(Default)]
 struct ClientState {
     compositor: CompositorClientState,
+    /// Looked up on first need, from `State::launch_scales`.
+    scale: Mutex<Option<f64>>,
+}
+
+/// The panel, the one output: 12.3 inches at 8:3.
+pub const PANEL_PX: (i32, i32) = (1920, 720);
+pub const PANEL_MM: (i32, i32) = (293, 110);
+/// The scales offered to apps, as the 120ths wp_fractional_scale counts in divide evenly.
+pub const SCALE_STEP: f64 = 0.25;
+pub const SCALE_RANGE: (f64, f64) = (1.0, 2.0);
+
+/// The app scale at which a logical pixel looks as big as CSS's reference pixel (1/96 inch at
+/// 28 inches: 0.0213 degrees) from `view_mm` away, to the nearest step:
+/// `px_per_mm * 25.4 / 96 * view_mm / 711.2`. The panel from 750 mm: 1.83, so 1.75.
+pub fn default_scale(view_mm: f64) -> f64 {
+    let px_per_mm = PANEL_PX.0 as f64 / PANEL_MM.0 as f64;
+    let s = px_per_mm * 25.4 / 96.0 * view_mm / 711.2;
+    ((s / SCALE_STEP).round() * SCALE_STEP).clamp(SCALE_RANGE.0, SCALE_RANGE.1)
+}
+
+/// What clients without wp_fractional_scale are told, through wl_surface and wl_output.
+fn integer_scale(s: f64) -> i32 {
+    (s.round() as i32).max(1)
+}
+
+/// The window size, in surface units, that fills the panel at scale `s`.
+fn logical_size(s: f64) -> (i32, i32) {
+    ((PANEL_PX.0 as f64 / s).round() as i32, (PANEL_PX.1 as f64 / s).round() as i32)
 }
 
 impl ClientData for ClientState {
@@ -195,24 +237,27 @@ impl Server {
         let touch = seat.add_touch();
         // The keymap is xkb's default (us); delay and rate are milliseconds and keys per second.
         let keyboard = seat.add_keyboard(XkbConfig::default(), 400, 25).map_err(io::Error::other)?;
-        // The panel: 1920 x 720, 12.3 inches (about 310 x 116 mm), the one output.
         let output = Output::new(
             "livi-0".into(),
-            PhysicalProperties { size: (310, 116).into(), subpixel: Subpixel::Unknown, make: "LIVI".into(), model: "panel".into() },
+            PhysicalProperties { size: PANEL_MM.into(), subpixel: Subpixel::Unknown, make: "LIVI".into(), model: "panel".into() },
         );
-        let mode = Mode { size: (1920, 720).into(), refresh: 60_000 };
+        let mode = Mode { size: PANEL_PX.into(), refresh: 60_000 };
         output.create_global::<State>(&dh);
         output.change_current_state(Some(mode), None, None, Some((0, 0).into()));
         output.set_preferred(mode);
         let state = State {
-            _output: output,
+            output,
             _output_manager: OutputManagerState::new_with_xdg_output::<State>(&dh),
             _viewporter: ViewporterState::new::<State>(&dh),
             data_device: DataDeviceState::new::<State>(&dh),
+            _fractional: FractionalScaleManagerState::new::<State>(&dh),
+            dh: dh.clone(),
+            launch_scales: HashMap::new(),
             pointer,
             keyboard,
             touch,
-            compositor: CompositorState::new::<State>(&dh),
+            // v6, for preferred_buffer_scale.
+            compositor: CompositorState::new_v6::<State>(&dh),
             xdg_shell: XdgShellState::new::<State>(&dh),
             shm: ShmState::new::<State>(&dh, vec![Format::Abgr8888, Format::Xbgr8888]),
             seat_state,
@@ -351,16 +396,22 @@ impl Server {
         self.started.elapsed().as_millis() as u32
     }
 
-    /// The window's surface, its origin placed at (0, 0): every position below is local to it.
-    fn focus(&self, window: u64) -> Option<(WlSurface, Point<f64, Logical>)> {
+    /// The window's surface, its origin placed at (0, 0), and (x, y) in the window's frame as a
+    /// position on that surface.
+    fn focus(&self, window: u64, x: f64, y: f64) -> Option<((WlSurface, Point<f64, Logical>), Point<f64, Logical>)> {
         let w = self.state.windows.iter().find(|w| w.id == window && w.mapped)?;
-        Some((w.toplevel.wl_surface().clone(), (0.0, 0.0).into()))
+        let k = w.buffer_scale;
+        Some(((w.toplevel.wl_surface().clone(), (0.0, 0.0).into()), (x / k, y / k).into()))
     }
 
-    /// Moves the pointer to (x, y) in the window, or out of every window with `None`.
+    /// Moves the pointer to (x, y) in the window's frame, or out of every window with `None`.
+    /// Positions below are frame pixels, as the window's texture has them.
     pub fn pointer_motion(&mut self, window: Option<u64>, x: f64, y: f64) {
-        let focus = window.and_then(|w| self.focus(w));
-        let event = PointerMotion { location: (x, y).into(), serial: SERIAL_COUNTER.next_serial(), time: self.time() };
+        let (focus, location) = match window.and_then(|w| self.focus(w, x, y)) {
+            Some((f, at)) => (Some(f), at),
+            None => (None, (x, y).into()),
+        };
+        let event = PointerMotion { location, serial: SERIAL_COUNTER.next_serial(), time: self.time() };
         let pointer = self.state.pointer.clone();
         pointer.motion(&mut self.state, focus, &event);
         pointer.frame(&mut self.state);
@@ -376,10 +427,10 @@ impl Server {
     }
 
     pub fn touch_down(&mut self, window: u64, slot: u32, x: f64, y: f64) {
-        let Some(focus) = self.focus(window) else { return };
+        let Some((focus, location)) = self.focus(window, x, y) else { return };
         let event = TouchDown {
             slot: TouchSlot::from(Some(slot)),
-            location: (x, y).into(),
+            location,
             serial: SERIAL_COUNTER.next_serial(),
             time: self.time(),
         };
@@ -389,8 +440,11 @@ impl Server {
     }
 
     pub fn touch_motion(&mut self, window: u64, slot: u32, x: f64, y: f64) {
-        let focus = self.focus(window);
-        let event = TouchMotion { slot: TouchSlot::from(Some(slot)), location: (x, y).into(), time: self.time() };
+        let (focus, location) = match self.focus(window, x, y) {
+            Some((f, at)) => (Some(f), at),
+            None => (None, (x, y).into()),
+        };
+        let event = TouchMotion { slot: TouchSlot::from(Some(slot)), location, time: self.time() };
         let touch = self.state.touch.clone();
         touch.motion(&mut self.state, focus, &event);
         touch.frame(&mut self.state);
@@ -405,7 +459,7 @@ impl Server {
 
     /// Gives the window keyboard focus, or takes it from every window with `None`.
     pub fn keyboard_focus(&mut self, window: Option<u64>) {
-        let focus = window.and_then(|w| self.focus(w)).map(|(s, _)| s);
+        let focus = window.and_then(|w| self.focus(w, 0.0, 0.0)).map(|((s, _), _)| s);
         let keyboard = self.state.keyboard.clone();
         keyboard.set_focus(&mut self.state, focus, SERIAL_COUNTER.next_serial());
     }
@@ -479,6 +533,16 @@ impl CompositorHandler for State {
             .compositor
     }
 
+    /// Before the client can ask: wp_fractional_scale sends what is set here when it is bound.
+    fn new_surface(&mut self, surface: &WlSurface) {
+        let Some(client) = surface.client() else { return };
+        let s = self.client_scale(&client);
+        with_states(surface, |states| {
+            with_fractional_scale(states, |f| f.set_preferred_scale(s));
+            send_surface_state(surface, states, integer_scale(s), Transform::Normal);
+        });
+    }
+
     fn commit(&mut self, surface: &WlSurface) {
         let mut root = surface.clone();
         while let Some(parent) = get_parent(&root) {
@@ -505,6 +569,14 @@ impl CompositorHandler for State {
         });
         match assignment {
             Some(BufferAssignment::NewBuffer(buffer)) => {
+                let buf_w = match get_dmabuf(&buffer) {
+                    Ok(d) => d.size().w,
+                    Err(_) => with_buffer_contents(&buffer, |_, _, d| d.width).unwrap_or(0),
+                };
+                // Not a placeholder's single pixel, which a viewport stretches over the window.
+                if buf_w > 1 {
+                    self.windows[i].buffer_scale = buffer_per_unit(surface, buf_w);
+                }
                 let mut shm = false;
                 let content = if let Ok(dmabuf) = get_dmabuf(&buffer) {
                     let dmabuf = dmabuf.clone();
@@ -580,6 +652,48 @@ impl CompositorHandler for State {
 }
 
 impl State {
+    /// The client's scale: by its PID, else its process group, in `launch_scales`; else 1.
+    pub fn client_scale(&self, client: &Client) -> f64 {
+        let Some(data) = client.get_data::<ClientState>() else { return 1.0 };
+        let mut slot = data.scale.lock().unwrap_or_else(|e| e.into_inner());
+        *slot.get_or_insert_with(|| {
+            let Ok(pid) = client.get_credentials(&self.dh).map(|c| c.pid) else { return 1.0 };
+            // SAFETY: a plain syscall on a number.
+            let group = unsafe { libc::getpgid(pid) };
+            self.launch_scales.get(&pid).or_else(|| self.launch_scales.get(&group)).copied().unwrap_or(1.0)
+        })
+    }
+
+    /// Scales the window's client, every window of it, at once: wp_fractional_scale and
+    /// preferred_buffer_scale may change at any time, and a new configure gives the new size.
+    pub fn set_window_scale(&mut self, id: u64, s: f64) {
+        let Some(client) = self.windows.iter().find(|w| w.id == id).and_then(|w| w.toplevel.wl_surface().client()) else {
+            return;
+        };
+        let s = s.clamp(0.25, 8.0);
+        if let Some(data) = client.get_data::<ClientState>() {
+            *data.scale.lock().unwrap_or_else(|e| e.into_inner()) = Some(s);
+        }
+        for o in self.output.client_outputs(&client) {
+            send_output_scale(&o, s);
+        }
+        for w in self.windows.iter_mut().filter(|w| w.toplevel.wl_surface().client().as_ref() == Some(&client)) {
+            w.scale = s;
+            with_surface_tree_downward(
+                w.toplevel.wl_surface(),
+                (),
+                |_, _, _| TraversalAction::DoChildren(()),
+                |surface, states, _| {
+                    with_fractional_scale(states, |f| f.set_preferred_scale(s));
+                    send_surface_state(surface, states, integer_scale(s), Transform::Normal);
+                },
+                |_, _, _| true,
+            );
+            w.toplevel.with_pending_state(|st| st.size = Some(logical_size(s).into()));
+            w.toplevel.send_pending_configure();
+        }
+    }
+
     /// See `Window::native`. Lays the window out again at once, so a still picture follows.
     pub fn set_native(&mut self, id: u64, on: bool) {
         let Some(i) = self.windows.iter().position(|w| w.id == id) else { return };
@@ -670,6 +784,12 @@ impl State {
             },
             |_, _, _| true,
         );
+        // Subsurfaces sit at surface units; the window's frame is in its buffer's pixels.
+        let k = self.windows[i].buffer_scale;
+        let px = |v: f64| (v * k).round() as i32;
+        for (_, loc) in &mut placed {
+            *loc = (px(loc.x as f64), px(loc.y as f64)).into();
+        }
         let root_id = root.id();
         let has_layers = placed.iter().any(|(id, _)| *id != root_id && self.layers.contains_key(id));
         let dma: Vec<(Point<i32, Logical>, &DmaLayer)> =
@@ -711,6 +831,7 @@ impl State {
         let mut layers = Vec::new();
         for (loc, d) in &dma {
             let (lw, lh, src) = layer_geometry(d);
+            let (lw, lh) = (px(lw as f64).max(1), px(lh as f64).max(1));
             w = w.max((loc.x.max(0) + lw) as u32);
             h = h.max((loc.y.max(0) + lh) as u32);
             layers.push(SceneLayer { key: d.key, dmabuf: d.dmabuf.clone(), x: loc.x, y: loc.y, w: lw, h: lh, src });
@@ -718,8 +839,8 @@ impl State {
         if !dma.is_empty() && real_base.is_none() {
             // A video window's toplevel is a placeholder scaled to the whole window by viewporter.
             if let Some(d) = with_states(&root, |s| s.cached_state.get::<ViewportCachedState>().current().dst) {
-                w = w.max(d.w.max(0) as u32);
-                h = h.max(d.h.max(0) as u32);
+                w = w.max(px(d.w as f64).max(0) as u32);
+                h = h.max(px(d.h as f64).max(0) as u32);
             }
         }
         if w == 0 || h == 0 {
@@ -792,7 +913,18 @@ fn blit(canvas: &mut [u8], w: u32, h: u32, f: &Frame, x0: i32, y0: i32) {
     }
 }
 
-/// A dmabuf layer's size in window pixels and the 0..1 part of the buffer it shows, from its
+/// Buffer pixels per surface unit across: what the viewport's destination (or source) or the
+/// buffer scale makes of a `buf_w` wide buffer.
+fn buffer_per_unit(surface: &WlSurface, buf_w: i32) -> f64 {
+    with_states(surface, |states| {
+        let vp = *states.cached_state.get::<ViewportCachedState>().current();
+        let scale = states.cached_state.get::<SurfaceAttributes>().current().buffer_scale.max(1) as f64;
+        let w = vp.dst.map(|d| d.w as f64).or(vp.src.map(|r| r.size.w)).unwrap_or(buf_w as f64 / scale);
+        if w > 0.0 { buf_w as f64 / w } else { 1.0 }
+    })
+}
+
+/// A dmabuf layer's size in surface units and the 0..1 part of the buffer it shows, from its
 /// viewporter state (source crop, destination size) and buffer scale.
 fn layer_geometry(d: &DmaLayer) -> (i32, i32, [f32; 4]) {
     let buf = d.dmabuf.size();
@@ -832,8 +964,11 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
         // The panel is the only place a window can be: fullscreen on it.
         use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgState;
+        let scale = toplevel.wl_surface().client().map_or(1.0, |c| self.client_scale(&c));
+        // wl_output's integer scale reaches only surfaces on the output.
+        self.output.enter(toplevel.wl_surface());
         toplevel.with_pending_state(|s| {
-            s.size = Some((1920, 720).into());
+            s.size = Some(logical_size(scale).into());
             s.states.set(XdgState::Fullscreen);
             s.states.set(XdgState::Activated);
         });
@@ -852,6 +987,8 @@ impl XdgShellHandler for State {
             canvas: None,
             canvas_size: (0, 0),
             native: false,
+            scale,
+            buffer_scale: 1.0,
         });
     }
 
@@ -916,7 +1053,25 @@ impl DataDeviceHandler for State {
 }
 delegate_data_device!(State);
 
-impl OutputHandler for State {}
+/// wl_output's scale is per bound resource, so each client gets its own.
+fn send_output_scale(o: &WlOutput, s: f64) {
+    if o.version() >= 2 {
+        o.scale(integer_scale(s));
+        o.done();
+    }
+}
+
+impl OutputHandler for State {
+    fn output_bound(&mut self, _: Output, o: WlOutput) {
+        let s = o.client().map_or(1.0, |c| self.client_scale(&c));
+        if integer_scale(s) != 1 {
+            send_output_scale(&o, s);
+        }
+    }
+}
+
+impl FractionalScaleHandler for State {}
+delegate_fractional_scale!(State);
 
 #[cfg(test)]
 mod tests {
@@ -928,7 +1083,7 @@ mod tests {
     use std::os::fd::AsRawFd;
 
     use super::*;
-    use crate::test_client::{self, Format as BufFormat, Opts, Pattern};
+    use crate::test_client::{self, Format as BufFormat, Honour, Opts, Pattern};
 
     /// Dispatches and completes frames until `done` holds; false after five seconds.
     fn pump(server: &mut Server, mut done: impl FnMut(&State) -> bool) -> bool {
@@ -971,6 +1126,23 @@ mod tests {
             format: BufFormat::Xrgb8888,
             video: false,
             events: None,
+            honour: Honour::None,
+        }
+    }
+
+    /// Clients of this test process get scale `s`, through `launch_scales` as launched apps do.
+    fn scaled(s: f64) -> Server {
+        let mut server = server();
+        server.state.launch_scales.insert(std::process::id() as i32, s);
+        server
+    }
+
+    /// Buffer pixels per surface unit a client draws at for scale `s`.
+    fn honoured(h: Honour, s: f64) -> f64 {
+        match h {
+            Honour::None => 1.0,
+            Honour::Fractional => s,
+            Honour::Integer => integer_scale(s) as f64,
         }
     }
 
@@ -997,21 +1169,62 @@ mod tests {
     }
 
     #[test]
+    /// At any scale the client honours, the frame is its buffer, the picture drawn at that many
+    /// pixels per surface unit, and a scale changed live is drawn at anew. 96 x 64 surface units.
     fn a_client_buffer_becomes_its_window_frame() {
-        for dmabuf in [false, true] {
-            let mut server = server();
-            let _client = client(&mut server, opts(Pattern::Grid, None, dmabuf));
-            assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))), "dmabuf={dmabuf}");
+        let cases: &[(bool, Honour, f64, Option<f64>)] = &[
+            (false, Honour::None, 1.0, None),
+            (true, Honour::None, 1.0, None),
+            (false, Honour::Fractional, 1.5, Some(2.0)),
+            (true, Honour::Fractional, 1.75, Some(1.25)),
+            (false, Honour::Integer, 2.0, Some(1.0)),
+            // The nearest whole scale.
+            (false, Honour::Integer, 1.5, None),
+            (false, Honour::None, 1.5, Some(2.0)),
+        ];
+        for &(dmabuf, honour, scale, then) in cases {
+            let case = format!("dmabuf={dmabuf} {honour:?} {scale}");
+            let mut server = scaled(scale);
+            let mut o = opts(Pattern::Grid, None, dmabuf);
+            o.honour = honour;
+            let _client = client(&mut server, o);
+            assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))), "{case}");
             let w = &server.state.windows[0];
-            assert_eq!((w.app_id.as_str(), w.title.as_str()), ("org.test.app", "test"));
-            let content = w.frame.as_ref().unwrap();
-            assert_eq!(matches!(content, Content::Dmabuf { .. }), dmabuf);
-            let f = pixels(content);
-            assert_eq!((f.width, f.height, f.rgba.len()), (96, 64, 96 * 64 * 4));
-            let at = |x: u32, y: u32| &f.rgba[((y * 96 + x) * 4) as usize..][..4];
-            for (x, y) in [(0, 0), (70, 0), (70, 63), (95, 63)] {
-                assert_eq!(at(x, y), Pattern::Grid.pixel(x, y, 96), "dmabuf={dmabuf} ({x}, {y})");
+            assert_eq!((w.app_id.as_str(), w.title.as_str(), w.scale), ("org.test.app", "test", scale), "{case}");
+            assert_eq!(matches!(w.frame.as_ref().unwrap(), Content::Dmabuf { .. }), dmabuf, "{case}");
+            for s in std::iter::once(scale).chain(then) {
+                let k = honoured(honour, s);
+                let (fw, fh) = ((96.0 * k).round() as u32, (64.0 * k).round() as u32);
+                if s != scale {
+                    server.state.set_window_scale(1, s);
+                    assert!(
+                        pump(&mut server, |st| st.windows[0].frame.as_ref().is_some_and(|c| pixels(c).width == fw)),
+                        "{case} -> {s}: no {fw} px frame"
+                    );
+                }
+                let w = &server.state.windows[0];
+                assert_eq!(w.buffer_scale, k, "{case} -> {s}");
+                let f = pixels(w.frame.as_ref().unwrap());
+                assert_eq!((f.width, f.height, f.rgba.len()), (fw, fh, (fw * fh * 4) as usize), "{case} -> {s}");
+                let at = |x: u32, y: u32| &f.rgba[((y * fw + x) * 4) as usize..][..4];
+                // Each side of the red cell's edge, 64 units in, and the far corners.
+                let edge = (64.0 * k) as u32;
+                for (x, y) in [(0, 0), (edge - 1, 0), (edge, 0), (fw - 1, edge - 1), (fw - 1, fh - 1)] {
+                    let want = Pattern::Grid.pixel((x as f64 / k) as u32, (y as f64 / k) as u32, 96);
+                    assert_eq!(at(x, y), want, "{case} -> {s} ({x}, {y})");
+                }
             }
+        }
+    }
+
+    #[test]
+    fn scales_for_the_panel() {
+        // The panel from 750 mm (rules.yaml's view_mm), a desktop's distance, and closer and farther.
+        for (view_mm, want) in [(750.0, 1.75), (711.2, 1.75), (600.0, 1.5), (400.0, 1.0), (2000.0, 2.0)] {
+            assert_eq!(default_scale(view_mm), want, "{view_mm} mm");
+        }
+        for (s, size, int) in [(1.0, (1920, 720), 1), (1.25, (1536, 576), 1), (1.5, (1280, 480), 2), (1.75, (1097, 411), 2), (2.0, (960, 360), 2)] {
+            assert_eq!((logical_size(s), integer_scale(s)), (size, int), "{s}");
         }
     }
 
@@ -1067,36 +1280,44 @@ mod tests {
         }
     }
 
-    /// Each kind of input reaches the window at the position given, in order.
+    /// Each kind of input reaches the window at the position given, in order: positions in the
+    /// window's frame, which is `k` buffer pixels per surface unit, land on the surface.
     #[test]
     fn input_reaches_the_window_at_surface_positions() {
-        type Send = fn(&mut Server);
+        type Send = fn(&mut Server, f64);
         let steps: &[(Send, &[&str])] = &[
-            (|s| s.pointer_motion(Some(1), 10.5, 20.0), &["pointer enter 10.5 20.0"]),
-            (|s| s.pointer_motion(Some(1), 12.0, 22.5), &["pointer motion 12.0 22.5"]),
-            (|s| s.pointer_button(0x110, true), &["pointer button 272 pressed"]),
-            (|s| s.pointer_button(0x110, false), &["pointer button 272 released"]),
-            (|s| s.pointer_motion(None, 0.0, 0.0), &["pointer leave"]),
-            (|s| s.touch_down(1, 0, 30.0, 40.0), &["touch down 0 30.0 40.0"]),
-            (|s| s.touch_motion(1, 0, 31.0, 41.5), &["touch motion 0 31.0 41.5"]),
-            (|s| s.touch_up(0), &["touch up 0"]),
-            (|s| s.keyboard_focus(Some(1)), &["keyboard enter"]),
-            (|s| s.key(30, true), &["key 30 pressed"]),
-            (|s| s.key(30, false), &["key 30 released"]),
-            (|s| s.keyboard_focus(None), &["keyboard leave"]),
+            (|s, k| s.pointer_motion(Some(1), 10.5 * k, 20.0 * k), &["pointer enter 10.5 20.0"]),
+            (|s, k| s.pointer_motion(Some(1), 12.0 * k, 22.5 * k), &["pointer motion 12.0 22.5"]),
+            (|s, _| s.pointer_button(0x110, true), &["pointer button 272 pressed"]),
+            (|s, _| s.pointer_button(0x110, false), &["pointer button 272 released"]),
+            (|s, _| s.pointer_motion(None, 0.0, 0.0), &["pointer leave"]),
+            (|s, k| s.touch_down(1, 0, 30.0 * k, 40.0 * k), &["touch down 0 30.0 40.0"]),
+            (|s, k| s.touch_motion(1, 0, 31.0 * k, 41.5 * k), &["touch motion 0 31.0 41.5"]),
+            (|s, _| s.touch_up(0), &["touch up 0"]),
+            (|s, _| s.keyboard_focus(Some(1)), &["keyboard enter"]),
+            (|s, _| s.key(30, true), &["key 30 pressed"]),
+            (|s, _| s.key(30, false), &["key 30 released"]),
+            (|s, _| s.keyboard_focus(None), &["keyboard leave"]),
         ];
-        let mut server = server();
-        let client = client(&mut server, opts(Pattern::Grid, None, false));
-        assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))));
-        for (send, _) in steps {
-            send(&mut server);
-            server.dispatch().unwrap();
+        let cases = [(Honour::None, 1.0), (Honour::Fractional, 1.5), (Honour::Integer, 2.0), (Honour::None, 1.75)];
+        for (honour, scale) in cases {
+            let k = honoured(honour, scale);
+            let mut server = scaled(scale);
+            let mut o = opts(Pattern::Grid, None, false);
+            o.honour = honour;
+            let client = client(&mut server, o);
+            assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))));
+            assert_eq!(server.state.windows[0].buffer_scale, k, "{honour:?} {scale}");
+            for (send, _) in steps {
+                send(&mut server, k);
+                server.dispatch().unwrap();
+            }
+            server.close(1);
+            assert!(pump(&mut server, |s| s.windows.is_empty()));
+            let got: Vec<String> = client.join().unwrap().events.into_iter().filter(|e| !e.starts_with("buffer ")).collect();
+            let want: Vec<&str> = steps.iter().flat_map(|(_, w)| w.iter().copied()).collect();
+            assert_eq!(got, want, "{honour:?} {scale}");
         }
-        server.close(1);
-        assert!(pump(&mut server, |s| s.windows.is_empty()));
-        let got = client.join().unwrap().events;
-        let want: Vec<&str> = steps.iter().flat_map(|(_, w)| w.iter().copied()).collect();
-        assert_eq!(got, want);
     }
 
     #[test]

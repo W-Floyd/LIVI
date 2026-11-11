@@ -14,6 +14,8 @@ signal show_window(id: int)
 
 ## Grace between asking a window to close, SIGTERM to its process group, and SIGKILL.
 const CLOSE_GRACE_S := 3.0
+## The scales, in percent, the settings offer apps.
+const SCALES := [100, 125, 150, 175, 200]
 
 ## `{id, name, icon, argv, cwd, app_ids, source, timeout_s}`, in the order to show.
 var apps: Array = []
@@ -35,6 +37,7 @@ var _poll_at := 0
 func _ready() -> void:
 	Wayland.window_mapped.connect(_on_mapped)
 	Wayland.window_unmapped.connect(_on_unmapped)
+	ThemeManager.changed.connect(_rescale)
 
 
 func _exit_tree() -> void:
@@ -126,7 +129,9 @@ func open(id: String) -> void:
 	if pid < 0:
 		failed[id] = "could not start %s" % a.argv[0]
 	else:
-		print("launcher: %s started as %d: %s" % [id, pid, " ".join(a.argv)])
+		print("launcher: %s started as %d at %d %%: %s" % [id, pid, scale_of(id), " ".join(a.argv)])
+		# Before the compositor next dispatches, which is when the client can connect.
+		Wayland.set_process_scale(pid, scale_of(id) / 100.0)
 		_pids[id] = pid
 		launching[id] = {pid = pid, until = Time.get_ticks_msec() + int(a.timeout_s) * 1000}
 	changed.emit()
@@ -160,6 +165,7 @@ func close(window: int) -> void:
 func stop_all() -> void:
 	for id in _pids:
 		_catalog.stop(_pids[id], false)
+		Wayland.set_process_scale(_pids[id], 0)
 	_pids.clear()
 	launching.clear()
 
@@ -179,6 +185,7 @@ func _process(_delta: float) -> void:
 		var code: int = _catalog.poll(_pids[id])
 		if code <= 0:
 			continue
+		Wayland.set_process_scale(_pids[id], 0)
 		_pids.erase(id)
 		if launching.has(id):
 			launching.erase(id)
@@ -234,6 +241,48 @@ func _owner_of(app_id: String, window: int, fresh: bool) -> String:
 	if fresh and launching.size() == 1:
 		return launching.keys()[0]
 	return ""
+
+
+## The scale, in percent, at which a logical pixel looks from the driver's seat as a desktop's
+## does from a desk (`Wayland.default_app_scale`): 175 for this panel from rules.yaml's view_mm.
+static func auto_scale() -> int:
+	return roundi(Wayland.default_app_scale(float(ThemeManager.rules.get("view_mm", 750))) * 100.0)
+
+
+## The shell's scale for apps: Settings' choice, else `auto_scale`.
+static func default_scale() -> int:
+	return ThemeManager.app_scale if ThemeManager.app_scale > 0 else auto_scale()
+
+
+## The app's scale in percent: its own in Settings, else apps.yaml's `scale`, else the default.
+func scale_of(id: String) -> int:
+	if ThemeManager.app_scales.has(id):
+		return int(ThemeManager.app_scales[id])
+	var own := int(app(id).get("scale", 0))
+	return own if own > 0 else default_scale()
+
+
+## The app's own scale, saved with the look; 0 goes back to apps.yaml's or the default. Its
+## windows follow at once.
+func set_app_scale(id: String, percent: int) -> void:
+	var scales: Dictionary = ThemeManager.app_scales.duplicate()
+	if percent > 0:
+		scales[id] = percent
+	else:
+		scales.erase(id)
+	ThemeManager.set_look({app_scales = scales})
+	ThemeManager.save_look()
+
+
+## Windows of launched apps whose scale has changed get the new one.
+func _rescale() -> void:
+	for w in windows:
+		var id: String = windows[w].app
+		if id == "" or not _pids.has(id):
+			continue
+		var s := scale_of(id) / 100.0
+		if not is_equal_approx(Wayland.window_scale(w), s):
+			Wayland.set_window_scale(w, s)
 
 
 ## Running windows for the switcher, most recent first: `{window, app, name, icon}`.

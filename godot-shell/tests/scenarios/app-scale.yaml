@@ -1,0 +1,91 @@
+name: app-scale
+# Apps draw at their scale and take input in surface units. The test client is 640×360 units:
+# at 150 % it draws 960×540 through wp_fractional_scale, 1280×720 through preferred_buffer_scale
+# (the nearest whole scale), and 640×360 when it honours neither, which the view stretches. Each
+# draws its 64-unit grid at its own pixels, and a tap on the picture's centre lands on (320, 180).
+# A launched app gets apps.yaml's `scale`; holding its tile opens its menu, which rescales it live.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  apps: fixtures/apps
+  clients:
+    - { role: app, app_id: org.livi.test.frac, size: 640x360, events: true, honour: fractional, scale: 150 }
+    - { role: app, app_id: org.livi.test.int, size: 640x360, events: true, honour: integer, scale: 150 }
+    - { role: app, app_id: org.livi.test.plain, size: 640x360, events: true, scale: 150 }
+steps:
+  - wait: { window: org.livi.test.frac }
+  - wait: { window: org.livi.test.int }
+  - wait: { window: org.livi.test.plain }
+  - wait: { frames: 2 }
+  - gdscript: |
+      # Buffer size, and the grid's red cell ending 64 units in, in buffer pixels.
+      for want in [["org.livi.test.frac", Vector2(960, 540), 96], ["org.livi.test.int", Vector2(1280, 720), 128], ["org.livi.test.plain", Vector2(640, 360), 64]]:
+          var w = Wayland.find_window(want[0])
+          var tex = Wayland.texture(w)
+          if tex.get_size() != want[1]:
+              return "%s is %s, want %s" % [want[0], tex.get_size(), want[1]]
+          if not is_equal_approx(Wayland.window_scale(w), 1.5):
+              return "%s asked scale %s" % [want[0], Wayland.window_scale(w)]
+          var img = RenderingServer.texture_2d_get(tex.get_rid())
+          var edge: int = want[2]
+          if img.get_pixel(edge - 1, 8).to_rgba32() != Color8(220, 40, 40).to_rgba32() or img.get_pixel(edge, 8).to_rgba32() != Color8(200, 200, 200).to_rgba32():
+              return "%s: red cell does not end at %d px: %s | %s" % [want[0], edge, img.get_pixel(edge - 1, 8), img.get_pixel(edge, 8)]
+  - gdscript: shell.bring_forward(Wayland.find_window("org.livi.test.frac"))
+  - wait: { frames: 2 }
+  - tap: { node: Projection/Window, with: touch }
+  - expect_client: { app_id: org.livi.test.frac, lines: ["buffer 960x540", "touch down 0 320.0 180.0", "touch up 0"] }
+  - screenshot: { name: app-scale-150, compare: false }
+  - gdscript: shell.bring_forward(Wayland.find_window("org.livi.test.int"))
+  - wait: { frames: 2 }
+  - tap: { node: Projection/Window, with: touch }
+  - expect_client: { app_id: org.livi.test.int, lines: ["buffer 1280x720", "touch down 0 320.0 180.0", "touch up 0"] }
+  - gdscript: shell.bring_forward(Wayland.find_window("org.livi.test.plain"))
+  - wait: { frames: 2 }
+  - tap: { node: Projection/Window, with: touch }
+  - expect_client: { app_id: org.livi.test.plain, lines: ["touch down 0 320.0 180.0", "touch up 0"] }
+  # Live: the fractional client redraws at 2x.
+  - gdscript: |
+      Wayland.set_window_scale(Wayland.find_window("org.livi.test.frac"), 2.0)
+  - expect_client: { app_id: org.livi.test.frac, lines: ["buffer 1280x720"] }
+  # apps.yaml's scale: 150 for Extra command, a fractional client.
+  - page: apps
+  - tap: { node: Apps/Scroll/List/Grid/org_livi_test_extra }
+  - wait: { window: org.livi.test.extra }
+  - wait: { frames: 2 }
+  - gdscript: |
+      var w = Wayland.find_window("org.livi.test.extra")
+      if shell.launcher.scale_of("org.livi.test.extra") != 150 or not is_equal_approx(Wayland.window_scale(w), 1.5):
+          return "extra at %d %%, window %s" % [shell.launcher.scale_of("org.livi.test.extra"), Wayland.window_scale(w)]
+      if Wayland.texture(w).get_size() != Vector2(960, 540):
+          return "extra is %s" % Wayland.texture(w).get_size()
+  # Held, the tile opens the menu and does not bring the window.
+  - page: apps
+  - gdscript: |
+      var tile = shell.get_node("Apps/Scroll/List/Grid/org_livi_test_extra")
+      var at = tile.get_global_rect().get_center()
+      for pressed in [true, false]:
+          var ev = InputEventMouseButton.new()
+          ev.position = at
+          ev.button_index = MOUSE_BUTTON_LEFT
+          ev.button_mask = MOUSE_BUTTON_MASK_LEFT if pressed else 0
+          ev.pressed = pressed
+          runner._vp.push_input(ev)
+          await runner.frames(50 if pressed else 2)
+      if shell.get_node_or_null("Apps/Menu") == null:
+          return "no menu after a hold"
+      if shell._page_name != "apps":
+          return "the hold opened %s" % shell._page_name
+  - expect_node: { path: Apps/Menu/Panel/Box/Sizes/s0, text: Default (150 %) }
+  - screenshot: { name: app-scale-menu, compare: false }
+  - tap: { node: Apps/Menu/Panel/Box/Sizes/s200 }
+  - gdscript: |
+      var w = Wayland.find_window("org.livi.test.extra")
+      var until = Time.get_ticks_msec() + 5000
+      while Wayland.texture(w).get_size() != Vector2(1280, 720) and Time.get_ticks_msec() < until:
+          await runner.frames(1)
+      if Wayland.texture(w).get_size() != Vector2(1280, 720) or not is_equal_approx(Wayland.window_scale(w), 2.0):
+          return "extra is %s at %s" % [Wayland.texture(w).get_size(), Wayland.window_scale(w)]
+      if shell.get_node_or_null("Apps/Menu") != null:
+          return "the menu stayed"
+      if ThemeManager.app_scales != {"org.livi.test.extra": 200}:
+          return "saved %s" % ThemeManager.app_scales

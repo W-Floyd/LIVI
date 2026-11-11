@@ -165,7 +165,8 @@ func _run_one(path: String) -> String:
 	return ""
 
 
-## `{ role: app, app_id, pattern, size: WxH, animate: N, buffer: shm|dmabuf|nv12|i420, video: true }` as a test client process, or
+## `{ role: app, app_id, pattern, size: WxH, animate: N, buffer: shm|dmabuf|nv12|i420, video: true,
+## honour: none|fractional|integer, scale: percent }` as a test client process, or
 ## `{ role: command, run: [program, args...] }` for a real one, such as weston-terminal.
 func _spawn(c: Dictionary) -> String:
 	var bin := _client_bin
@@ -183,6 +184,8 @@ func _spawn(c: Dictionary) -> String:
 				args.append_array(["--buffer", c.buffer])
 			if c.get("video", false):
 				args.append("--video")
+			if c.has("honour"):
+				args.append_array(["--honour", c.honour])
 			if c.get("events", false):
 				DirAccess.make_dir_recursive_absolute(_out.path_join(_scenario))
 				args.append_array(["--events", _client_events(c.get("app_id", "org.livi.test"))])
@@ -199,6 +202,8 @@ func _spawn(c: Dictionary) -> String:
 	if pid <= 0:
 		return "could not start %s" % bin
 	_clients.append(pid)
+	if c.has("scale"):
+		Wayland.set_process_scale(pid, float(c.scale) / 100.0)
 	return ""
 
 
@@ -208,6 +213,7 @@ func _teardown() -> void:
 	_record_stop()
 	for pid in _clients:
 		OS.kill(pid)
+		Wayland.set_process_scale(pid, 0)
 	_clients.clear()
 	if _shell:
 		_shell.launcher.stop_all()

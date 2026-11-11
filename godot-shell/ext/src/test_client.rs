@@ -19,6 +19,9 @@ use wayland_client::protocol::wl_pointer::{self, WlPointer};
 use wayland_client::protocol::wl_seat::{self, WlSeat};
 use wayland_client::protocol::wl_touch::{self, WlTouch};
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum, delegate_noop};
+use wayland_client::protocol::wl_surface;
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{self, WpFractionalScaleV1};
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1};
@@ -67,6 +70,29 @@ impl Pattern {
     }
 }
 
+/// Which scale the client draws at, of what the compositor prefers.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Honour {
+    /// Neither: buffers are the size asked for, at scale 1.
+    #[default]
+    None,
+    /// wp_fractional_scale_v1, the buffer sized by it and shown at the logical size by viewporter.
+    Fractional,
+    /// wl_surface.preferred_buffer_scale, as wl_surface.set_buffer_scale.
+    Integer,
+}
+
+impl Honour {
+    pub fn parse(s: &str) -> Option<Honour> {
+        match s {
+            "none" => Some(Honour::None),
+            "fractional" => Some(Honour::Fractional),
+            "integer" => Some(Honour::Integer),
+            _ => None,
+        }
+    }
+}
+
 /// Pixel layout of a dmabuf; planar ones are limited-range YUV, BT.601 or BT.709 by size as the
 /// compositor picks.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -111,6 +137,7 @@ impl Format {
 pub struct Opts {
     pub app_id: String,
     pub title: String,
+    /// In surface units: the buffer is this times the scale honoured, the pattern drawn to match.
     pub width: u32,
     pub height: u32,
     pub pattern: Pattern,
@@ -126,6 +153,8 @@ pub struct Opts {
     pub video: bool,
     /// Also append each input event, one line each, to this file as it arrives.
     pub events: Option<std::path::PathBuf>,
+    /// Not with `video`. Unless `None`, each new buffer size is an event, `buffer 960x540`.
+    pub honour: Honour,
 }
 
 /// What a run saw: frames drawn, and every input event in the order it came, such as
@@ -141,6 +170,13 @@ struct App {
     compositor: Option<WlCompositor>,
     subcompositor: Option<WlSubcompositor>,
     viewporter: Option<WpViewporter>,
+    fractional: Option<WpFractionalScaleManagerV1>,
+    /// The compositor's latest preferences: 120ths, and the whole scale.
+    scale_120: u32,
+    buffer_scale: i32,
+    honour: Honour,
+    /// A preference honoured changed since the buffers were made.
+    rescale: bool,
     shm: Option<WlShm>,
     wm_base: Option<XdgWmBase>,
     dmabuf: Option<ZwpLinuxDmabufV1>,
@@ -171,7 +207,7 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();
     conn.display().get_registry(&qh, ());
-    let mut app = App::default();
+    let mut app = App { honour: opts.honour, ..App::default() };
     if let Some(path) = &opts.events {
         app.log = Some(File::create(path)?);
     }
@@ -187,14 +223,19 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     let toplevel = xdg.get_toplevel(&qh, ());
     toplevel.set_app_id(opts.app_id.clone());
     toplevel.set_title(opts.title.clone());
+    // Before the first commit, so the first buffer can be the right size.
+    let mut scaled = None;
+    if opts.honour == Honour::Fractional {
+        let (Some(fs), Some(vp)) = (app.fractional.clone(), app.viewporter.clone()) else {
+            return Err(io::Error::other("compositor lacks wp_fractional_scale_manager_v1 or wp_viewporter"));
+        };
+        scaled = Some((fs.get_fractional_scale(&surface, &qh, ()), vp.get_viewport(&surface, &qh, ())));
+    }
     surface.commit();
     while !app.configured {
         queue.blocking_dispatch(&mut app).map_err(|e| err(&e))?;
     }
 
-    let (w, h) = (opts.width, opts.height);
-    let (planes, size) = if opts.dmabuf { opts.format.planes(w, h) } else { Format::Xrgb8888.planes(w, h) };
-    let stride = planes[0].1;
     let dmabuf = match (opts.dmabuf, app.dmabuf.clone()) {
         (false, _) => None,
         (true, Some(d)) => Some(d),
@@ -204,6 +245,7 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     // under a placeholder toplevel, with the toplevel's own picture a transparent pixel.
     let mut keep = Vec::new();
     let target = if opts.video {
+        let (w, h) = (opts.width, opts.height);
         let (Some(sub), Some(vp)) = (app.subcompositor.clone(), app.viewporter.clone()) else {
             return Err(io::Error::other("compositor lacks wl_subcompositor or wp_viewporter"));
         };
@@ -232,42 +274,26 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     } else {
         surface.clone()
     };
-    // Three buffers, each reused only once the compositor has released it, as Mesa's clients
-    // do: a dmabuf comes back a frame after its successor is shown, so two would halve the rate.
-    let mut slots = Vec::new();
-    for i in 0..3 {
-        let file = memfd(size, dmabuf.is_some())?;
-        // SAFETY: a fresh memfd of `size` bytes, mapped shared until the end of this function.
-        let map = unsafe {
-            libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, file.as_raw_fd(), 0)
-        };
-        if map == libc::MAP_FAILED {
-            return Err(io::Error::last_os_error());
-        }
-        let (buffer, pool) = match &dmabuf {
-            Some(d) => {
-                let fd = udmabuf(&file, size)?;
-                let params = d.create_params(&qh, ());
-                // LINEAR: modifier 0. One fd for every plane.
-                for (n, &(offset, stride)) in planes.iter().enumerate() {
-                    params.add(fd.as_fd(), n as u32, offset, stride, 0, 0);
-                }
-                let buffer = params.create_immed(w as i32, h as i32, opts.format.fourcc(), zwp_linux_buffer_params_v1::Flags::empty(), &qh, i);
-                params.destroy();
-                (buffer, None)
-            }
-            None => {
-                let pool = shm.create_pool(file.as_fd(), size as i32, &qh, ());
-                let buffer = pool.create_buffer(0, w as i32, h as i32, stride as i32, wl_shm::Format::Xrgb8888, &qh, i);
-                (buffer, Some(pool))
-            }
-        };
-        app.busy.push(false);
-        slots.push((buffer, pool, map, file));
-    }
 
+    let mut slots: Vec<Slot> = Vec::new();
+    let mut size = Size::default();
     let mut drawn = 0;
     loop {
+        if slots.is_empty() || app.rescale {
+            app.rescale = false;
+            size = Size::of(opts, &app);
+            free(std::mem::take(&mut slots));
+            slots = alloc(opts, &size, &shm, dmabuf.as_ref(), &qh)?;
+            app.busy = vec![false; slots.len()];
+            match (&scaled, opts.honour) {
+                (Some((_, vp)), _) => vp.set_destination(opts.width as i32, opts.height as i32),
+                (None, Honour::Integer) => target.set_buffer_scale(size.integer),
+                _ => {}
+            }
+            if opts.honour != Honour::None {
+                app.note(format!("buffer {}x{}", size.w, size.h));
+            }
+        }
         let i = loop {
             if let Some(i) = app.busy.iter().position(|b| !b) {
                 break Some(i);
@@ -278,15 +304,15 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
         };
         let Some(i) = i else { break };
         // SAFETY: slot i's mapping, which the compositor has released.
-        let pixels = unsafe { std::slice::from_raw_parts_mut(slots[i].2 as *mut u8, size) };
+        let pixels = unsafe { std::slice::from_raw_parts_mut(slots[i].map as *mut u8, size.bytes) };
         if opts.dmabuf && opts.format != Format::Xrgb8888 {
-            draw_yuv(pixels, opts, drawn, &planes);
+            draw_yuv(pixels, opts, drawn, &size.planes);
         } else {
-            draw(&mut pixels[..(stride * h) as usize], opts, drawn);
+            draw(&mut pixels[..(size.planes[0].1 * size.h) as usize], opts, &size, drawn);
         }
         app.busy[i] = true;
-        target.attach(Some(&slots[i].0), 0, 0);
-        target.damage_buffer(0, 0, w as i32, h as i32);
+        target.attach(Some(&slots[i].buffer), 0, 0);
+        target.damage_buffer(0, 0, size.w as i32, size.h as i32);
         if opts.animate.is_some() {
             target.frame(&qh, ());
             app.frame_due = false;
@@ -296,7 +322,7 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
         if opts.animate.is_some_and(|n| drawn >= n) {
             break;
         }
-        while !app.closed && !(opts.animate.is_some() && app.frame_due) {
+        while !app.closed && !app.rescale && !(opts.animate.is_some() && app.frame_due) {
             if queue.blocking_dispatch(&mut app).is_err() {
                 app.closed = true;
             }
@@ -316,19 +342,100 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
     if opts.video {
         target.destroy();
     }
+    if let Some((fs, vp)) = scaled {
+        fs.destroy();
+        vp.destroy();
+    }
     toplevel.destroy();
     xdg.destroy();
     surface.destroy();
-    for (buffer, pool, map, _file) in slots {
-        buffer.destroy();
-        if let Some(p) = pool {
-            p.destroy();
-        }
-        // SAFETY: unmapping a mapping made above; nothing reads it after this.
-        unsafe { libc::munmap(map, size) };
-    }
+    free(slots);
     let _ = queue.roundtrip(&mut app);
     Ok(Report { drawn, events: app.events })
+}
+
+/// The buffers' size and layout for the scale honoured now.
+#[derive(Default)]
+struct Size {
+    w: u32,
+    h: u32,
+    /// Buffer pixels per surface unit.
+    scale: f64,
+    integer: i32,
+    planes: Vec<(u32, u32)>,
+    bytes: usize,
+}
+
+impl Size {
+    fn of(opts: &Opts, app: &App) -> Size {
+        let integer = app.buffer_scale.max(1);
+        let scale = match opts.honour {
+            Honour::None => 1.0,
+            Honour::Fractional => app.scale_120.max(1) as f64 / 120.0,
+            Honour::Integer => integer as f64,
+        };
+        // As the protocol has it: the logical size times the scale, rounded.
+        let (w, h) = ((opts.width as f64 * scale).round() as u32, (opts.height as f64 * scale).round() as u32);
+        let format = if opts.dmabuf { opts.format } else { Format::Xrgb8888 };
+        let (planes, bytes) = format.planes(w, h);
+        Size { w, h, scale, integer, planes, bytes }
+    }
+}
+
+struct Slot {
+    buffer: WlBuffer,
+    pool: Option<WlShmPool>,
+    map: *mut libc::c_void,
+    bytes: usize,
+    _file: File,
+}
+
+/// Three buffers, each reused only once the compositor has released it, as Mesa's clients
+/// do: a dmabuf comes back a frame after its successor is shown, so two would halve the rate.
+fn alloc(opts: &Opts, size: &Size, shm: &WlShm, dmabuf: Option<&ZwpLinuxDmabufV1>, qh: &QueueHandle<App>) -> io::Result<Vec<Slot>> {
+    let mut slots = Vec::new();
+    for i in 0..3 {
+        let file = memfd(size.bytes, dmabuf.is_some())?;
+        // SAFETY: a fresh memfd of `size.bytes` bytes, mapped shared until `free`.
+        let map = unsafe {
+            libc::mmap(std::ptr::null_mut(), size.bytes, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, file.as_raw_fd(), 0)
+        };
+        if map == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        let (w, h) = (size.w as i32, size.h as i32);
+        let (buffer, pool) = match dmabuf {
+            Some(d) => {
+                let fd = udmabuf(&file, size.bytes)?;
+                let params = d.create_params(qh, ());
+                // LINEAR: modifier 0. One fd for every plane.
+                for (n, &(offset, stride)) in size.planes.iter().enumerate() {
+                    params.add(fd.as_fd(), n as u32, offset, stride, 0, 0);
+                }
+                let buffer = params.create_immed(w, h, opts.format.fourcc(), zwp_linux_buffer_params_v1::Flags::empty(), qh, i);
+                params.destroy();
+                (buffer, None)
+            }
+            None => {
+                let pool = shm.create_pool(file.as_fd(), size.bytes as i32, qh, ());
+                let buffer = pool.create_buffer(0, w, h, size.planes[0].1 as i32, wl_shm::Format::Xrgb8888, qh, i);
+                (buffer, Some(pool))
+            }
+        };
+        slots.push(Slot { buffer, pool, map, bytes: size.bytes, _file: file });
+    }
+    Ok(slots)
+}
+
+fn free(slots: Vec<Slot>) {
+    for s in slots {
+        s.buffer.destroy();
+        if let Some(p) = s.pool {
+            p.destroy();
+        }
+        // SAFETY: unmapping a mapping `alloc` made; nothing reads it after this.
+        unsafe { libc::munmap(s.map, s.bytes) };
+    }
 }
 
 const XRGB8888: u32 = 0x3432_5258;
@@ -357,11 +464,13 @@ fn udmabuf(memfd: &File, size: usize) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-fn draw(px: &mut [u8], opts: &Opts, frame: u32) {
+/// The pattern in surface units, so a scaled buffer shows the same picture, sharper.
+fn draw(px: &mut [u8], opts: &Opts, size: &Size, frame: u32) {
     let w = opts.width;
     let marker = opts.animate.map(|_| frame % w);
     for (i, out) in px.chunks_exact_mut(4).enumerate() {
-        let (x, y) = (i as u32 % w, i as u32 / w);
+        let (bx, by) = (i as u32 % size.w, i as u32 / size.w);
+        let (x, y) = ((bx as f64 / size.scale) as u32, (by as f64 / size.scale) as u32);
         let [r, g, b, _] = if marker == Some(x) {
             [255; 4]
         } else {
@@ -432,7 +541,9 @@ impl Dispatch<WlRegistry, ()> for App {
             return;
         };
         match interface.as_str() {
-            "wl_compositor" => app.compositor = Some(registry.bind(name, version.min(4), qh, ())),
+            // v6 sends preferred_buffer_scale.
+            "wl_compositor" => app.compositor = Some(registry.bind(name, version.min(6), qh, ())),
+            "wp_fractional_scale_manager_v1" => app.fractional = Some(registry.bind(name, 1, qh, ())),
             "wl_subcompositor" => app.subcompositor = Some(registry.bind(name, 1, qh, ())),
             "wp_viewporter" => app.viewporter = Some(registry.bind(name, 1, qh, ())),
             "wl_shm" => app.shm = Some(registry.bind(name, 1, qh, ())),
@@ -494,7 +605,29 @@ delegate_noop!(App: WpViewporter);
 delegate_noop!(App: WpViewport);
 delegate_noop!(App: WlShmPool);
 delegate_noop!(App: ignore WlShm);
-delegate_noop!(App: ignore WlSurface);
+delegate_noop!(App: WpFractionalScaleManagerV1);
+
+impl Dispatch<WlSurface, ()> for App {
+    fn event(app: &mut Self, _: &WlSurface, event: wl_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let wl_surface::Event::PreferredBufferScale { factor } = event
+            && factor != app.buffer_scale
+        {
+            app.buffer_scale = factor;
+            app.rescale |= app.honour == Honour::Integer;
+        }
+    }
+}
+
+impl Dispatch<WpFractionalScaleV1, ()> for App {
+    fn event(app: &mut Self, _: &WpFractionalScaleV1, event: wp_fractional_scale_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event
+            && scale != app.scale_120
+        {
+            app.scale_120 = scale;
+            app.rescale |= app.honour == Honour::Fractional;
+        }
+    }
+}
 delegate_noop!(App: ignore ZwpLinuxDmabufV1);
 delegate_noop!(App: ignore ZwpLinuxBufferParamsV1);
 

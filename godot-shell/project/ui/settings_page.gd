@@ -893,6 +893,8 @@ func _look_rows() -> Array:
 		_look_choice("quality", "3D quality", [["normal", "Normal"], ["low", "Low"]]),
 		_look_choice("ev_page", "Electric vehicle page", [["auto", "Auto"], ["image", "Image"], ["live", "Live"]]),
 		_look_choice("volume_style", "Volume indicator", [["card", "Card"], ["glow", "Line"]]),
+		_look_choice("app_scale", "App size", [[0, "Auto (%d %%)" % Launcher.auto_scale()]] + Launcher.SCALES.map(func(p): return [p, "%d %%" % p]),
+			"Apps from the launcher; hold an app's tile for its own"),
 	]
 	return rows
 

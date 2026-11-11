@@ -33,9 +33,9 @@ fn env(k: &str) -> Option<String> {
 #[godot_api]
 impl AppCatalog {
     /// The apps in `dirs` (data dirs in precedence order; empty for the XDG ones) with the config
-    /// at `config_path` applied, as `{id, name, icon, argv, cwd, app_ids, source, timeout_s}`. Also
-    /// starts listing Waydroid's apps, when the config allows and `waydroid` is installed: those
-    /// arrive through `poll_scan`.
+    /// at `config_path` applied, as `{id, name, icon, argv, cwd, app_ids, source, timeout_s,
+    /// scale}` (`scale` a percentage, 0 for none). Also starts listing Waydroid's apps, when the
+    /// config allows and `waydroid` is installed: those arrive through `poll_scan`.
     #[func]
     fn scan(&mut self, dirs: PackedStringArray, config_path: GString) -> VarArray {
         self.dirs = if dirs.is_empty() { apps::xdg_data_dirs(env) } else { dirs.as_slice().iter().map(|d| PathBuf::from(d.to_string())).collect() };
@@ -202,6 +202,7 @@ fn to_dict(a: &App) -> VarDictionary {
     d.set("app_ids", &a.app_ids.iter().map(gs).collect::<PackedStringArray>());
     d.set("source", &gs(a.source));
     d.set("timeout_s", a.timeout_s as i64);
+    d.set("scale", a.scale.unwrap_or(0) as i64);
     d
 }
 

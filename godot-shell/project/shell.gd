@@ -82,16 +82,16 @@ var rail_width := 0.0:
 
 func _init() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var page := VBoxContainer.new()
+	# The status bar on one edge and home's body in the rest (`_layout_status`).
+	var page := Control.new()
 	page.name = "Page"
 	page.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	page.add_theme_constant_override("separation", 0)
 	var status := StatusBar.new()
 	status.name = "Status"
+	status.minimum_size_changed.connect(_layout_status)
 	page.add_child(status)
 	var body := HBoxContainer.new()
 	body.name = "Body"
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	body.add_theme_constant_override("separation", 0)
 	# The projection is its own layer under the page: in its slot for solid surfaces, under
 	# everything for frosted and glass ones, which float over it.
@@ -169,6 +169,7 @@ func _ready() -> void:
 	Wayland.text_input_released.connect(func(id): if app_keyboard and app_keyboard.window_id == id: app_keyboard.close())
 	Drive.changed.connect(_update_keys_button)
 	launcher.show_window.connect(bring_forward)
+	_status.edge = ThemeManager.status_position
 	_style()
 	_refresh()
 	_tell_app_area()
@@ -229,6 +230,9 @@ func _style() -> void:
 	_keys_button.custom_minimum_size = Vector2.ONE * ThemeManager.px.touch * 1.2
 	_keys_button.icon = Icons.texture("keyboard", ThemeManager.px.icon)
 	_place_keyboard.call_deferred()
+	if _status.edge != ThemeManager.status_position:
+		_move_status()
+	_layout_status()
 
 
 ## Hosted apps are configured to the app page's rect (the panel less the rail), whichever page
@@ -244,6 +248,111 @@ func _inset() -> void:
 	offset_left = w if left else 0.0
 	offset_right = 0.0 if left else -w
 	_place_next_frame()
+
+
+## The shell's rect (already beside a docked rail) less the status bar, where the page showing
+## lays out: home's body, and every page `_fit_page` places. The whole rect on pages without
+## the bar (the app and phone pages, a pack's screens, a pack's own EV title bar).
+func content_rect() -> Rect2:
+	return _rect_beside_status() if $Page.visible else Rect2(Vector2.ZERO, size)
+
+
+func _rect_beside_status() -> Rect2:
+	var r := Rect2(Vector2.ZERO, size)
+	var t := _status_thickness()
+	match _status.edge:
+		"bottom":
+			r.size.y -= t
+		"left":
+			r.position.x += t
+			r.size.x -= t
+		"right":
+			r.size.x -= t
+		_:
+			r.position.y += t
+			r.size.y -= t
+	return r
+
+
+## Whole pixels, as the rail: a row as a box container lays it out (truncated), a column rounded
+## up so its widest item fits. None when it is off.
+func _status_thickness() -> float:
+	if _status.edge == "off":
+		return 0.0
+	var m := _status.get_combined_minimum_size()
+	return ceilf(m.x) if _status.vertical() else floorf(m.y)
+
+
+## Puts the status bar on its edge and the body in the rest, and the open page with it.
+func _layout_status() -> void:
+	if _status == null:
+		return
+	var t := _status_thickness()
+	const PRESETS := {top = Control.PRESET_TOP_WIDE, bottom = Control.PRESET_BOTTOM_WIDE, left = Control.PRESET_LEFT_WIDE, right = Control.PRESET_RIGHT_WIDE, off = Control.PRESET_TOP_WIDE}
+	_status.visible = _status.edge != "off"
+	_status.set_anchors_preset(PRESETS[_status.edge])
+	for k in ["offset_left", "offset_top", "offset_right", "offset_bottom"]:
+		_status.set(k, 0.0)
+	match _status.edge:
+		"bottom":
+			_status.offset_top = -t
+		"left":
+			_status.offset_right = t
+		"right":
+			_status.offset_left = -t
+		_:
+			_status.offset_bottom = t
+	var r := _rect_beside_status()
+	_body.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_body.offset_left = r.position.x
+	_body.offset_top = r.position.y
+	_body.offset_right = r.end.x - size.x
+	_body.offset_bottom = r.end.y - size.y
+	if _page:
+		_fit_page(_page)
+	_place_next_frame()
+
+
+## A new edge for the status bar (Look → Status bar): it fades in there, at once under reduced
+## motion.
+func _move_status() -> void:
+	_status.edge = ThemeManager.status_position
+	if ThemeManager.reduced_motion or not is_visible_in_tree():
+		return
+	_status.modulate.a = 0.0
+	create_tween().tween_property(_status, "modulate:a", 1.0, SPLIT_S)
+
+
+## The status bar's rect in the shell's, empty on pages without it.
+func status_rect() -> Rect2:
+	return _status.get_rect() if $Page.visible and _status.visible else Rect2()
+
+
+## Whether the status bar shows as a column on the driver's side, where a docked rail is: the two
+## then read as one band (`NavRail.joined`), the column nearer the page.
+func status_beside_rail() -> bool:
+	return is_node_ready() and $Page.visible and ThemeManager.status_position == ("left" if _driver_left() else "right")
+
+
+## Lays `page` out in `content_rect`. A page with a `top_inset` spans the top and draws its own
+## content below it, as it did under the top bar only.
+func _fit_page(page: Control) -> void:
+	var r := content_rect()
+	page.offset_left = r.position.x
+	page.offset_right = r.end.x - size.x
+	page.offset_bottom = r.end.y - size.y
+	if "top_inset" in page:
+		# The bar's unrounded height, which these pages have always drawn below.
+		var top := _status.get_combined_minimum_size().y if $Page.visible and _status.edge == "top" else r.position.y
+		if page.top_inset != top:
+			page.top_inset = top
+			if page.has_method("_layout"):
+				page.call_deferred("_layout")
+			page.queue_redraw()
+		if page is SettingsPage:
+			page.offset_top = top
+	else:
+		page.offset_top = r.position.y
 
 
 ## "home"; a screen of the theme's pack, which replaces the home page until "home" again
@@ -295,34 +404,35 @@ func open_page(page: String) -> String:
 		_scene.visible = home
 	if live:
 		var ev := EvLive.new()
-		ev.top_inset = 0.0 if own_bar else _status.get_combined_minimum_size().y
+		_fit_page(ev)
 		ev.tile_pressed.connect(func(id): ev_action.emit(id))
 		ev.back_pressed.connect(func(): open_page.call_deferred("home"))
 		_page = ev
 		add_child(_page)
 	elif page == "settings":
 		var settings := SettingsPage.new()
-		settings.top_inset = _status.get_combined_minimum_size().y
 		settings.back_pressed.connect(func(): open_page.call_deferred(_settings_from))
 		$Page.visible = true
+		_fit_page(settings)
 		_page = settings
 		add_child(_page)
 	elif page == "media":
 		var media := MediaPage.new()
 		media.now_playing = now_playing
-		media.top_inset = _status.get_combined_minimum_size().y
+		_fit_page(media)
 		_page = media
 		add_child(_page)
 	elif page == "apps":
 		var apps := AppsPage.new()
 		apps.launcher = launcher
-		apps.top_inset = _status.get_combined_minimum_size().y
+		_fit_page(apps)
 		_page = apps
 		add_child(_page)
 	elif not home and not _app_page:
 		_page = PackScreen.new()
 		_page.screen_name = page
 		add_child(_page)
+	_layout_status()
 	_show_app()
 	if not _following_front:
 		_tell_front()
@@ -455,6 +565,7 @@ func _place_next_frame() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED and _side:
+		_layout_status()
 		_set_split(_split)
 		_place_keyboard()
 
@@ -491,7 +602,7 @@ func _update_split() -> void:
 func _set_split(v: float) -> void:
 	_split = v
 	var handle := _handle.get_combined_minimum_size().x if _handle.visible else 0.0
-	_side.custom_minimum_size.x = lerpf(ThemeManager.px.side, size.x - handle, v)
+	_side.custom_minimum_size.x = lerpf(ThemeManager.px.side, _rect_beside_status().size.x - handle, v)
 	(_side.get_node("Panel") as HomeCards).wide = v
 
 
@@ -542,7 +653,7 @@ func _fit() -> void:
 	for n in PRIORITY:
 		panel.get_node(n).visible = wanted[n]
 	# The screen's height, not the panel's: the panel grows with what it holds.
-	var room: float = size.y - _status.get_combined_minimum_size().y \
+	var room: float = _rect_beside_status().size.y \
 		- _side.get_theme_constant("margin_top") - _side.get_theme_constant("margin_bottom")
 	left_out.clear()
 	var order := PRIORITY.duplicate()

@@ -1,0 +1,128 @@
+name: status-position
+# Look → Status bar: a row along the top or bottom, or a column along the left or right, and every
+# page laid out in the rest (`Shell.content_rect`): nothing of a page under the bar or the rail, the
+# live page's scene and labels fitted beside it, and home's slot (the area Android Auto is asked
+# for) clear of it. The app page has no bar: a hosted app keeps the shell's rect. Each edge in
+# either hand, and off (the page has the whole rect), then again with the rail docked, which a
+# column on the driver's side joins.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/ev6-main.json
+  clients:
+    - { role: app, app_id: livi-video-main, pattern: grid, size: 1920x1080, buffer: nv12, video: true }
+    - { role: app, app_id: org.livi.test.fill, pattern: grid, size: "0x0" }
+theme: { reduced_motion: true }
+steps:
+  - set: { core: { config: { projectionWidth: 1920, projectionHeight: 720 } } }
+  - wait: { window: livi-video-main }
+  - wait: { window: org.livi.test.fill }
+  - gdscript: &every |
+      var rail: Control = runner._vp.get_node_or_null("NavRail")
+      var status: StatusBar = shell.get_node("Page/Status")
+      var asked := Rect2i()
+      for pos in ["top", "bottom", "left", "right", "off"]:
+          for hand in ["lhd", "rhd"]:
+              ThemeManager.set_look({status_position = pos, hand = hand})
+              for page in ["home", "apps", "settings", "ev_live", "app"]:
+                  var e: String = shell.open_page(page)
+                  if e != "":
+                      return e
+                  await runner.frames(3)
+                  var at := "%s, %s, %s: " % [pos, hand, page]
+                  var sr: Rect2 = shell.get_global_rect()
+                  var rr: Rect2 = rail.get_global_rect() if rail else Rect2()
+                  if rail and (sr.intersects(rr) or not is_equal_approx(sr.size.x + rr.size.x, 1920.0)):
+                      return at + "shell at %s beside the rail at %s" % [sr, rr]
+                  if page == "app":
+                      # No bar: the hosted app is configured to the whole shell rect.
+                      var w: WindowView = shell.get_node("Projection/Window")
+                      # A rail just docked reconfigures it: the client's next buffer is a round trip.
+                      for i in 30:
+                          if w.texture and w.texture.get_size() == sr.size:
+                              break
+                          await runner.frames(1)
+                      if status.is_visible_in_tree() or w.texture == null or w.texture.get_size() != sr.size or not w.get_global_rect().is_equal_approx(sr):
+                          return at + "the app is %s at %s, the shell %s (bar shown: %s)" % [w.texture.get_size() if w.texture else null, w.get_global_rect(), sr, status.is_visible_in_tree()]
+                      continue
+                  var b := status.get_global_rect() if pos != "off" else Rect2()
+                  var on_edge := {off = not status.is_visible_in_tree(), top = b.position.y == sr.position.y and b.size.x == sr.size.x,
+                      bottom = b.end.y == sr.end.y and b.size.x == sr.size.x,
+                      left = b.position.x == sr.position.x and b.size.y == sr.size.y,
+                      right = b.end.x == sr.end.x and b.size.y == sr.size.y}
+                  if pos != "off" and (not status.is_visible_in_tree() or b.size.x < 1.0 or b.size.y < 1.0) or not on_edge[pos]:
+                      return at + "the bar at %s in the shell's %s" % [b, sr]
+                  if b.size != b.size.floor() and b.size.ceil() != b.size:
+                      return at + "the bar is %s, not whole pixels" % b.size
+                  var c: Rect2 = shell.content_rect()
+                  c.position += sr.position
+                  if c.intersects(b) or not is_equal_approx(c.get_area() + b.get_area(), sr.get_area()):
+                      return at + "the page's rect %s beside the bar at %s" % [c, b]
+                  if rail and rail.joined != (pos == ("left" if hand == "lhd" else "right")):
+                      return at + "the rail joined: %s" % rail.joined
+                  # Pages with a top inset span the top, under a bar there, and draw below it.
+                  var stack: Array = shell.get_children()
+                  while not stack.is_empty():
+                      var n = stack.pop_back()
+                      if n == status or n is CanvasLayer or (n is CanvasItem and not n.visible):
+                          continue
+                      if n is Control:
+                          var spans: bool = n.name == "Page" or (pos == "top" and "top_inset" in n)
+                          var g: Rect2 = n.get_global_rect()
+                          # A label's box runs past its glyphs, as the settings header's always has.
+                          if n is Label:
+                              g = g.grow_individual(0, -g.size.y * 0.25, 0, -g.size.y * 0.25)
+                          if not spans and g.has_area() and (g.intersects(b) or (rail and g.intersects(rr)) or not sr.encloses(g)):
+                              return at + "%s at %s is under the bar at %s (rail %s)" % [shell.get_path_to(n), g, b, rr]
+                          if n.clip_contents and not spans:
+                              continue
+                      stack.append_array(n.get_children())
+                  if page == "home":
+                      var slot: Rect2 = shell.get_node("Page/Body/Slot").get_global_rect()
+                      for m in Core.fake_sent():
+                          if m.get("type") == "action" and m.action.kind == "projectionArea":
+                              asked = Rect2i(m.action.x, m.action.y, m.action.width, m.action.height)
+                      Core.fake_clear()
+                      if not slot.has_area() or not c.encloses(slot) or asked != Rect2i(slot):
+                          return at + "home's slot %s in %s asked %s" % [slot, c, asked]
+                  if page == "ev_live":
+                      var ev: Control = shell.get_node("EvLive")
+                      var a: Dictionary = ev.get_node("Scene").anchors()
+                      # The car's rear runs off the panel's edge in a right-hand drive.
+                      for k in ["car", "pin", "on", "off"] if hand == "lhd" else ["pin", "on", "off"]:
+                          if b.has_point(a[k]) or not ev.get_global_rect().has_point(a[k]):
+                              return at + "%s at %s is under the bar %s or off the page %s" % [k, a[k], b, ev.get_global_rect()]
+                      for l in ["Battery", "RangeOn", "RangeOff", "Title"]:
+                          var lc: Control = ev.get_node(l)
+                          if lc.visible and not c.encloses(lc.get_global_rect()):
+                              return at + "%s at %s is off the page %s" % [l, lc.get_global_rect(), c]
+  - theme: { status_position: top, hand: lhd }
+  - page: home
+  - screenshot: { name: status-top, tolerance: 8 }
+  - theme: { status_position: bottom }
+  - page: home
+  - screenshot: { name: status-bottom, tolerance: 8 }
+  - theme: { status_position: left }
+  - page: home
+  - screenshot: { name: status-left, tolerance: 8 }
+  - theme: { status_position: right }
+  - page: home
+  - screenshot: { name: status-right, tolerance: 8 }
+  - theme: { status_position: "off" }
+  - page: home
+  - screenshot: { name: status-off, tolerance: 8 }
+  # The docked rail, and a column on its side beside it, one band.
+  - gdscript: |
+      NavRail.attach(shell)
+      await runner.frames(3)
+  - gdscript: *every
+  - theme: { status_position: left, hand: lhd }
+  - page: home
+  - screenshot: { name: status-left-rail, tolerance: 8 }
+  - theme: { status_position: right, hand: rhd }
+  - page: home
+  - screenshot: { name: status-right-rail-rhd, tolerance: 8 }
+  - page: settings
+  - screenshot: { name: status-right-rail-rhd-settings }
+  - theme: { status_position: "off", hand: lhd }
+  - page: home
+  - screenshot: { name: status-off-rail, tolerance: 8 }

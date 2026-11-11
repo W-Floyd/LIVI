@@ -58,10 +58,17 @@ func _update() -> void:
 	_place.call_deferred()
 
 
-## Centred in the status bar's height.
+## Centred in a status bar row (`Shell.status_rect`); beside a column, too narrow for it, or with
+## the bar off, at the top of the page's rect.
 func _place() -> void:
 	if not visible:
 		return
 	size = get_combined_minimum_size()
 	var shell := get_parent() as Control
-	position = (Vector2((shell.size.x - size.x) / 2.0, (ThemeManager.px.status - size.y) / 2.0)).round()
+	var bar := Rect2(0, 0, shell.size.x, ThemeManager.px.status)
+	if ThemeManager.status_position != "top" and shell.has_method("status_rect"):
+		bar = shell.status_rect()
+	if not bar.has_area() or bar.size.y > bar.size.x:
+		var c: Rect2 = shell.content_rect()
+		bar = Rect2(c.position.x, c.position.y + ThemeManager.px.gap, c.size.x, size.y)
+	position = (bar.get_center() - size / 2.0).round()

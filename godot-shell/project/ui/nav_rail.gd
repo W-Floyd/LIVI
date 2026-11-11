@@ -11,6 +11,15 @@ signal selected(page: String)
 const ITEMS := [["home", "Home", "home"], ["ev", "EV", "bolt"], ["media", "Media", "note"], ["apps", "Apps", "grid"], ["projection", "Phone", "phone"], ["settings", "Settings", "gear"]]
 
 var _buttons := {}
+## The status bar runs as a column beside it (`Shell.status_beside_rail`): one band, whose rule
+## is the column's, against the page.
+var joined := false:
+	set(v):
+		if v != joined:
+			joined = v
+			if is_inside_tree():
+				_style()
+var _shell: Control
 
 
 func _init() -> void:
@@ -37,6 +46,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	ThemeManager.changed.connect(_style)
+	ThemeManager.changed.connect(_join)
 	_style()
 
 
@@ -50,6 +60,8 @@ static func attach(shell: Control, open := Callable()) -> NavRail:
 	rail.set_item_visible("projection", shell.has_phone())
 	shell.phone_changed.connect(func(on): rail.set_item_visible("projection", on))
 	rail.resized.connect(func(): shell.rail_width = rail.size.x)
+	rail._shell = shell
+	rail._join()
 	shell.add_sibling(rail)
 	return rail
 
@@ -57,11 +69,16 @@ static func attach(shell: Control, open := Callable()) -> NavRail:
 ## Marks the page that is open: `ev_live` and `ev_main` are both the EV item.
 func show_page(page: String) -> void:
 	visible = page != "projection"
+	_join()
 	# A hosted app's window ("app") was opened from Apps.
 	var key := "ev" if page.begins_with("ev") else "apps" if page == "app" else page if _buttons.has(page) else ""
 	# set_pressed_no_signal leaves the group's other button pressed too.
 	for k in _buttons:
 		(_buttons[k] as Button).set_pressed_no_signal(k == key)
+
+
+func _join() -> void:
+	joined = is_instance_valid(_shell) and _shell.status_beside_rail()
 
 
 ## Shows or hides one item (`projection` while there is no phone's picture).
@@ -88,8 +105,8 @@ func _style() -> void:
 	var f := StyleBoxFlat.new()
 	f.bg_color = ThemeManager.c.bg
 	f.border_color = ThemeManager.c.line
-	f.border_width_right = 2 if left else 0
-	f.border_width_left = 0 if left else 2
+	f.border_width_right = 2 if left and not joined else 0
+	f.border_width_left = 2 if not left and not joined else 0
 	f.set_content_margin_all(g * 0.75)
 	add_theme_stylebox_override("panel", f)
 	_dock.call_deferred()

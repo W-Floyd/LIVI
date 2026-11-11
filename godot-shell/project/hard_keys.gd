@@ -269,10 +269,11 @@ func _style() -> void:
 	_place.call_deferred()
 
 
-## Top center, below the status bar, as the stock overlay sat.
+## Top center, below a status bar along the top, as the stock overlay sat.
 func _place() -> void:
 	_card.reset_size()
 	var vp := get_viewport().get_visible_rect().size
-	_card.position = Vector2((vp.x - _card.size.x) / 2.0, ThemeManager.px.status + ThemeManager.px.gap)
+	var top: float = ThemeManager.px.status if ThemeManager.status_position == "top" else 0.0
+	_card.position = Vector2((vp.x - _card.size.x) / 2.0, top + ThemeManager.px.gap)
 	_glow.position = Vector2(0, vp.y - 60.0)
 	_glow.size = Vector2(vp.x, 60.0)

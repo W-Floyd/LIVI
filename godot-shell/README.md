@@ -372,7 +372,10 @@ as they open, so their rows ask for a second tap.
 
 "Look" sets `ThemeManager`'s look and keeps it in `$XDG_CONFIG_HOME/livi-shell/look.json`
 (`~/.config/...`), read at start (not in tests). Its day or night is Auto (the core's
-`mainUiNightMode`, which follows LIVI's own appearance setting), Day or Night.
+`mainUiNightMode`, which follows LIVI's own appearance setting), Day or Night. Its Status bar
+(`status_position`) runs along the top (stock), the bottom, as a column of stacked items down the
+left or right, or is Off. Every page with the bar lays out in the rest (`Shell.content_rect`); on
+the driver's side a docked rail stays at the edge and the column sits beside it as one band.
 
 The look resolved is also written, on every change, to `tokens.json` beside `look.json`: the
 contract for apps the shell hosts (godot-maps), so they need not read theme files. It holds

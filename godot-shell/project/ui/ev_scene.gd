@@ -154,10 +154,30 @@ static var version := 0
 var _version := 0
 
 
-func _process(_delta: float) -> void:
+## The road's pulse: seconds into its cycle. Frame time, so test renders stay the same.
+var _pulse_t := 0.0
+const PULSE_RUN := 2.6
+const PULSE_REST := 1.4
+
+
+func _process(delta: float) -> void:
 	if _version != version:
 		_apply_view()
 		_push()
+	_pulse(delta)
+
+
+## A band runs from the car to the end of the lit road, fading in and out, then rests.
+func _pulse(delta: float) -> void:
+	if ThemeManager.reduced_motion or km_on <= 0.0:
+		_road_mat.set_shader_parameter("pulse", 0.0)
+		return
+	_pulse_t = fmod(_pulse_t + delta, PULSE_RUN + PULSE_REST)
+	var f := _pulse_t / PULSE_RUN
+	var on := f < 1.0
+	var from := maxf(car_front() / upk(), 0.0)
+	_road_mat.set_shader_parameter("pulse_km", lerpf(from, km_on, ease(minf(f, 1.0), 0.6)))
+	_road_mat.set_shader_parameter("pulse", sin(f * PI) if on else 0.0)
 
 
 ## The camera, the road's shape and the road's length, from the view values.

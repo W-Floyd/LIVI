@@ -20,6 +20,9 @@ const BATTERY_Y := 0.31
 const CREASE := [0.0, 0.25, 0.5, 1.0, 0.45, 0.2, 0.8, 0.0]
 
 var _shell: MeshInstance3D
+var _spins: Array[Node3D] = []
+## Radians a second: a slow roll, a hint of motion rather than a speed.
+const WHEEL_SPIN := 1.2
 var _battery: MeshInstance3D
 var _glass := ShaderMaterial.new()
 var _cell := ShaderMaterial.new()
@@ -175,12 +178,23 @@ func _wheel(at: Vector3) -> void:
 	rim.height = 0.28
 	rim.radial_segments = 20
 	rim.rings = 1
-	for pair in [[tire, _tire], [rim, _rim]]:
+	# The rolling part: tire, rim and spokes, turned about the axle (its y) as the car "rolls".
+	var spin := Node3D.new()
+	spin.name = "Spin"
+	w.add_child(spin)
+	_spins.append(spin)
+	var spoke := BoxMesh.new()
+	spoke.size = Vector3(0.44, 0.3, 0.045)
+	var parts := [[tire, _tire, 0.0], [rim, _rim, 0.0]]
+	for i in 3:
+		parts.append([spoke, _tire, i * 60.0])
+	for p in parts:
 		var m := MeshInstance3D.new()
-		m.mesh = pair[0]
-		m.material_override = pair[1]
+		m.mesh = p[0]
+		m.material_override = p[1]
+		m.rotation_degrees.y = p[2]
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		w.add_child(m)
+		spin.add_child(m)
 	add_child(w)
 
 
@@ -278,3 +292,10 @@ static func _occlusion(v: Vector3) -> float:
 		var d := Vector2(v.x - sx * WHEEL_X, v.y - WHEEL_R).length()
 		ao *= lerpf(0.45, 1.0, smoothstep(WHEEL_R, WHEEL_R + 0.3, d)) if absf(v.z) > 0.5 else 1.0
 	return ao
+
+
+func _process(delta: float) -> void:
+	if ThemeManager.reduced_motion:
+		return
+	for s in _spins:
+		s.rotate_y(-WHEEL_SPIN * delta)

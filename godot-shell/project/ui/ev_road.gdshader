@@ -14,6 +14,9 @@ uniform float km_warn = 1.0e6;
 uniform float tick_km = 50.0;
 uniform float stop_x = -1000.0;
 uniform float glow = 0.4;
+// A soft band running up the lit road from the car: where it is (km), and how much of it shows.
+uniform float pulse_km = -1000.0;
+uniform float pulse = 0.0;
 uniform vec4 c_lit : source_color = vec4(0.3, 0.4, 0.8, 0.9);
 uniform vec4 c_far : source_color = vec4(0.6, 0.7, 0.95, 0.6);
 uniform vec4 c_warn : source_color = vec4(1.0, 0.6, 0.1, 0.9);
@@ -62,6 +65,12 @@ void fragment() {
 	col = mix(col, c_line.rgb, edge * 0.55 + center * 0.5 + tick * 0.9 + cap * 0.55 + split * 0.8);
 	a = max(a, max(edge * 0.55, max(center * 0.4, tick * 0.8)));
 	a = max(a, max(cap * 0.85, split * 0.9));
+
+	// The pulse: a soft band across the lit road, wider as it goes so it reads at every distance.
+	float pw = 2.0 + pulse_km * 0.06;
+	float band = exp(-pow((km - pulse_km) / pw, 2.0)) * pulse * s_on * s_body;
+	col = mix(col, c_line.rgb, band * 0.35);
+	a = max(a, band * 0.45);
 
 	// The charger: a ring and a soft disc where it stands.
 	float r = length(vec2(lp.x - stop_x, lp.y));

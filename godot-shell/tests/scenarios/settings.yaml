@@ -38,7 +38,12 @@ steps:
   - wait: { frames: 2 }
   - tap: { node: Settings/Rows/List/Max Audio Lag }
   - expect_node: { path: Settings/Heading/Title, text: Max Audio Lag }
-  - tap: { node: Settings/Rows/List/Number/+100 }
+  - gdscript: |
+      for b in shell.get_node("Settings/Rows/List/Number").get_children():
+          if b is Button and is_equal_approx(float(b.text), 100.0):
+              b.pressed.emit()
+              return
+      return "no 100.0 step"
   - expect_action: { SetConfig: { patch: { audioBacklogMaxMs: 1100 } } }
   - tap: { node: Settings/Heading/Up }
   - gdscript: |
@@ -47,7 +52,12 @@ steps:
   - wait: { frames: 2 }
   - tap: { node: Settings/Rows/List/Audio Lag After a Skip }
   - expect_node: { path: Settings/Heading/Title, text: Audio Lag After a Skip }
-  - tap: { node: Settings/Rows/List/Number/-100 }
+  - gdscript: |
+      for b in shell.get_node("Settings/Rows/List/Number").get_children():
+          if b is Button and is_equal_approx(float(b.text), -100.0):
+              b.pressed.emit()
+              return
+      return "no -100.0 step"
   - expect_action: { SetConfig: { patch: { audioBacklogTargetMs: 50 } } }
   - tap: { node: Settings/Heading/Up }
   - tap: { node: Settings/Sections/List/General }

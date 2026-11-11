@@ -171,7 +171,7 @@ func _style() -> void:
 func _place() -> void:
 	var g: float = ThemeManager.px.gap
 	var bar := TitleBar.bar_height()
-	var left := g * 1.5 + _rail_inset()
+	var left := g * 1.5
 	_header.position = Vector2.ZERO
 	_header.size = Vector2(size.x, bar)
 	var s := maxf(bar, ThemeManager.px.touch)
@@ -199,12 +199,6 @@ func _place() -> void:
 	_rows.position = Vector2(rx, bar + g * 2 + hh)
 	_rows.size = Vector2(rw, size.y - _rows.position.y - g)
 	queue_redraw()
-
-
-## The nav rail sits over the left edge when there is one; the lists start clear of it.
-func _rail_inset() -> float:
-	var rail := get_tree().root.find_child("NavRail", true, false) as Control if is_inside_tree() else null
-	return rail.size.x if rail and rail.visible else 0.0
 
 
 ## Redraws from the core's view, unless nothing a row shows has changed. `force` redraws anyway.
@@ -895,6 +889,7 @@ func _look_rows() -> Array:
 		_look_choice("volume_style", "Volume indicator", [["card", "Card"], ["glow", "Line"]]),
 		_look_choice("app_scale", "App size", [[0, "Auto (%d %%)" % Launcher.auto_scale()]] + Launcher.SCALES.map(func(p): return [p, "%d %%" % p]),
 			"Apps from the launcher; hold an app's tile for its own"),
+		{key = "home_phone", kind = "switch", label = "Phone on home", detail = "Android Auto or CarPlay beside the cards", checked = ThemeManager.home_phone, enabled = true},
 	]
 	return rows
 

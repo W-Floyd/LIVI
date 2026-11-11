@@ -64,9 +64,11 @@ func _style() -> void:
 	queue_redraw()
 
 
-## Clear of the rail on the left edge (LIVI_SHELL_NAV), which overlays every page but projection.
+## The right margin's, beside a docked rail (`Shell.rail_width`); without one, still the room
+## the rail took when it floated over the page.
 func _left() -> float:
-	return ThemeManager.px.touch + ThemeManager.px.gap * 4.0
+	var rail = get_parent().get("rail_width") if get_parent() else null
+	return ThemeManager.px.gap * 4.0 + (0.0 if rail != null and rail > 0.0 else ThemeManager.px.touch)
 
 
 func _layout() -> void:

@@ -38,7 +38,8 @@ honour: none|fractional|integer, scale: percent }` runs the test client
 viewporter-scaled subsurface under a placeholder toplevel; `scale` is what the compositor asks of it,
 `honour` which protocol it draws by, `size` then in surface units), `{ role: command, run: [...] }` any
 Wayland program. `apps: <dir under tests/>` is the launcher's only data dir, with its `apps.yaml`
-(see "App launcher").
+(see "App launcher"). A scenario's `nav: true` docks the rail LIVI_SHELL_NAV turns on (`NavRail`),
+which every page but the phone's lays out beside.
 
 Steps: `page: home | ev | ev_live | app | apps | projection | <pack screen>` (see "Electric vehicle page"), `compare_reference` (below), `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`
 for a finger), `key`, `expect_client: { app_id, lines: [...] }`,

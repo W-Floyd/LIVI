@@ -84,7 +84,15 @@ var _under: OmniLight3D
 var _env: WorldEnvironment
 var _tween: Tween
 var _msaa_before := -1
-var _lift := Vector2.ZERO
+var _lift_px := 0.0
+## The panel rectangle (viewport pixels) the whole-panel picture is fitted into, its top left
+## kept: narrower beside a docked rail. Empty for the whole viewport.
+var view_rect := Rect2():
+	set(v):
+		if v != view_rect:
+			view_rect = v
+			if _camera:
+				_frame()
 
 
 func _ready() -> void:
@@ -183,9 +191,8 @@ func _pulse(delta: float) -> void:
 ## The camera, the road's shape and the road's length, from the view values.
 func _apply_view() -> void:
 	_version = version
-	_camera.size = 2.0 * NEAR * tan(deg_to_rad(CAM_FOV) / 2.0)
 	_camera.look_at_from_position(cam_pos(), cam_pos() + _forward() * 50.0)
-	_camera.frustum_offset = _base_offset() + _lift
+	_frame()
 	var plane: PlaneMesh = _road.mesh
 	var x0 := -24.0
 	var x1 := ROAD_UNITS * 1.5
@@ -488,9 +495,29 @@ func _push() -> void:
 
 ## Moves the picture up by `px` panel pixels, to keep it clear of a taller control row.
 func lift(px: float) -> void:
-	_lift = Vector2(0.0, -px / get_viewport().get_visible_rect().size.y * _camera.size)
-	_camera.frustum_offset = _base_offset() + _lift
+	_lift_px = px
+	_frame()
 	moved.emit()
+
+
+## The near plane's height that spans the panel's height in the stock framing.
+func _window_h() -> float:
+	return 2.0 * NEAR * tan(deg_to_rad(CAM_FOV) / 2.0)
+
+
+## The stock framing, scaled by `s` and moved so the panel's top left lands on `view_rect`'s:
+## a wider window by 1/s, its center moved by what that and the rect's corner shift the picture.
+func _frame() -> void:
+	var h := _window_h()
+	var vp := get_viewport().get_visible_rect().size if get_viewport() else Vector2.ONE
+	var r := view_rect if view_rect.has_area() else Rect2(Vector2.ZERO, vp)
+	var s := minf(r.size.x / vp.x, r.size.y / vp.y)
+	var d := (vp / 2.0 * (1.0 - s) - r.position) / (s * vp.y / h)
+	_camera.size = h / s
+	# The lift from the camera's own (single-precision) size, as it always was: the goldens hold it.
+	var lift := Vector2(0.0, -_lift_px / vp.y * _camera.size * s)
+	# Screen y runs down, the window's up.
+	_camera.frustum_offset = _base_offset() + lift + Vector2(d.x, -d.y)
 
 
 ## A point of the world, as a panel pixel.

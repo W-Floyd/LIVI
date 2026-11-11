@@ -1,0 +1,59 @@
+name: home-phone-toggle
+# With a phone connected, a button between home's slot and the cards hides the phone's picture
+# (Look → Phone on home) and, from the filled layout, shows it again; never over the slot, which
+# is the phone's. No phone, no button.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: livi-video-main, pattern: grid, size: 1920x1080, buffer: nv12, video: true }
+theme: { reduced_motion: true }
+steps:
+  - set: { core: { config: { projectionWidth: 1920, projectionHeight: 720 } } }
+  - wait: { window: livi-video-main }
+  - wait: { frames: 2 }
+  - gdscript: &clear |
+      var b: Button = shell.get_node("Page/Body/Handle/PhoneToggle")
+      var slot: Rect2 = shell.get_node("Page/Body/Slot").get_global_rect()
+      var cards: Rect2 = shell.get_node("Page/Body/Side/Panel").get_global_rect()
+      var r := b.get_global_rect()
+      if not b.is_visible_in_tree() or minf(r.size.x, r.size.y) < ThemeManager.px.touch - 0.5:
+          return "the toggle at %s, visible %s" % [r, b.is_visible_in_tree()]
+      if r.intersects(slot) or r.intersects(cards) or r.end.x > shell.size.x or r.position.x < 0.0:
+          return "the toggle at %s meets the slot %s or the cards %s" % [r, slot, cards]
+  - expect_node: { path: Page/Body/Slot, visible: true }
+  - gdscript: |
+      if shell.get_node("Page/Body/Slot").size.x < 600.0 or not ThemeManager.home_phone:
+          return "no picture in the slot"
+  - screenshot: { name: home-phone-toggle-shown, tolerance: 8 }
+  - tap: { node: Page/Body/Handle/PhoneToggle }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if ThemeManager.home_phone or shell.get_node("Page/Body/Slot").size.x > 0.5 or shell._projection.visible:
+          return "the picture is still on home (slot %s)" % shell.get_node("Page/Body/Slot").size
+  - gdscript: *clear
+  - screenshot: home-phone-toggle-hidden
+  - tap: { node: Page/Body/Handle/PhoneToggle }
+  - wait: { frames: 2 }
+  - gdscript: |
+      if not ThemeManager.home_phone or shell.get_node("Page/Body/Slot").size.x < 600.0:
+          return "the picture did not come back"
+  # The driver's side: the cards and the toggle move over, the toggle still beside the slot.
+  - theme: { hand: rhd }
+  - wait: { frames: 2 }
+  - gdscript: *clear
+  - theme: { home_phone: false }
+  - wait: { frames: 2 }
+  - gdscript: *clear
+  - screenshot: home-phone-toggle-hidden-rhd
+  # The phone gone: no toggle.
+  - gdscript: |
+      for pid in runner._clients:
+          OS.kill(pid)
+      for i in 300:
+          if not shell.has_phone():
+              break
+          await runner.frames(1)
+      await runner.frames(2)
+      if shell.get_node("Page/Body/Handle").visible:
+          return "the toggle shows with no phone"

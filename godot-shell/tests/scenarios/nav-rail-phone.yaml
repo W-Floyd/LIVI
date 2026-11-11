@@ -1,0 +1,100 @@
+name: nav-rail-phone
+# With the rail docked, home's slot (and the area Android Auto is asked to lay out in, in the
+# projection screen's pixels) is beside it; the phone's page has the whole panel, rail hidden; a
+# hosted app's window shows in the rest.
+clock: 2026-11-09T08:30:00
+nav: true
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: livi-video-main, pattern: grid, size: 1920x1080, buffer: nv12, video: true }
+    - { role: app, app_id: org.livi.test.bars, pattern: bars, size: 640x360 }
+theme: { reduced_motion: true }
+steps:
+  - set: { core: { config: { projectionWidth: 1920, projectionHeight: 720 } } }
+  - wait: { window: livi-video-main }
+  - wait: { window: org.livi.test.bars }
+  - page: home
+  - wait: { frames: 2 }
+  - gdscript: &asked |
+      var got := []
+      for m in Core.fake_sent():
+          if m.get("type") == "action" and m.action.kind == "projectionArea":
+              got.append(Rect2i(m.action.x, m.action.y, m.action.width, m.action.height))
+      runner.set_meta("asked", got)
+      Core.fake_clear()
+  - gdscript: |
+      var r: Rect2 = runner._vp.get_node("NavRail").get_global_rect()
+      var slot: Rect2 = shell.get_node("Page/Body/Slot").get_global_rect()
+      var asked: Array = runner.get_meta("asked")
+      if slot.intersects(r) or asked.is_empty() or asked[-1] != Rect2i(slot):
+          return "home's slot %s (rail %s) asked %s" % [slot, r, asked]
+      var p: Rect2 = shell.get_node("Projection").get_global_rect()
+      if not p.is_equal_approx(slot):
+          return "the picture at %s, not in the slot %s" % [p, slot]
+  - gdscript: &clear |
+      var rail: Control = runner._vp.get_node("NavRail")
+      var r := rail.get_global_rect()
+      var sr: Rect2 = shell.get_global_rect()
+      if not rail.visible or sr.intersects(r) or not is_equal_approx(sr.size.x + r.size.x, 1920.0):
+          return "shell at %s beside the rail at %s (visible %s)" % [sr, r, rail.visible]
+      var stack: Array = shell.get_children()
+      while not stack.is_empty():
+          var n = stack.pop_back()
+          # Overlays (a CanvasLayer: the volume card) are drawn over the rail too.
+          if n is CanvasLayer or (n is CanvasItem and not n.visible):
+              continue
+          if n is Control:
+              var g: Rect2 = n.get_global_rect()
+              if g.has_area() and g.intersects(r):
+                  return "%s at %s is under the rail at %s" % [shell.get_path_to(n), g, r]
+              if n.clip_contents:
+                  continue
+          stack.append_array(n.get_children())
+  # The phone took the slot: the stream's pixel at a projection pixel is at the same panel pixel,
+  # and a tap there reaches the phone there.
+  - gdscript: |
+      var s: Rect2i = runner.get_meta("asked")[-1]
+      var e: String = Core.fake_set("sessions/area", {x = s.position.x, y = s.position.y, width = s.size.x, height = s.size.y})
+      if e != "":
+          return e
+      await runner.frames(2)
+      var w: WindowView = shell.get_node("Projection/Window")
+      if Rect2i(w.get_global_rect()) != s or not w.picture_rect().is_equal_approx(Rect2(Vector2.ZERO, w.size)) or not w.texture.get_size().is_equal_approx(Vector2(s.size)):
+          return "the slot at %s shows %s of %s, not its own area %s 1:1" % [w.get_global_rect(), w.picture_rect(), w.texture.get_size(), s]
+      var img: Image = runner._vp.get_texture().get_image()
+      # The test client's 64 px checkerboard; the stream's row 180 is the panel's 0.
+      for c in [[s.position.x + 30, 300], [s.position.x + 31, 300], [127, 300], [128, 300], [1000, 203], [1000, 204], [1023, 300], [1024, 300]]:
+          var dark: bool = (c[0] / 64 + (c[1] + 180) / 64) % 2 == 0
+          if (img.get_pixel(c[0], c[1]).get_luminance() < 0.4) != dark:
+              return "(%d, %d) is %s" % [c[0], c[1], img.get_pixel(c[0], c[1])]
+      Core.fake_clear()
+      var at := Vector2(s.position) + Vector2(s.size) * Vector2(0.25, 0.75)
+      await runner._tap(at)
+      for m in Core.fake_sent():
+          if m.get("type") == "input":
+              var p: Dictionary = m.input.points[0]
+              if not (is_equal_approx(p.x, at.x / 1920.0) and is_equal_approx(p.y, at.y / 720.0)):
+                  return "a tap at %s reached the core as %s, %s" % [at, p.x, p.y]
+              return ""
+      return "no input sent from the slot"
+  - screenshot: { name: nav-rail-phone-home, tolerance: 8 }
+  # The phone's page: the whole panel, 1:1, no rail.
+  - page: projection
+  - wait: { frames: 2 }
+  - gdscript: *asked
+  - gdscript: |
+      var asked: Array = runner.get_meta("asked")
+      if runner._vp.get_node("NavRail").visible or shell.get_global_rect() != Rect2(0, 0, 1920, 720):
+          return "the phone's page at %s, rail visible %s" % [shell.get_global_rect(), runner._vp.get_node("NavRail").visible]
+      if asked != [Rect2i(0, 0, 1920, 720)]:
+          return "the phone's page asked %s, not once the whole panel" % [asked]
+  # A hosted app's window in the rest.
+  - page: app
+  - wait: { frames: 2 }
+  - gdscript: *clear
+  - gdscript: |
+      var p: Rect2 = shell.get_node("Projection").get_global_rect()
+      if not p.is_equal_approx(shell.get_global_rect()) or shell._projection.window.window_id != Wayland.find_window("org.livi.test.bars"):
+          return "the app page shows %d at %s" % [shell._projection.window.window_id, p]
+  - screenshot: nav-rail-app

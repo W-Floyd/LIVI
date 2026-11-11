@@ -23,6 +23,29 @@ func _ready() -> void:
 	Core.welcome.connect(func(_v): _bind())
 	Core.changed.connect(_on_core_changed)
 	_build()
+	var page := get_parent_control()
+	if page:
+		page.resized.connect(_fit)
+		_fit()
+
+
+## The screen is laid out for the whole panel: beside a docked rail it is scaled down to the
+## page's width, its top left kept.
+func _fit() -> void:
+	var full := get_viewport_rect().size
+	var room := get_parent_control().size
+	if room.x <= 0.0 or room.y <= 0.0:
+		return
+	var s := minf(1.0, minf(room.x / full.x, room.y / full.y))
+	if s >= 1.0:
+		if scale != Vector2.ONE:
+			scale = Vector2.ONE
+			set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		return
+	set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	position = Vector2.ZERO
+	size = full
+	scale = Vector2(s, s)
 
 
 func _build() -> void:

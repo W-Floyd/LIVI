@@ -236,7 +236,17 @@ func _rect(id: String) -> Rect2:
 	if not v.has("rect"):
 		return Rect2()
 	var r: Array = v.rect
-	return Rect2(r[0], r[1], r[2], r[3])
+	var k := _fit_scale()
+	return Rect2(Vector2(r[0], r[1]) * k, Vector2(r[2], r[3]) * k)
+
+
+## The pack's panel-sized layout scaled into this page (narrower beside a docked rail), as the
+## scene is (`EvScene.view_rect`).
+func _fit_scale() -> float:
+	var vp := get_viewport_rect().size
+	if size.x <= 0.0 or size.y <= 0.0:
+		return 1.0
+	return minf(1.0, minf(size.x / vp.x, size.y / vp.y))
 
 
 # ---- theme ----
@@ -516,7 +526,11 @@ func _place() -> void:
 		return
 	var gap: float = ThemeManager.px.gap
 	var side := -1.0 if ThemeManager.hand == "rhd" else 1.0
+	_scene.view_rect = get_global_rect()
 	var a := _scene.anchors()
+	# Panel pixels to this page's.
+	for k in a:
+		a[k] -= get_global_rect().position
 	var w := size.x
 	var edge := gap * 1.5
 	var room_bottom := (_row_top if _row_top > 0.0 else size.y) - gap
@@ -626,7 +640,7 @@ func _draw() -> void:
 		# The stock title bar and the bar the tap targets sit on, over the scene.
 		var bar: Dictionary = _spec.get("status_bar", {})
 		if not bar.is_empty() and pack.has_image(bar.image):
-			var h := roundi(float(bar.height_dp) * float(_spec.get("density", 1.0)))
+			var h := roundi(float(bar.height_dp) * float(_spec.get("density", 1.0)) * _fit_scale())
 			pack.box(bar.image, mode).draw(get_canvas_item(), Rect2(0, 0, size.x, h))
 		for id in ["_View_3", "_View_4", "mainview_bottom_layout_widget"]:
 			if ui_hidden and id == "mainview_bottom_layout_widget":

@@ -20,13 +20,14 @@ var material := "solid"        # solid | frosted | glass: surfaces floating over
 var reduced_motion := false    # no animated transitions or camera moves
 var car := "auto"             # auto | procedural: the EV page's car, a model when one is installed
 var quality := "normal"        # normal | low: what the 3D pages may spend (PLAN.md, "Quality profiles")
+var home_phone := true         # whether home shows the phone's picture beside its cards
 var volume_style := "card"    # card | glow: the volume overlay, a card with the level, or a line along the bottom
 var ev_page := "auto"          # auto | image | live: which "Electric vehicle" page `ev` opens
 var app_scale := 0             # launched apps' scale in percent; 0: the panel's (Launcher.auto_scale)
 var app_scales := {}           # app id -> percent, over apps.yaml's `scale` and app_scale
 
 ## The driver's choices that `save_look` keeps; `look_file` is where ("" keeps nothing: tests).
-const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "app_scale", "app_scales"]
+const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "home_phone", "app_scale", "app_scales"]
 var look_file := ""
 ## The resolved look for apps the shell hosts, rewritten on every change (`write_tokens`); "" writes
 ## none. Beside `look_file`.
@@ -158,7 +159,7 @@ func defaults() -> void:
 	# Scenarios and the live tuner get a fixed look: the core's night (a fake core's default) does
 	# not repaint them. A theme step with appearance_mode "auto" opts back in.
 	appearance_mode = "day"
-	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto", volume_style = "card", app_scale = 0, app_scales = {}})
+	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto", volume_style = "card", home_phone = true, app_scale = 0, app_scales = {}})
 
 
 ## The "Electric vehicle" page `ev` stands for: the look's choice, else the theme's own

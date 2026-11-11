@@ -8,6 +8,8 @@ extends Control
 @onready var _slot: Control = $Page/Body/Slot
 @onready var _projection: ProjectionView = $Projection
 @onready var _side: MarginContainer = $Page/Body/Side
+@onready var _handle: MarginContainer = $Page/Body/Handle
+@onready var _phone_toggle: Button = $Page/Body/Handle/PhoneToggle
 @onready var _stat: StatTile = $Page/Body/Side/Panel/Stat
 @onready var _precondition: ToggleRow = $Page/Body/Side/Panel/Precondition
 @onready var _stop: StopCard = $Page/Body/Side/Panel/Stop
@@ -56,7 +58,15 @@ var launcher: Launcher
 var _split := 1.0
 var _split_to := 1.0
 var _split_tween: Tween
+var _phone_present := false
 const SPLIT_S := 0.35
+## Panel pixels a docked rail (NavRail) takes on the driver's side: every page lays out in the
+## rest, the phone's area included, except the phone's own page, which keeps the whole panel.
+var rail_width := 0.0:
+	set(v):
+		if v != rail_width:
+			rail_width = v
+			_inset()
 
 
 func _init() -> void:
@@ -83,6 +93,18 @@ func _init() -> void:
 	slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	slot.resized.connect(_place_projection)
 	body.add_child(slot)
+	# Between the slot and the cards, while a phone is connected: hides or shows its picture.
+	var handle := MarginContainer.new()
+	handle.name = "Handle"
+	handle.visible = false
+	var toggle := Button.new()
+	toggle.name = "PhoneToggle"
+	toggle.focus_mode = Control.FOCUS_NONE
+	toggle.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	toggle.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	toggle.pressed.connect(func(): ThemeManager.set_look({home_phone = not ThemeManager.home_phone}))
+	handle.add_child(toggle)
+	body.add_child(handle)
 	var side := MarginContainer.new()
 	side.name = "Side"
 	side.clip_contents = true
@@ -104,6 +126,7 @@ func _init() -> void:
 func _ready() -> void:
 	theme = ThemeManager.godot_theme
 	ThemeManager.changed.connect(_style)
+	ThemeManager.changed.connect(func(): _update_split(); _tell_front())
 	# A (re)connected core starts from its own idea of the main screen: say what this page shows.
 	Core.welcome.connect(func(_v): _refresh(); _tell_front(); _ask_area(true))
 	Core.changed.connect(_on_core_changed)
@@ -136,7 +159,7 @@ func _style() -> void:
 	if ThemeManager.is_scene() and _scene == null:
 		_scene = SceneSkin.new()
 		_scene.name = "Scene"
-		_scene.surfaces = [_status, _stat, _precondition, _stop, _player]
+		_scene.surfaces = [_status, _stat, _precondition, _stop, _player, _phone_toggle]
 		add_child(_scene)
 		move_child(_scene, 0)
 	elif not ThemeManager.is_scene() and _scene != null:
@@ -154,7 +177,14 @@ func _style() -> void:
 	cards.gap = roundi(g * 1.5)
 	cards.column = ThemeManager.px.side - roundi(g * 1.5) * 2
 	cards.column_left = ThemeManager.side_left()
-	_body.move_child(_side, 0 if ThemeManager.side_left() else 1)
+	_body.move_child(_side, 0 if ThemeManager.side_left() else 2)
+	_body.move_child(_handle, 1)
+	# Its gap to the slot is the cards' to it.
+	_handle.add_theme_constant_override("margin_top", roundi(g * 1.5))
+	_handle.add_theme_constant_override("margin_left", 0 if ThemeManager.side_left() else roundi(g * 1.5))
+	_handle.add_theme_constant_override("margin_right", roundi(g * 1.5) if ThemeManager.side_left() else 0)
+	_phone_toggle.custom_minimum_size = Vector2.ONE * ThemeManager.px.touch
+	_style_toggle()
 	_set_split(_split)
 	# The page passes input through where the projection shows.
 	$Page.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -162,6 +192,17 @@ func _style() -> void:
 	queue_redraw()
 	_fit.call_deferred()
 	_place_projection.call_deferred()
+	# The driver's side may have changed.
+	if rail_width > 0.0:
+		_inset()
+
+
+func _inset() -> void:
+	var w := 0.0 if _projection_page else rail_width
+	var left := ThemeManager.hand != "rhd"
+	offset_left = w if left else 0.0
+	offset_right = 0.0 if left else -w
+	_place_next_frame()
 
 
 ## "home"; a screen of the theme's pack, which replaces the home page until "home" again
@@ -190,6 +231,8 @@ func open_page(page: String) -> String:
 	_page_name = page
 	_projection_page = page == "projection"
 	_app_page = page == "app" or _projection_page
+	if rail_width > 0.0:
+		_inset()
 	var home := page == "home"
 	var live := page == "ev_live"
 	var own_bar := live and _own_bar()
@@ -264,7 +307,7 @@ func _tell_front() -> void:
 ## Pages with the phone's picture on them: home has it in its slot, so the phone keeps video
 ## focus there too (and the slot's picture exists only while it does).
 func _shows_projection() -> bool:
-	return _on_projection() or _page_name == "home"
+	return _on_projection() or (_page_name == "home" and ThemeManager.home_phone)
 
 
 ## Day or night as the core has it for the main screen's UI: the car's lights (its night mode,
@@ -354,11 +397,17 @@ func _notification(what: int) -> void:
 ## Opens home's slot while there is a phone's picture, else gives the cards the whole width:
 ## animated on home, at once elsewhere or under reduced motion.
 func _update_split() -> void:
-	var want := 0.0 if has_phone() else 1.0
+	var present := has_phone()
+	if present != _phone_present:
+		_phone_present = present
+		_handle.visible = present
+		_set_split(_split)
+		phone_changed.emit(present)
+	# The driver can keep home to the cards while a phone is connected (Look → Phone on home).
+	var want := 0.0 if present and ThemeManager.home_phone else 1.0
 	if want == _split_to:
 		return
 	_split_to = want
-	phone_changed.emit(want == 0.0)
 	_stat.hero = want == 1.0
 	_fit.call_deferred()
 	if _split_tween:
@@ -376,7 +425,8 @@ func _update_split() -> void:
 
 func _set_split(v: float) -> void:
 	_split = v
-	_side.custom_minimum_size.x = lerpf(ThemeManager.px.side, size.x, v)
+	var handle := _handle.get_combined_minimum_size().x if _handle.visible else 0.0
+	_side.custom_minimum_size.x = lerpf(ThemeManager.px.side, size.x - handle, v)
 	(_side.get_node("Panel") as HomeCards).wide = v
 
 
@@ -388,6 +438,13 @@ func _split_settled() -> void:
 	if _split_to == 1.0:
 		_area_asked = Rect2i()
 	_place_next_frame()
+
+
+## Hide while the picture is in the slot, show while it is not.
+func _style_toggle() -> void:
+	var shown := ThemeManager.home_phone
+	_phone_toggle.icon = Icons.texture("eye_off" if shown else "phone", ThemeManager.px.icon)
+	_phone_toggle.tooltip_text = "Hide the phone" if shown else "Show the phone"
 
 
 ## A projection video window (Android Auto or CarPlay streaming) is mapped.
@@ -404,8 +461,7 @@ var _area_asked := Rect2i()
 func _ask_area(again := false) -> void:
 	if not _shows_projection():
 		return
-	var home := Rect2(_slot.global_position - global_position, _slot.size)
-	var a: Rect2i = _projection.window.to_screen(home if _page_name == "home" else Rect2(Vector2.ZERO, size))
+	var a: Rect2i = _projection.window.to_screen(_slot.get_global_rect() if _page_name == "home" else get_global_rect())
 	if a.size.x <= 0 or a.size.y <= 0 or (a == _area_asked and not again):
 		return
 	_area_asked = a

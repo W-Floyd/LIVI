@@ -24,13 +24,7 @@ func _ready() -> void:
 	# Once the home page is up: the live EV page's shaders, compiled while nobody waits.
 	get_tree().create_timer(2.0).timeout.connect(shell.warm_up)
 	if OS.get_environment("LIVI_SHELL_NAV") != "":
-		var rail: Control = preload("res://ui/nav_rail.gd").new()
-		rail.selected.connect(func(page): _open(shell, page))
-		shell.page_changed.connect(rail.show_page)
-		# The phone's page only while there is a phone's picture to show.
-		rail.set_item_visible("projection", shell.has_phone())
-		shell.phone_changed.connect(func(on): rail.set_item_visible("projection", on))
-		add_child(rail)
+		NavRail.attach(shell, func(page): _open(shell, page))
 	_restore_page(shell)
 
 

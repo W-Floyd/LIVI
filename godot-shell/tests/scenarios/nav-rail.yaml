@@ -1,0 +1,70 @@
+name: nav-rail
+# LIVI_SHELL_NAV's rail, docked full height on the driver's side: every page lays out beside it,
+# nothing of a page under it, and the live page's scene and labels fitted into the rest.
+clock: 2026-11-09T17:42:00
+nav: true
+fixtures:
+  core: fixtures/ev6-main.json
+  apps: fixtures/apps
+theme: { theme_name: instrument, appearance: night, reduced_motion: true }
+steps:
+  - wait: { frames: 2 }
+  - gdscript: &clear |
+      var rail: Control = runner._vp.get_node("NavRail")
+      var r := rail.get_global_rect()
+      var left := ThemeManager.hand != "rhd"
+      if not rail.visible or r.size.x < ThemeManager.px.touch or r.size.y != 720.0 or (r.position.x == 0.0) != left:
+          return "rail at %s, visible %s" % [r, rail.visible]
+      var sr: Rect2 = shell.get_global_rect()
+      if sr.intersects(r) or not is_equal_approx(sr.size.x + r.size.x, 1920.0) or sr.size.y != 720.0:
+          return "shell at %s beside the rail at %s" % [sr, r]
+      var stack: Array = shell.get_children()
+      while not stack.is_empty():
+          var n = stack.pop_back()
+          # Overlays (a CanvasLayer: the volume card) are drawn over the rail too.
+          if n is CanvasLayer or (n is CanvasItem and not n.visible):
+              continue
+          if n is Control:
+              var g: Rect2 = n.get_global_rect()
+              if g.has_area() and g.intersects(r):
+                  return "%s at %s is under the rail at %s" % [shell.get_path_to(n), g, r]
+              # What a clipping control holds is drawn inside it.
+              if n.clip_contents:
+                  continue
+          stack.append_array(n.get_children())
+  - expect_node: { path: ../NavRail/Items/home, button_pressed: true }
+  - screenshot: nav-rail-home
+  - tap: { node: ../NavRail/Items/apps }
+  - expect_node: { path: Apps/Scroll/List/Grid/zeta/Name, text: Zeta renamed }
+  - gdscript: *clear
+  - screenshot: nav-rail-apps
+  - tap: { node: ../NavRail/Items/settings }
+  - wait: { frames: 2 }
+  - gdscript: *clear
+  - screenshot: nav-rail-settings
+  - tap: { node: ../NavRail/Items/ev }
+  - wait: { frames: 2 }
+  - gdscript: &ev |
+      var r: Rect2 = runner._vp.get_node("NavRail").get_global_rect()
+      var page: Control = shell.get_node("EvLive")
+      var a: Dictionary = page.get_node("Scene").anchors()
+      # The car's rear runs off the panel's edge in a right-hand drive, rail or not.
+      for k in ["car", "pin", "on", "off"] if ThemeManager.hand != "rhd" else ["pin", "on", "off"]:
+          if r.has_point(a[k]) or not page.get_global_rect().has_point(a[k]):
+              return "%s at %s is not on the page %s" % [k, a[k], page.get_global_rect()]
+      for n in ["Battery", "RangeOn", "RangeOff", "Title"]:
+          var c: Control = page.get_node(n)
+          if c.visible and not page.get_global_rect().encloses(c.get_global_rect()):
+              return "%s at %s is off the page %s" % [n, c.get_global_rect(), page.get_global_rect()]
+  - gdscript: *clear
+  - screenshot: nav-rail-ev
+  # The rail moves to the driver's side; the pages follow.
+  - theme: { hand: rhd }
+  - wait: { frames: 2 }
+  - gdscript: *ev
+  - gdscript: *clear
+  - screenshot: nav-rail-ev-rhd
+  - tap: { node: ../NavRail/Items/home }
+  - wait: { frames: 2 }
+  - gdscript: *clear
+  - screenshot: nav-rail-home-rhd

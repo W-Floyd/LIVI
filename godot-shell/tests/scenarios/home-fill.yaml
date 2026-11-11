@@ -52,7 +52,8 @@ steps:
           return Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea")
       var slot: Control = shell.get_node("Page/Body/Slot")
       var proj: Control = shell.get_node("Projection")
-      var full: float = shell.size.x - ThemeManager.px.side
+      # Less the phone's toggle beside the cards.
+      var full: float = shell.size.x - ThemeManager.px.side - shell.get_node("Page/Body/Handle").get_combined_minimum_size().x
       var between := 0
       var last := -1.0
       for i in 40:

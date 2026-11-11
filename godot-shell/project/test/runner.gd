@@ -149,6 +149,9 @@ func _run_one(path: String) -> String:
 	ThemeManager.set_look(look)
 	_shell = SHELL.instantiate()
 	_vp.add_child(_shell)
+	# `nav: true`: the docked rail, as LIVI_SHELL_NAV has it.
+	if sc.get("nav", false):
+		NavRail.attach(_shell)
 	await _frames(1)
 	for c in fixtures.get("clients", []):
 		var e := _spawn(c)
@@ -502,7 +505,7 @@ func _look_error(look: Dictionary) -> String:
 		theme_name = null, appearance = ["day", "night"], appearance_mode = ["auto", "day", "night"],
 		hand = ["lhd", "rhd"], near = ["projection", "panel"], text_scale = null,
 		material = ["solid", "frosted", "glass"], reduced_motion = [true, false],
-		quality = ["normal", "low"], ev_page = ["auto", "image", "live"], car = ["auto", "procedural"], volume_style = ["card", "glow"]}
+		quality = ["normal", "low"], ev_page = ["auto", "image", "live"], car = ["auto", "procedural"], volume_style = ["card", "glow"], home_phone = null}
 	for k in look:
 		if not KEYS.has(k):
 			return "theme: unknown key %s" % k

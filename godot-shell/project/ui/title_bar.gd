@@ -106,7 +106,8 @@ func _place() -> void:
 	if _back == null:
 		return
 	var s := minf(size.y, bar_height())
-	var margin: float = ThemeManager.px.gap
+	# The page's own edge margin, as the controls under the bar.
+	var margin: float = ThemeManager.px.gap * 1.5
 	var side := Vector2(maxf(s, ThemeManager.px.touch), maxf(s, ThemeManager.px.touch))
 	var y := (size.y - side.y) / 2.0
 	var rhd := ThemeManager.hand == "rhd"
@@ -126,3 +127,8 @@ func _draw() -> void:
 		return
 	draw_rect(Rect2(Vector2.ZERO, size), ThemeManager.c.bg)
 	draw_rect(Rect2(0, size.y - 2, size.x, 2), ThemeManager.c.line)
+
+
+## The back button's rect in the bar; empty while it is off.
+func back_rect() -> Rect2:
+	return Rect2(_back.position, _back.size) if back_shown else Rect2()

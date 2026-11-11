@@ -22,6 +22,10 @@ var _aux: HBoxContainer
 var _climate: HBoxContainer
 var _heater: HBoxContainer
 var _rows: Array[HBoxContainer] = []
+## The items with something to show, most important first.
+var _wanted: Array = []
+## What is open in words, and as a count for a short row.
+var _said := ["", ""]
 
 
 func _init() -> void:
@@ -88,6 +92,7 @@ func show_for(t: Dictionary) -> bool:
 	elif not open.is_empty():
 		said = ("%s open" % " and ".join(open)).to_lower()
 		said = said.substr(0, 1).to_upper() + said.substr(1)
+	_said = [said, "" if open.is_empty() else "%d open" % open.size()]
 	_open.text = said
 	_open.get_meta("look")[2] = "warn" if warn else "text"
 	UI.style_label(_open)
@@ -95,14 +100,29 @@ func show_for(t: Dictionary) -> bool:
 	_set_chip(_aux, "" if aux == null else "12 V %d %%" % roundi(float(aux)), "warn" if aux != null and float(aux) < AUX_LOW_PCT else "text")
 	var w = t.get("climatePowerW")
 	var drawing: bool = w != null and float(w) > 0.0
-	_set_chip(_climate, "" if not EvLive.blower_running() else "Climate " + (Units.power_text(float(w)) if drawing else "on"))
+	# Its draw only: the range's name already says the climate is on.
+	_set_chip(_climate, "" if not (drawing and EvLive.blower_running()) else "Climate %s" % Units.power_text(float(w)))
 	var hw = t.get("batteryHeaterW")
 	_set_chip(_heater, "" if hw == null or float(hw) <= 0.0 else "Battery heater %s" % Units.power_text(float(hw)))
+	_wanted = [_body, _aux, _heater, _climate].filter(func(c): return c.visible)
+	return keep(_wanted.size())
+
+
+## Shows only the `n` most important items it has (what is open, the 12 V battery, the heater,
+## the climate), for a page with no room for them all; false when that is none.
+func keep(n: int, terse := false) -> bool:
+	_open.text = _said[1 if terse else 0]
+	for i in _wanted.size():
+		_wanted[i].visible = i < n
 	for r in _rows:
 		r.visible = r.get_children().any(func(c): return c.visible)
 		r.alignment = BoxContainer.ALIGNMENT_BEGIN if side > 0 else BoxContainer.ALIGNMENT_END
 	visible = _rows.any(func(r): return r.visible)
 	return visible
+
+
+func wanted() -> int:
+	return _wanted.size()
 
 
 ## The car from above, front up, the driver's door on the driver's side: open doors swing out,

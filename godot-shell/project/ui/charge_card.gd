@@ -17,6 +17,9 @@ var _value: Label
 var _unit: Label
 var _grid: GridContainer
 var _t := {}
+## The table's rows at most, for a page short of room (`fit`).
+var max_rows := ROWS.size()
+var _fit_h := -1.0
 
 
 func _build() -> void:
@@ -46,12 +49,14 @@ func _style() -> void:
 	var g: float = ThemeManager.px.gap
 	_grid.add_theme_constant_override("h_separation", roundi(g * 2.0))
 	_grid.add_theme_constant_override("v_separation", 0)
+	_fit_h = -1.0
 	_fill()
 
 
 ## Shows for `t`, the core's telemetry; false (and hidden) when nothing is plugged in.
 func show_for(t: Dictionary) -> bool:
 	_t = t
+	_fit_h = -1.0
 	visible = t.get("charging") == true
 	_fill()
 	return visible
@@ -84,7 +89,7 @@ func _fill() -> void:
 	for c in _grid.get_children():
 		_grid.remove_child(c)
 		c.queue_free()
-	var rows := ROWS.filter(func(r): return _t.get(r[1]) != null or _t.get(r[2]) != null)
+	var rows := ROWS.filter(func(r): return _t.get(r[1]) != null or _t.get(r[2]) != null).slice(0, max_rows)
 	_grid.visible = not rows.is_empty()
 	if rows.is_empty():
 		return
@@ -102,3 +107,15 @@ func _fill() -> void:
 			v.name = "%s%s" % [r[0], "AC" if i == 1 else "DC"]
 			v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			_grid.add_child(v)
+
+
+## Drops table rows, the last first, until the card is at most `h` tall or has none left.
+func fit(h: float) -> void:
+	if h == _fit_h:
+		return
+	_fit_h = h
+	max_rows = ROWS.size()
+	_fill()
+	while get_combined_minimum_size().y > h and max_rows > 0:
+		max_rows -= 1
+		_fill()

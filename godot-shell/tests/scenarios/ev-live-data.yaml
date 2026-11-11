@@ -137,7 +137,7 @@ steps:
   # The page is kept between visits: what changed while away shows on the next, at once.
   - page: home
   - set: { core: { telemetry: { climate: {} } } }
-  - set: { core: { telemetry: { fuelPct: 64, rangeKm: 250, rangeClimateOffKm: 270, climate: { source: car, fanLevel: 2, on: true } }, navigation: { chargingStop: { distanceM: 12000 } } } }
+  - set: { core: { telemetry: { fuelPct: 64, rangeKm: 250, rangeClimateOffKm: 270, climatePowerW: 1200, climate: { source: car, fanLevel: 2, on: true } }, navigation: { chargingStop: { distanceM: 12000 } } } }
   - wait: { frames: 2 }
   - theme: { reduced_motion: false }
   - page: ev_live

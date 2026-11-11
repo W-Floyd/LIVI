@@ -1,0 +1,51 @@
+name: ev-live-car-state-rail
+# Beside a docked rail the EV page has no back button: the car's state takes its place in the
+# title row on the car's side, as many items as fit there (what is open as a count before an item
+# goes), and leaves the scene's room to the charge and ranges at any text scale.
+clock: 2026-11-09T19:05:00
+nav: true
+fixtures:
+  core: fixtures/charging.json
+theme: { theme_name: instrument, appearance: night, reduced_motion: true }
+steps:
+  - set: { core: { telemetry: { climate: {} } } }
+  - set: { core: { telemetry: { charging: false, chargePortOpen: false, doorDriverOpen: true, trunkOpen: true, auxBatteryPct: 24, climatePowerW: 1400, batteryHeaterW: 2100, climate: { source: car, fanLevel: 2, on: true } } } }
+  - page: ev_live
+  - expect_node: { path: EvLive/TitleBar/Back, visible: "false" }
+  - gdscript: &row |
+      # In the title row, clear of the title's text, on the car's side; nothing placed overlaps.
+      var page: Control = shell.get_node("EvLive")
+      var s: Control = page.get_node("CarStatus")
+      var bar: Rect2 = page.get_node("TitleBar").get_global_rect()
+      var r := s.get_global_rect()
+      if not s.visible or r.position.y < bar.position.y or r.end.y > bar.end.y:
+          return "the car's state %s is not in the title row %s" % [r, bar]
+      var t: Label = page.get_node("Title")
+      var tw: float = t.get_theme_font("font").get_string_size(t.text, HORIZONTAL_ALIGNMENT_LEFT, -1, t.get_theme_font_size("font_size")).x
+      var tx: float = t.get_global_rect().get_center().x
+      if r.end.x > tx - tw / 2.0 and r.position.x < tx + tw / 2.0:
+          return "the car's state %s overlaps the title" % r
+      if (ThemeManager.hand == "rhd") != (r.get_center().x > page.get_global_rect().get_center().x):
+          return "the car's state %s is not on the car's side" % r
+      if not page.get_node("CarStatus/Row0/Body").visible:
+          return "what is open was dropped"
+      var rects := []
+      for p in ["CarStatus", "Battery", "RangeOn", "RangeOff", "ChargerLabel", "next_departure", "scheduled", "v2l", "Settings"]:
+          var n: Control = page.get_node(p)
+          if n.visible:
+              rects.append([p, n.get_global_rect()])
+      for i in rects.size():
+          for j in range(i + 1, rects.size()):
+              # The range and charger labels among themselves are the scene's layout, not this.
+              var mine := [rects[i][0], rects[j][0]].any(func(n): return n.ends_with("CarStatus") or n.ends_with("ChargeCard") or n.ends_with("Battery"))
+              if mine and rects[i][1].intersects(rects[j][1]):
+                  return "%s overlaps %s" % [rects[i][0], rects[j][0]]
+  - screenshot: ev-live-car-state-rail
+  - theme: { text_scale: 1.4 }
+  - wait: { frames: 2 }
+  - gdscript: *row
+  - screenshot: ev-live-car-state-rail-text-1.4
+  - theme: { text_scale: 1.0, hand: rhd }
+  - wait: { frames: 2 }
+  - gdscript: *row
+  - screenshot: { name: ev-live-car-state-rail-rhd, compare: false }

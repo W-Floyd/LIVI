@@ -22,15 +22,18 @@ steps:
   # The charge port alone is open: said, not a warning.
   - expect_node: { path: EvLive/CarStatus/Row0/Body/Open, text: Charge port open }
   - gdscript: &apart |
-      # Nothing the page places overlaps the card or the car's state.
+      # Nothing the page places overlaps another, the tap targets included.
       var rects := []
-      for p in ["EvLive/ChargeCard", "EvLive/CarStatus", "EvLive/Battery", "EvLive/RangeOn", "EvLive/RangeOff", "EvLive/ChargerLabel"]:
+      for p in ["EvLive/ChargeCard", "EvLive/CarStatus", "EvLive/Battery", "EvLive/RangeOn", "EvLive/RangeOff", "EvLive/ChargerLabel",
+              "EvLive/next_departure", "EvLive/scheduled", "EvLive/v2l", "EvLive/Settings"]:
           var n: Control = shell.get_node(p)
           if n.visible:
               rects.append([p, n.get_global_rect()])
       for i in rects.size():
           for j in range(i + 1, rects.size()):
-              if rects[i][1].intersects(rects[j][1]):
+              # The range and charger labels among themselves are the scene's layout, not this.
+              var mine := [rects[i][0], rects[j][0]].any(func(n): return n.ends_with("CarStatus") or n.ends_with("ChargeCard") or n.ends_with("Battery"))
+              if mine and rects[i][1].intersects(rects[j][1]):
                   return "%s overlaps %s" % [rects[i][0], rects[j][0]]
   - screenshot: ev-live-charging
   # Only what the car reports: no DC limit, a dash.
@@ -69,6 +72,16 @@ steps:
           return "RHD: the car's state is not on the car's side: %s" % s.get_global_rect()
   - gdscript: *apart
   - screenshot: ev-live-doors-night-rhd
+  # Larger text: the least important items give way rather than push the charge onto the targets.
+  - theme: { text_scale: 1.2 }
+  - wait: { frames: 2 }
+  - gdscript: *apart
+  - theme: { text_scale: 1.4 }
+  - wait: { frames: 2 }
+  - gdscript: *apart
+  - expect_node: { path: EvLive/CarStatus/Row0/Body, visible: "true" }
+  - screenshot: { name: ev-live-doors-night-rhd-text-1.4, compare: false }
+  - theme: { text_scale: 1.0 }
   # More than two: a count, the picture says which.
   - set: { core: { telemetry: { doorPassengerOpen: true, hoodOpen: true } } }
   - wait: { frames: 2 }
@@ -79,6 +92,10 @@ steps:
   - wait: { frames: 2 }
   - gdscript: *apart
   - screenshot: ev-live-charging-night
+  - theme: { text_scale: 1.4 }
+  - wait: { frames: 2 }
+  - gdscript: *apart
+  - theme: { text_scale: 1.0 }
   # Nothing reported: neither shows (the drive fixtures' pages are unchanged).
   - set: { core: { telemetry: { charging: null, chargerReady: null, chargePortOpen: null, auxBatteryPct: null, climatePowerW: null, batteryHeaterW: null } } }
   - wait: { frames: 2 }

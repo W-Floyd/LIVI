@@ -621,13 +621,40 @@ func _place() -> void:
 	for b in [_battery, _charger, _on, _off]:
 		var box: Control = b.box
 		box.size = box.get_combined_minimum_size()
-	# The car's state under the title on the car's side; charging at the top in the middle.
+	# The car's state goes in the title row on the car's side where it fits (beside a docked rail
+	# there is no back button there), else under the title, keeping the charge on the car clear of
+	# the targets; items go, least important first, until it fits.
 	var placed: Array[Rect2] = []
-	if _car_status.visible:
-		_car_status.size = _car_status.get_combined_minimum_size()
-		_car_status.position = Vector2(edge if side > 0 else w - edge - _car_status.size.x, floor_y + gap * 0.5).round()
-		placed.append(Rect2(_car_status.position, _car_status.size))
+	var bat: Control = _battery.box
+	var slot := _status_slot(side, edge, gap)
+	var in_row := not _bar.back_shown and _status_in(slot)
+	var keep := _car_status.wanted()
+	while true:
+		placed.clear()
+		if in_row:
+			placed.append(Rect2(_car_status.position, _car_status.size))
+		elif _car_status.keep(keep):
+			_car_status.size = _car_status.get_combined_minimum_size()
+			_car_status.position = Vector2(edge if side > 0 else w - edge - _car_status.size.x, floor_y + gap * 0.5).round()
+			placed.append(Rect2(_car_status.position, _car_status.size))
+		bat.position = (a.car as Vector2) - bat.size / 2.0
+		if not _spec.is_empty():
+			# The car does not move on a pack's screen, so the stock position holds.
+			var at := Vector2(_rect("mainview_text_battery_percentage_value").position.x, _rect("ev_mainview_battery_text").position.y)
+			bat.position = Vector2(at.x if side > 0 else w - at.x - bat.size.x, at.y)
+		_fit_in(bat, bounds)
+		for r in placed:
+			if Rect2(bat.position, bat.size).intersects(r):
+				bat.position.y = r.end.y + gap * 0.5
+		if in_row or keep <= 0 or bat.position.y + bat.size.y <= room_bottom:
+			break
+		# Beside the back button before anything is dropped.
+		if keep == _car_status.wanted() and _status_in(slot):
+			in_row = true
+			continue
+		keep -= 1
 	if _charge_card.visible:
+		_charge_card.fit(room_bottom - floor_y - gap)
 		_charge_card.size = _charge_card.get_combined_minimum_size()
 		var cx := (w - _charge_card.size.x) / 2.0
 		# Clear of the car's state, on its side of the page.
@@ -636,17 +663,6 @@ func _place() -> void:
 				else minf(cx, _car_status.position.x - gap * 2.0 - _charge_card.size.x)
 		_charge_card.position = Vector2(cx, floor_y + gap).round()
 		placed.append(Rect2(_charge_card.position, _charge_card.size))
-	var bat: Control = _battery.box
-	bat.position = (a.car as Vector2) - bat.size / 2.0
-	if not _spec.is_empty():
-		# The car does not move on a pack's screen, so the stock position holds.
-		var at := Vector2(_rect("mainview_text_battery_percentage_value").position.x, _rect("ev_mainview_battery_text").position.y)
-		bat.position = Vector2(at.x if side > 0 else w - at.x - bat.size.x, at.y)
-	_fit_in(bat, bounds)
-	# Below the car's state rather than off the car.
-	for r in placed:
-		if Rect2(bat.position, bat.size).intersects(r):
-			bat.position.y = r.end.y + gap * 0.5
 	placed.append(Rect2(bat.position, bat.size))
 	# The charger: its block over the pin, the pin a third in from the side the road runs from.
 	var ch: Control = _charger.box
@@ -685,6 +701,44 @@ func _place() -> void:
 	if ui_hidden:
 		_apply_hidden()
 	queue_redraw()
+
+
+## The title row's room on the car's side: from the page's edge, or past the back button, to the
+## title's text. Empty on a pack's screen, which has its own bar.
+func _status_slot(side: float, edge: float, gap: float) -> Rect2:
+	if not _spec.is_empty():
+		return Rect2()
+	var font: Font = _title.get_theme_font("font")
+	var text_w := font.get_string_size(_title.text, HORIZONTAL_ALIGNMENT_LEFT, -1, _title.get_theme_font_size("font_size")).x
+	var text := Rect2(_title.position.x + (_title.size.x - text_w) / 2.0, _bar.position.y, text_w, _bar.size.y)
+	var back := _bar.back_rect()
+	back.position += _bar.position
+	var row := Rect2(_bar.position, _bar.size)
+	if side > 0:
+		var x0 := back.end.x + gap if back.has_area() else edge
+		return Rect2(x0, row.position.y, text.position.x - gap * 2.0 - x0, row.size.y)
+	var x1 := back.position.x - gap if back.has_area() else row.end.x - edge
+	return Rect2(text.end.x + gap * 2.0, row.position.y, x1 - text.end.x - gap * 2.0, row.size.y)
+
+
+## Puts the car's state in `slot`, centred in its height on the car's side, with as many items as
+## fit; false (all items kept for elsewhere) when none does.
+func _status_in(slot: Rect2) -> bool:
+	if slot.size.x <= 0.0:
+		return false
+	var side := -1.0 if ThemeManager.hand == "rhd" else 1.0
+	for k in range(_car_status.wanted(), 0, -1):
+		# What is open as a count before the next item goes: the picture says which.
+		for terse in [false, true]:
+			_car_status.keep(k, terse)
+			var m := _car_status.get_combined_minimum_size()
+			if m.x <= slot.size.x and m.y <= slot.size.y:
+				_car_status.size = m
+				var x := slot.position.x if side > 0 else slot.end.x - m.x
+				_car_status.position = Vector2(x, slot.position.y + (slot.size.y - m.y) / 2.0).round()
+				return true
+	_car_status.keep(_car_status.wanted())
+	return false
 
 
 ## Keeps a label inside `bounds` as far as it can: it may be too big for them, then it stays at

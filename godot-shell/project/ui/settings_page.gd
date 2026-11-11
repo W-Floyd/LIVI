@@ -828,8 +828,10 @@ func _number_page() -> Control:
 	row.add_theme_constant_override("separation", roundi(ThemeManager.px.gap))
 	var add := func(by: float):
 		var b := Button.new()
-		b.name = ("%+g" % by).validate_node_name()
-		b.text = "%+g" % by
+		# Godot's % has no "+" flag: the sign goes in by hand.
+		var label := ("+" if by > 0 else "") + String.num(by)
+		b.name = label.validate_node_name()
+		b.text = label
 		b.focus_mode = Control.FOCUS_NONE
 		b.custom_minimum_size = Vector2(ThemeManager.px.touch * 1.6, ThemeManager.px.touch * 1.2)
 		b.pressed.connect(func(): if not _rows.dragged: Core.settings_number(-1, v + by); _refresh(true))

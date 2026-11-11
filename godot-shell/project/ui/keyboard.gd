@@ -148,6 +148,10 @@ func _key_button(id: String) -> Button:
 	b.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
 	b.expand_icon = false
 	b.button_down.connect(_down.bind(b))
+	if id in ["symbols", "letters", "more"]:
+		# On release: a finger's press comes as a touch and as Godot's mouse from it, and on the
+		# second the new layer's key in the same place would switch straight back.
+		b.pressed.connect(func(): layer = id; _build())
 	return b
 
 
@@ -303,8 +307,7 @@ func _down(b: Button) -> void:
 			_shift_at = _now
 			_style_keys()
 		"symbols", "letters", "more":
-			layer = id
-			_build()
+			pass
 		"sign":
 			typed.emit("-")
 		_:

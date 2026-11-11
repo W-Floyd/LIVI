@@ -232,7 +232,11 @@ func _build_extras() -> void:
 		b.set_meta("id", id)
 		b.focus_mode = Control.FOCUS_NONE
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		b.button_down.connect(_extra.bind(id))
+		# Fn rebuilds the row: on release, as Keyboard's layer keys.
+		if id == "fn":
+			b.pressed.connect(_extra.bind(id))
+		else:
+			b.button_down.connect(_extra.bind(id))
 		_extras.add_child(b)
 	_style_extras()
 	_place_extras()

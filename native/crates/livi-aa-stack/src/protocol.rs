@@ -1026,12 +1026,7 @@ impl Session {
             );
         } else if sensor_type == 10 {
             // A forced appearance wins over the car's.
-            let night = self
-                .config
-                .borrow()
-                .initial_night_mode
-                .or(self.night_mode)
-                == Some(true);
+            let night = self.config.borrow().initial_night_mode.or(self.night_mode) == Some(true);
             self.send_to(
                 out,
                 ch::SENSOR,

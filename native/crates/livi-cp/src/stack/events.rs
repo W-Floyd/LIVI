@@ -111,7 +111,7 @@ impl<M: Media> Conn<M> {
         .await;
     }
 
-    pub(super) async fn send_night_mode(&mut self, night: bool) {
+    async fn send_night_mode(&mut self, night: bool) {
         self.send_event_command(&dict([
             ("type", Value::String("setNightMode".into())),
             ("params", dict([("nightMode", Value::Bool(night))])),
@@ -120,6 +120,10 @@ impl<M: Media> Conn<M> {
     }
 
     pub(super) async fn send_surface(&mut self, surface: Surface, night: bool) {
+        if surface == Surface::MainMap {
+            self.send_night_mode(night).await;
+            return;
+        }
         let uuid = if surface.on_cluster() {
             if self.told(|info| info.cluster.is_none()) {
                 return;
@@ -135,21 +139,26 @@ impl<M: Media> Conn<M> {
                 dict([
                     ("uuid", Value::String(uuid)),
                     ("appearanceMode", Value::Int(u64::from(night))),
-                    ("appearanceSetting", Value::Int(APPEARANCE_AUTOMATIC)),
+                    ("appearanceSetting", Value::Int(self.appearance_setting)),
                 ]),
             ),
         ]))
         .await;
     }
 
-    pub(super) async fn send_appearances(&mut self) {
-        if let Some(night) = self.night_mode {
-            self.send_night_mode(night).await;
-        }
+    pub(super) async fn send_surfaces(&mut self) {
         for surface in Surface::ALL {
             if let Some(night) = self.appearance[surface as usize] {
                 self.send_surface(surface, night).await;
             }
+        }
+    }
+
+    pub(super) async fn follow_appearance_setting(&mut self) {
+        let setting = self.ctx.config.borrow().info.appearance_setting;
+        if setting != self.appearance_setting {
+            self.appearance_setting = setting;
+            self.send_surfaces().await;
         }
     }
 

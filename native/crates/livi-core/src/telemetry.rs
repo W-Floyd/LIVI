@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::http::StatusCode;
-use livi_core_proto::config::{AppearanceMode, CarType, Config, EvConnectorType};
+use livi_core_proto::config::{
+    AppearanceMode, AppearanceSetting, CarType, Config, EvConnectorType, NIGHT_MODE_KEYS,
+};
 use livi_core_proto::state::State;
 use serde_json::{Map, Value, json};
 use socketioxide::SocketIo;
@@ -15,7 +17,6 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
 use tower_http::cors::CorsLayer;
 
-use crate::cp_telemetry::{NIGHT_MODE, SURFACE_KEYS};
 use crate::server::Core;
 use crate::state_files::Saved;
 
@@ -160,6 +161,20 @@ fn last_fix(gps: &Map<String, Value>) -> Option<Value> {
     Some(fix)
 }
 
+pub const NIGHT_MODE: &str = "nightMode";
+
+fn night_modes_patch(modes: [bool; 4]) -> Value {
+    Value::Object(
+        NIGHT_MODE_KEYS
+            .iter()
+            .zip(modes)
+            .map(|(k, v)| (k.to_string(), v.into()))
+            .collect(),
+    )
+}
+
+const APPEARANCE_SETTING: &str = "appearanceSetting";
+
 struct Telemetry {
     core: Arc<Core>,
     io: SocketIo,
@@ -228,6 +243,8 @@ impl Telemetry {
                 self.core.open_app(app.to_string());
             }
         }
+        self.night_modes_from(patch).await;
+        self.appearance_setting_from(patch).await;
         let path = self.snap.get("path").cloned();
         let Some(changed) = merge(&mut self.snap, patch) else {
             return;
@@ -274,10 +291,44 @@ impl Telemetry {
             return;
         }
         self.appearance = mode;
-        if let Some(night) = mode.night_mode() {
-            let mut patch = Map::from_iter([(NIGHT_MODE.to_string(), night.into())]);
-            patch.extend(SURFACE_KEYS.map(|(_, key)| (key.to_string(), Value::Null)));
-            self.push(&Value::Object(patch)).await;
+        if let Some(night) = mode.night_mode()
+            && merge(&mut self.snap, &json!({ NIGHT_MODE: night })).is_some()
+        {
+            self.publish().await;
+        }
+    }
+
+    async fn night_modes_from(&self, patch: &Value) {
+        let flag = |key: &str| patch.get(key).and_then(Value::as_bool);
+        let mut cfg = self.core.hub.config();
+        let saved = cfg.night_modes();
+        let night = flag(NIGHT_MODE);
+        let asked = |key: &str| night.is_some() || flag(key).is_some();
+        if !NIGHT_MODE_KEYS.iter().any(|k| asked(k)) {
+            return;
+        }
+        let mut modes = night.map_or(saved, |night| [night; 4]);
+        for (mode, key) in modes.iter_mut().zip(NIGHT_MODE_KEYS) {
+            if let Some(night) = flag(key) {
+                *mode = night;
+            }
+        }
+        cfg.set_night_modes(modes);
+        cfg.couple_night_modes(asked);
+        if cfg.night_modes() != saved || cfg.appearance_mode != AppearanceMode::Auto {
+            self.save(night_modes_patch(cfg.night_modes())).await;
+        }
+    }
+
+    async fn appearance_setting_from(&self, patch: &Value) {
+        let Some(setting) = patch
+            .get(APPEARANCE_SETTING)
+            .and_then(|v| serde_json::from_value::<AppearanceSetting>(v.clone()).ok())
+        else {
+            return;
+        };
+        if setting != self.core.hub.config().appearance_setting {
+            self.save(json!({ APPEARANCE_SETTING: setting })).await;
         }
     }
 
@@ -660,11 +711,12 @@ mod tests {
 
         t.appearance(AppearanceMode::Night).await;
         t.appearance(AppearanceMode::Day).await;
-        let both = core.hub.watch().borrow().telemetry.clone();
-        assert_eq!(both["nightMode"], false);
-        for (_, key) in SURFACE_KEYS {
-            assert_eq!(both[key], Value::Null, "{key}");
-        }
+        assert_eq!(core.hub.watch().borrow().telemetry["nightMode"], false);
+        assert_eq!(
+            core.hub.config().appearance_mode,
+            AppearanceMode::Night,
+            "LIVI's own night mode keeps the setting"
+        );
         t.appearance(AppearanceMode::Auto).await;
         assert_eq!(t.snap["nightMode"], false);
     }
@@ -788,6 +840,57 @@ mod tests {
         assert_eq!(core.hub.config().dark_mode, !dark, "the car wins again");
         t.push(&json!({ "darkMode": "yes" })).await;
         assert_eq!(core.hub.config().dark_mode, !dark);
+
+        t.push(&json!({ "nightMode": true, "mainMapNightMode": false }))
+            .await;
+        assert_eq!(core.hub.config().night_modes(), [true, false, true, true]);
+        assert_eq!(core.hub.config().appearance_mode, AppearanceMode::Auto);
+        t.push(&json!({ "clusterUiNightMode": false, "mainUiNightMode": "yes" }))
+            .await;
+        assert_eq!(
+            core.hub.config().night_modes(),
+            [true, false, false, false],
+            "a light UI takes its map along"
+        );
+        t.push(&json!({ "clusterMapNightMode": true })).await;
+        assert_eq!(
+            core.hub.config().night_modes(),
+            [true, false, true, true],
+            "a dark map darkens its UI"
+        );
+        t.push(&json!({ "nightMode": false })).await;
+        assert_eq!(
+            core.hub.config().night_modes(),
+            [false; 4],
+            "nightMode sets them all"
+        );
+        t.push(&json!({ "mainUiNightMode": true })).await;
+        assert_eq!(
+            core.hub.config().night_modes(),
+            [true, true, false, false],
+            "a dark UI takes its map along"
+        );
+        core.set_config(&json!({ "appearanceMode": "day" }))
+            .await
+            .unwrap();
+        assert_eq!(core.hub.config().night_modes(), [false; 4]);
+        t.push(&json!({ "nightMode": false })).await;
+        assert_eq!(
+            core.hub.config().appearance_mode,
+            AppearanceMode::Auto,
+            "the same night mode from the car hands back to Auto"
+        );
+
+        t.push(&json!({ "appearanceSetting": "always" })).await;
+        assert_eq!(
+            core.hub.config().appearance_setting,
+            AppearanceSetting::Always
+        );
+        t.push(&json!({ "appearanceSetting": "sometimes" })).await;
+        assert_eq!(
+            core.hub.config().appearance_setting,
+            AppearanceSetting::Always
+        );
     }
 
     #[tokio::test]
@@ -795,6 +898,7 @@ mod tests {
         let dir = TempDir::new();
         let mut cfg = defaults();
         cfg.hu_volume = f64::NAN;
+        cfg.appearance_mode = AppearanceMode::Auto;
         let core = core(&dir, cfg);
         let (_, io, _) = socket(core.hub.watch());
         let saved = Saved {
@@ -869,8 +973,9 @@ mod tests {
         tokio::spawn(async move { axum::serve(listener, app).await });
         let get = || async move {
             let mut s = TcpStream::connect(addr).await.unwrap();
-            let req =
-                format!("GET {HTTP_NAVIGATION} HTTP/1.1\r\nHost: livi\r\nConnection: close\r\n\r\n");
+            let req = format!(
+                "GET {HTTP_NAVIGATION} HTTP/1.1\r\nHost: livi\r\nConnection: close\r\n\r\n"
+            );
             s.write_all(req.as_bytes()).await.unwrap();
             let mut out = String::new();
             tokio::time::timeout(Duration::from_secs(5), s.read_to_string(&mut out))

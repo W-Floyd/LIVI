@@ -375,7 +375,7 @@ pub fn stack_config(
     theme: &Theme,
 ) -> StackConfig {
     let or = |v: u32, d: u32| if v == 0 { d } else { v };
-    let night = cfg.appearance_mode.night_mode();
+    let [main_ui, main_map, cluster_ui, cluster_map] = cfg.night_modes();
     let (main_w, main_h) = main_size(cfg);
     let main_mm = dpi_mm(cfg.projection_dpi, main_w, main_h)
         .or_else(|| main_mm(cfg, panels, screen.as_ref()));
@@ -405,8 +405,8 @@ pub fn stack_config(
                 cfg.cluster_safe_area_left,
                 cfg.cluster_safe_area_right,
             ),
-            ui_night: night,
-            map_night: night,
+            ui_night: cluster_ui,
+            map_night: cluster_map,
             ..Default::default()
         }
     });
@@ -422,6 +422,7 @@ pub fn stack_config(
             icons: icons(cfg),
             right_hand_drive: cfg.hand == HandDriveType::Rhd,
             theme_displays: theme_displays(cfg, theme),
+            appearance_setting: cfg.appearance_setting.code(),
             device_id: addresses.accessory.clone(),
             bt_mac: addresses.bt_mac.clone(),
             source_version: if source.is_empty() {
@@ -452,8 +453,8 @@ pub fn stack_config(
                 safe_area_draw_outside: Some(cfg.projection_safe_area_draw_outside),
                 status_bar_edge: Some(status_bar_edge(cfg.car_play_dock_position)),
                 initial_url: None,
-                ui_night: night,
-                map_night: night,
+                ui_night: main_ui,
+                map_night: main_map,
             },
             cluster,
             entertainment_sample_rate: if cfg.sampling_frequency == 1 {
@@ -822,7 +823,7 @@ impl ConfigSource {
 
 #[cfg(test)]
 mod tests {
-    use livi_core_proto::config::{AppearanceMode, defaults};
+    use livi_core_proto::config::defaults;
     use livi_core_proto::theme::livi_theme;
 
     use super::*;
@@ -1138,27 +1139,19 @@ mod tests {
     }
 
     #[test]
-    fn the_phone_starts_with_the_saved_appearance() {
-        let mut cfg = livi_core_proto::config::defaults();
-        let main = |cfg: &Config| {
-            let main = stack_config(
-                cfg,
-                &HashMap::new(),
-                None,
-                false,
-                &addresses(),
-                &livi_theme(),
-            )
-            .info
-            .main;
-            (main.ui_night, main.map_night)
-        };
-        cfg.appearance_mode = AppearanceMode::Day;
-        assert_eq!(main(&cfg), (Some(false), Some(false)));
-        cfg.appearance_mode = AppearanceMode::Night;
-        assert_eq!(main(&cfg), (Some(true), Some(true)));
-        cfg.appearance_mode = AppearanceMode::Auto;
-        assert_eq!(main(&cfg), (None, None));
+    fn the_phone_starts_with_the_saved_night_modes() {
+        let mut cfg = defaults();
+        cfg.main_map_night_mode = false;
+        let info = stack_config(
+            &cfg,
+            &HashMap::new(),
+            None,
+            false,
+            &addresses(),
+            &livi_theme(),
+        )
+        .info;
+        assert_eq!((info.main.ui_night, info.main.map_night), (true, false));
     }
 
     #[test]

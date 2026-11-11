@@ -4,7 +4,6 @@
 
 use livi_cp::helper_sock::HelperSock;
 use livi_cp::manager::{CpCmd, CpHandle};
-use livi_cp::stack::Surface;
 use livi_cp::vehicle_state::{GAUGE_KEYS, Notice};
 use serde_json::{Map, Value};
 
@@ -19,20 +18,9 @@ const PARK: i64 = 101;
 
 pub struct CpTelemetry {
     helper: HelperSock,
-    night: Option<bool>,
-    appearance: [Option<bool>; 4],
     limited_ui: Option<bool>,
     video_allowed: Option<bool>,
 }
-
-pub const NIGHT_MODE: &str = "nightMode";
-
-pub const SURFACE_KEYS: [(Surface, &str); 4] = [
-    (Surface::MainUi, "mainUiNightMode"),
-    (Surface::MainMap, "mainMapNightMode"),
-    (Surface::ClusterUi, "clusterUiNightMode"),
-    (Surface::ClusterMap, "clusterMapNightMode"),
-];
 
 fn changed(prev: &Map<String, Value>, next: &Map<String, Value>, key: &str) -> bool {
     next.contains_key(key) && prev.get(key) != next.get(key)
@@ -80,32 +68,12 @@ impl CpTelemetry {
     pub fn new(helper: HelperSock) -> Self {
         Self {
             helper,
-            night: None,
-            appearance: [None; 4],
             limited_ui: None,
             video_allowed: None,
         }
     }
 
     pub fn follow(&mut self, prev: &Map<String, Value>, next: &Map<String, Value>, cp: &CpHandle) {
-        let night = next.get(NIGHT_MODE).and_then(Value::as_bool);
-        if changed(prev, next, NIGHT_MODE)
-            && let Some(night) = night
-            && self.night != Some(night)
-        {
-            self.night = Some(night);
-            cp.send(CpCmd::NightMode(night));
-        }
-        for (surface, key) in SURFACE_KEYS {
-            let sent = &mut self.appearance[surface as usize];
-            if (changed(prev, next, NIGHT_MODE) || changed(prev, next, key))
-                && let Some(night) = next.get(key).and_then(Value::as_bool).or(night)
-                && *sent != Some(night)
-            {
-                *sent = Some(night);
-                cp.send(CpCmd::Appearance(surface, night));
-            }
-        }
         if (changed(prev, next, "gear") || changed(prev, next, "reverse"))
             && let Some(g) = gear(
                 next.get("gear"),
@@ -224,9 +192,11 @@ impl CpTelemetry {
         }
     }
 
+    pub fn video_allowed(&self) -> bool {
+        self.video_allowed != Some(false)
+    }
+
     pub fn hydrate(&mut self, snap: &Map<String, Value>, cp: &CpHandle) {
-        self.night = None;
-        self.appearance = [None; 4];
         self.limited_ui = None;
         self.video_allowed = None;
         let mut rest = snap.clone();
@@ -285,7 +255,10 @@ mod tests {
         let mut t = CpTelemetry::new(sock);
         let first = obj(json!({ "nightMode": true, "speedKph": 50, "ts": 1 }));
         t.follow(&Map::new(), &first, &cp);
-        assert_eq!(drain(&mut cmds), all_night(true));
+        assert!(
+            cmds.try_recv().is_err(),
+            "the night mode comes from the config"
+        );
 
         let second = obj(json!({
             "nightMode": true,
@@ -356,78 +329,12 @@ mod tests {
         let _ = cmds.try_recv();
 
         t.hydrate(&second, &cp);
-        for cmd in all_night(true) {
-            assert_eq!(cmds.try_recv(), Ok(cmd));
-        }
         assert!(matches!(cmds.try_recv(), Ok(CpCmd::Gauges(_))));
         assert!(next(&mut lines).await.starts_with("vehicle-status "));
 
         t.follow(&second, &obj(json!({ "gps": { "lat": 1.0 } })), &cp);
         t.follow(&second, &obj(json!({ "nightMode": "dusk" })), &cp);
         assert!(cmds.try_recv().is_err());
-    }
-
-    fn drain(cmds: &mut mpsc::UnboundedReceiver<CpCmd>) -> Vec<CpCmd> {
-        std::iter::from_fn(|| cmds.try_recv().ok()).collect()
-    }
-
-    fn all_night(night: bool) -> Vec<CpCmd> {
-        std::iter::once(CpCmd::NightMode(night))
-            .chain(Surface::ALL.map(|s| CpCmd::Appearance(s, night)))
-            .collect()
-    }
-
-    #[test]
-    fn every_surface_follows_the_night_mode_until_it_has_its_own() {
-        let (tx, mut cmds) = mpsc::unbounded_channel();
-        let cp = CpHandle::from_sender(tx);
-        let mut t = CpTelemetry::new(HelperSock::new("/nonexistent/cp-bt.sock"));
-        let day = obj(json!({ "nightMode": false }));
-        t.follow(&Map::new(), &day, &cp);
-        assert_eq!(drain(&mut cmds), all_night(false));
-        let dark_cluster = obj(json!({
-            "nightMode": false, "clusterUiNightMode": true, "clusterMapNightMode": true
-        }));
-        t.follow(&day, &dark_cluster, &cp);
-        assert_eq!(
-            drain(&mut cmds),
-            [
-                CpCmd::Appearance(Surface::ClusterUi, true),
-                CpCmd::Appearance(Surface::ClusterMap, true)
-            ]
-        );
-        let light_map = obj(json!({
-            "nightMode": true,
-            "mainMapNightMode": false,
-            "clusterUiNightMode": true,
-            "clusterMapNightMode": true
-        }));
-        t.follow(&dark_cluster, &light_map, &cp);
-        assert_eq!(
-            drain(&mut cmds),
-            [
-                CpCmd::NightMode(true),
-                CpCmd::Appearance(Surface::MainUi, true)
-            ],
-            "the main map and the cluster keep their own"
-        );
-        let cleared = obj(json!({
-            "nightMode": false,
-            "mainMapNightMode": null,
-            "clusterUiNightMode": null,
-            "clusterMapNightMode": null
-        }));
-        t.follow(&light_map, &cleared, &cp);
-        assert_eq!(
-            drain(&mut cmds),
-            [
-                CpCmd::NightMode(false),
-                CpCmd::Appearance(Surface::MainUi, false),
-                CpCmd::Appearance(Surface::ClusterUi, false),
-                CpCmd::Appearance(Surface::ClusterMap, false)
-            ],
-            "back to nightMode"
-        );
     }
 
     #[test]

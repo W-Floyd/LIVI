@@ -63,7 +63,6 @@ const PHONE_SILENT: Duration = Duration::from_secs(10);
 const SILENCE_CHECK: Duration = Duration::from_millis(250);
 
 const CLUSTER_MAP_URL: &str = "maps:/car/instrumentcluster/map";
-const APPEARANCE_AUTOMATIC: u64 = 0;
 const UI_APPEARANCE: &str = "uiAppearanceUpdate";
 const MAP_APPEARANCE: &str = "mapAppearanceUpdate";
 
@@ -195,7 +194,6 @@ pub enum StackCmd {
     Media(u8),
     Telephony(u8),
     Siri,
-    NightMode(bool),
     Appearance(Surface, bool),
     LimitedUi(bool),
     VideoAllowed(bool),
@@ -355,8 +353,8 @@ struct Conn<M: Media> {
     event_listener: Option<TcpListener>,
     event: Option<EventConn>,
     live: bool,
-    night_mode: Option<bool>,
     appearance: [Option<bool>; 4],
+    appearance_setting: u64,
     limited_ui: Option<bool>,
     cluster_want: bool,
     cluster_url: Option<String>,
@@ -452,7 +450,7 @@ async fn sleep_until(at: Option<tokio::time::Instant>) {
     }
 }
 
-fn id_text(v: Option<&Value>) -> String {
+pub(crate) fn id_text(v: Option<&Value>) -> String {
     match v {
         Some(Value::Int(n)) => n.to_string(),
         Some(Value::Real(f)) if f.fract() == 0.0 && f.abs() < 1e21 => format!("{}", *f as i64),
@@ -568,6 +566,7 @@ pub async fn run<M: Media>(
             .with_cluster_content(cfg.cluster_content.as_ref())
             .with_images(&cfg.images)
     };
+    let appearance_setting = ctx.config.borrow().info.appearance_setting;
     let mut conn = Conn {
         ctx,
         events,
@@ -624,8 +623,8 @@ pub async fn run<M: Media>(
         event_listener: None,
         event: None,
         live: false,
-        night_mode: None,
         appearance: [None; 4],
+        appearance_setting,
         limited_ui: None,
         cluster_want: false,
         cluster_url: None,
@@ -645,7 +644,10 @@ pub async fn run<M: Media>(
     config.mark_unchanged();
     loop {
         tokio::select! {
-            Ok(()) = config.changed() => conn.follow_cluster_url().await,
+            Ok(()) = config.changed() => {
+                conn.follow_cluster_url().await;
+                conn.follow_appearance_setting().await;
+            }
             read = rd.read(&mut buf) => match read {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {

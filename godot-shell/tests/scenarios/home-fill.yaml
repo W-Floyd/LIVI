@@ -1,6 +1,7 @@
 name: home-fill
-# Home without the phone's picture: the cards over the whole width, the charge as the hero where
-# the picture would be. Android Auto's video joining moves the cards aside (about 350 ms) and opens
+# Home without the phone's picture: the cards over the whole width; with nothing playing they
+# stack at their own heights, centred, the media card compact (the media card leads only while
+# something plays: scenario media-player). Android Auto's video joining moves the cards aside (about 350 ms) and opens
 # the slot, the picture following the slot every frame and the phone asked for the slot once,
 # settled; its going does the reverse, asking nothing. At once under reduced motion. The rail
 # offers the phone's page only while there is a picture, and that page falls back when it goes.
@@ -15,16 +16,18 @@ steps:
       var side: Control = shell.get_node("Page/Body/Side")
       if slot.size.x > 0.5 or side.size.x < shell.size.x - 0.5 or shell.get_node("Projection").visible:
           return "with no phone the slot is %s and the side %s" % [slot.size, side.size]
-      var stat: Control = shell.get_node("Page/Body/Side/Panel/Stat")
-      var pre: Control = shell.get_node("Page/Body/Side/Panel/Precondition")
-      var hero := stat.get_global_rect()
-      var row := pre.get_global_rect()
-      # The hero takes the picture's side: left for LHD, right for RHD.
-      var picture_left := not ThemeManager.side_left()
-      if (hero.end.x > row.position.x) if picture_left else (row.end.x > hero.position.x):
-          return "hero %s, stacked card %s" % [hero, row]
-      if hero.size.y < row.size.y * 3 or not stat.hero:
-          return "the hero is %s" % hero
+      var panel: Control = shell.get_node("Page/Body/Side/Panel")
+      var cards := Rect2()
+      for c in panel.get_children():
+          if not c.visible:
+              continue
+          if absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
+              return "%s stretched to %s" % [c.name, c.size]
+          cards = c.get_global_rect() if cards.size == Vector2.ZERO else cards.merge(c.get_global_rect())
+      if shell.get_node("Page/Body/Side/Panel/Stat").hero or panel.get_node("Player").layout != "empty":
+          return "the battery card a hero, or the media card not compact"
+      if cards.get_center().distance_to(panel.get_global_rect().get_center()) > 1.0:
+          return "the cards %s not centred in %s" % [cards, panel.get_global_rect()]
   - screenshot: home-filled
   - theme: { appearance: night }
   - screenshot: home-filled-night

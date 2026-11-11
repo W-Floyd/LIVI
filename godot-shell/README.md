@@ -262,13 +262,16 @@ band's stations (`dabPlay`/`fmPlay`, the tuned one playing `dabPause`) and favou
 is `phoneMedia` on the phone's tab, a band's resume when it is not on air, else `media`. Volume
 is `huVolume`, as the hard keys. The core has no shuffle or repeat. Scenario `media`.
 
-Home's player (`MiniPlayer`) lays itself out by the room `HomeCards` gives it, hidden or not:
-beside the phone, a cards column wide enough for two (`TALL_SHARE`, `TALL_TOUCH`, `REST_TOUCH`;
-the 680 px snap) gives it a column of its own, full height, with the cover as large as fits,
-title, artist, album, a position bar and larger controls. Otherwise one row; when the text would
-keep fewer than `MIN_CHARS` beside the controls, they take a row under it; where the panel has no
-height for that row, one row without prev. The cover is drawn square at every size
-(`ArtView.square`). Scenario `media-player`.
+Home's media card (`MiniPlayer`) leads home while something plays (`HomeCards.tall`): with the
+phone hidden it takes the large slot and the other cards stack beside it at their own heights,
+centred; beside the phone, a column with room for two (`TALL_SHARE`, `TALL_TOUCH`, `REST_TOUCH`;
+the 680 px snap) gives it a column of its own, else it fills what the stacked cards leave, never
+shorter than the tallest of them (Precondition goes first when there is no room). It lays itself
+out by that room (`HomeCards.child_rect`, shown or not): `wide` (cover the card's height beside
+title, artist, album, a position bar and larger controls), `tall` (cover over them), one row, or
+the controls in a row under the text when it would keep fewer than `MIN_CHARS` beside them.
+Nothing playing: a compact "Nothing playing / Open Media" card. The cover is drawn square at
+every size (`ArtView.square`). Scenario `media-player`.
 
 ## App launcher
 

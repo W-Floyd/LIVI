@@ -28,8 +28,9 @@ var _windows: Array[int] = []
 var _app_ids := {}
 
 ## Side panel items, most important first. When they don't all fit, the panel drops items
-## from the end, whole: never smaller text, never a half-shown card.
-const PRIORITY := ["Stop", "Precondition", "Stat", "Player"]
+## from the end, whole: never smaller text, never a half-shown card. The media card leads home
+## and is never the one left out.
+const PRIORITY := ["Player", "Stop", "Stat", "Precondition"]
 ## What the panel left out last time it was laid out, for tests and the shots' notes.
 var left_out: Array[String] = []
 
@@ -181,7 +182,8 @@ func _ready() -> void:
 	Core.welcome.connect(func(_v): _refresh(); _tell_front(); _ask_area(true))
 	Core.changed.connect(_on_core_changed)
 	Core.open_page.connect(_on_core_page)
-	_stat.hero = _split_to == 1.0
+	# Compact: the media card leads home.
+	_stat.hero = false
 	_projection.visible = false
 	_precondition.icon_name = "therm"
 	_precondition.pressed.connect(_on_precondition)
@@ -189,6 +191,8 @@ func _ready() -> void:
 	_player.opened.connect(func(): open_page.call_deferred("media"))
 	_player.now_playing = now_playing
 	(_side.get_node("Panel") as HomeCards).tall = _player
+	# Which cards fit depends on the panel's width too (the media card's layout, a split column).
+	_side.get_node("Panel").resized.connect(func(): _fit.call_deferred())
 	now_playing.changed.connect(_update_player)
 	now_playing.art_changed.connect(_update_player)
 	_update_player()
@@ -713,7 +717,6 @@ func _slide(want: float, to: float) -> void:
 		return
 	_split_to = want
 	_side_to = to
-	_stat.hero = want == 1.0
 	_fit.call_deferred()
 	if _split_tween:
 		_split_tween.kill()
@@ -958,7 +961,7 @@ func _fit() -> void:
 	var panel: HomeCards = _side.get_node("Panel")
 	var dashboard := _split_to == 1.0
 	var electric := _powertrain() == "electric"
-	var wanted := {Stat = true, Precondition = electric, Stop = electric and _stop.has_content(), Player = _player.has_content()}
+	var wanted := {Stat = true, Precondition = electric, Stop = electric and _stop.has_content(), Player = true}
 	for n in PRIORITY:
 		panel.get_node(n).visible = wanted[n]
 	# The screen's height, not the panel's: the panel grows with what it holds.
@@ -970,7 +973,8 @@ func _fit() -> void:
 	order.reverse()
 	for n in order:
 		var need := panel.needed(dashboard)
-		if need <= room:
+		# Fractions of a pixel: the cards' heights are not whole.
+		if need <= room + 1.0:
 			break
 		var item: Control = panel.get_node(n)
 		# A tight player in one row rather than none.
@@ -979,6 +983,8 @@ func _fit() -> void:
 			if panel.needed(dashboard) <= room:
 				break
 			need = panel.needed(dashboard)
+		if item == _player:
+			continue
 		if item.visible:
 			item.visible = false
 			# The hero beside a too-tall stack: leaving it out would not make the stack fit.

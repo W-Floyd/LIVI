@@ -21,6 +21,11 @@ var seekable := true:
 		queue_redraw()
 
 var _drag := -1.0
+## Its height, of a touch target: a thin bar on home's media card.
+var height_share := 1.0:
+	set(v):
+		height_share = v
+		update_minimum_size()
 
 
 func _ready() -> void:
@@ -37,7 +42,7 @@ func dragging() -> bool:
 
 
 func _get_minimum_size() -> Vector2:
-	return Vector2(0, ThemeManager.px.touch)
+	return Vector2(0, roundf(ThemeManager.px.touch * height_share))
 
 
 func _gui_input(event: InputEvent) -> void:

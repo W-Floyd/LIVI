@@ -1,23 +1,27 @@
 class_name MiniPlayer
 extends Card
 ## What's playing, with the three controls a driver needs, laid out by the room home's panel
-## gives it. A column of its own (HomeCards.is_tall): the cover as large as fits, title, artist
-## and album, a thin position bar, larger controls. Otherwise one row, the cover square at the
-## text's height; when the text would get fewer than MIN_CHARS beside the controls, they go to a
-## row of their own under it, prev going only when that row cannot hold three; where the panel
-## has no height for that row, one row without prev. One line per text, cut with an ellipsis. A
-## tap elsewhere on the card opens the media page.
+## gives it (HomeCards.child_rect). Large (the media card leads home): `wide`, the cover the
+## card's height beside title, artist, album, a position bar and larger controls; `tall` where
+## that leaves the text too little width, the cover over them. Otherwise one row, the cover
+## square at the text's height; when the text would get fewer than MIN_CHARS beside the
+## controls, they go to a row of their own under it, prev going only when that row cannot hold
+## three; where the panel has no height for that row, one row without prev. Nothing playing:
+## `empty`, a placeholder and a line to open the media page. A tap on the card outside its
+## controls opens the media page.
 
 signal control(name: String)  # playPause | next | prev
 signal opened
 
 ## Characters of the title's font the text keeps beside the controls in one row.
 const MIN_CHARS := 8
+## The position bar's height on a large card, of a touch target.
+const SEEK_SHARE := 0.6
 
 var title := "":
 	set(v):
 		title = v
-		if _title: _title.text = v
+		_texts()
 var artist := "":
 	set(v):
 		artist = v
@@ -50,7 +54,7 @@ var show_position := false:
 		if v != show_position:
 			show_position = v
 			_arrange()
-## one | two | tall: the controls beside the text, under it, or the card a column of its own.
+## empty | one | two | tall | wide (see above).
 var layout := "one"
 var two_rows: bool:
 	get:
@@ -73,6 +77,8 @@ var _play: Button
 var _next: Button
 var _rows: VBoxContainer
 var _top: HBoxContainer
+## Beside the cover in `wide`: the text, the bar and the controls.
+var _col: VBoxContainer
 var _buttons: HBoxContainer
 
 
@@ -95,6 +101,7 @@ func _build() -> void:
 	_seek = SeekBar.new()
 	_seek.name = "Seek"
 	_seek.visible = false
+	_seek.height_share = SEEK_SHARE
 	_seek.seeked.connect(_on_seek)
 	_prev = _button("prev", "Previous")
 	_play = _button("pause", "Pause")
@@ -107,8 +114,13 @@ func _build() -> void:
 	_buttons.set_meta("gap", 0.0)
 	_top = UI.hbox([_art, _meta, _buttons], 1.0)
 	_top.name = "Top"
+	_col = UI.vbox([], 1.0)
+	_col.name = "Column"
+	_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_col.alignment = BoxContainer.ALIGNMENT_CENTER
 	_rows = UI.vbox([_top], 1.0)
 	_rows.name = "Rows"
+	_rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_rows)
 	_texts()
 
@@ -156,14 +168,16 @@ func _button(icon: String, name: String) -> Button:
 	return b
 
 
-## Artist and album a line each in a column of its own, else on one line.
+## Artist and album a line each on a large card, else on one line. Nothing playing: a line to
+## the media page.
 func _texts() -> void:
 	if _subtitle == null:
 		return
-	var tall := layout == "tall"
-	_subtitle.text = artist if tall else " · ".join([artist, album].filter(func(s): return s != ""))
+	var large := layout == "tall" or layout == "wide"
+	_title.text = title if title != "" else "Nothing playing"
+	_subtitle.text = "Open Media" if title == "" else artist if large else " · ".join([artist, album].filter(func(s): return s != ""))
 	_album.text = album
-	_album.visible = tall and album != ""
+	_album.visible = large and album != "" and title != ""
 
 
 func _style() -> void:
@@ -199,7 +213,13 @@ func _panel() -> HomeCards:
 	return p if p is HomeCards else null
 
 
-## The width inside the card's padding, of the width home's panel gives it.
+## The room inside the card's padding, of the rect home's panel gives it.
+func inner_size() -> Vector2:
+	var r := _panel().child_rect(self).size if _panel() else size
+	return r - get_theme_stylebox("panel").get_minimum_size()
+
+
+## The width alone (HomeCards.child_width), which does not depend on this card's height.
 func inner_width() -> float:
 	var w: float = _panel().child_width(self) if _panel() else size.x
 	return w - get_theme_stylebox("panel").get_minimum_size().x
@@ -219,53 +239,126 @@ func min_text_width() -> float:
 	return f.get_string_size("abcdefghijklmnopqrstuvwxyz", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x / 26.0 * MIN_CHARS
 
 
+## The card's height in a row, or two where the text would be tight: what it needs at least,
+## from the theme's fonts rather than its present layout.
+func compact_height() -> float:
+	var t: float = ThemeManager.px.touch
+	var pad := get_theme_stylebox("panel").get_minimum_size().y
+	var text: float = ThemeManager.fonts.strong.get_height(ThemeManager.font_size("body")) \
+		+ ThemeManager.fonts.body.get_height(ThemeManager.font_size("caption")) + 6.0
+	var row := maxf(t, text)
+	if title != "" and one_row_text_width() < min_text_width() and allow_two_rows:
+		row += float(_rows.get_theme_constant("separation")) + t
+	return ceilf(row + pad)
+
+
 ## `n` controls of `side` (they have no padding).
 func _buttons_width(n: int, side: float) -> float:
 	return side * n + ThemeManager.px.touch_gap * (n - 1)
+
+
+## The text (`title_lines` of title, the album line or not), bar and controls of a large layout,
+## with `side` controls.
+func _large_stack_height(title_lines: int, side: float, with_album: bool) -> float:
+	var sep := float(_rows.get_theme_constant("separation"))
+	# A label's lines with the theme's line spacing between them.
+	var spacing := 3.0
+	var h: float = (ThemeManager.fonts.strong.get_height(ThemeManager.font_size("title")) + spacing) * title_lines
+	h += (ThemeManager.fonts.body.get_height(ThemeManager.font_size("caption")) + spacing) * (2.0 if with_album and album != "" else 1.0)
+	h += side + sep
+	if show_position:
+		h += roundf(ThemeManager.px.touch * SEEK_SHARE) + sep
+	return h
+
+
+## The layout for the room the card has: [layout, the large cover's side, title lines, control
+## side, album line]. A large layout only where its text, bar and controls fit the height: two
+## lines of title and larger controls where they fit, else one line, else touch-size controls,
+## else without the album line.
+func _choose() -> Array:
+	var t: float = ThemeManager.px.touch
+	if title == "":
+		return ["empty", 0.0, 1, t, false]
+	var room := inner_size()
+	var sep := float(_rows.get_theme_constant("separation"))
+	for fit in [[2, t * 1.25, true], [1, t * 1.25, true], [1, t, true], [1, t, false]]:
+		var stack := _large_stack_height(fit[0], fit[1], fit[2])
+		# Beside the text: the card's height, leaving the text 1.5 MIN_CHARS at the title's size
+		# and room for the controls.
+		var beside := minf(room.y, room.x - sep - maxf(min_text_width() * ThemeManager.px.title / ThemeManager.px.body * 1.5, _buttons_width(3, fit[1])))
+		if room.y >= stack and beside >= t * 2.0:
+			return ["wide", floorf(beside), fit[0], fit[1], fit[2]]
+		var over := minf(room.x, room.y - stack - sep)
+		if over >= t * 2.0 and room.x >= _buttons_width(3, fit[1]):
+			return ["tall", floorf(over), fit[0], fit[1], fit[2]]
+	if one_row_text_width() < min_text_width() and allow_two_rows:
+		return ["two", 0.0, 1, t, false]
+	return ["one", 0.0, 1, t, false]
 
 
 func _arrange() -> void:
 	if _top == null or inner_width() <= 0.0:
 		return
 	var t: float = ThemeManager.px.touch
-	var tight := one_row_text_width() < min_text_width()
-	var want := "one"
-	if _panel() and _panel().is_tall(self):
-		want = "tall"
-	elif tight and allow_two_rows:
-		want = "two"
-	if want != layout:
-		layout = want
+	var pick := _choose()
+	if pick[0] != layout:
+		layout = pick[0]
 		_place()
 		_texts()
-	var tall := layout == "tall"
-	# Larger controls in a column of their own, where three fit.
-	var big := t * 1.25 if tall and inner_width() >= _buttons_width(3, t * 1.25) else t
+	var large := layout == "tall" or layout == "wide"
+	var room := inner_size()
+	# The controls on a large card as `_choose` fitted them.
+	var line: float = room.x - (pick[1] + float(_top.get_theme_constant("separation")) if layout == "wide" else 0.0)
+	var big: float = pick[3]
+	_album.visible = large and album != "" and pick[4]
 	for b in [_prev, _play, _next]:
 		b.custom_minimum_size = Vector2(big, big)
 		b.icon = Icons.texture(b.get_meta("icon_name"), ThemeManager.px.icon * big / t)
-	_seek.visible = tall and show_position
+	_buttons.visible = layout != "empty"
+	_seek.visible = large and show_position
 	if now_playing and _seek.visible:
 		_seek.seekable = now_playing.can_seek
 		_seek.fraction = now_playing.fraction()
-	_prev.visible = inner_width() >= _buttons_width(3, big) if layout != "one" else not tight
+	_prev.visible = line >= _buttons_width(3, big) if layout != "one" else one_row_text_width() >= min_text_width()
 	_buttons.alignment = BoxContainer.ALIGNMENT_BEGIN if layout == "one" else BoxContainer.ALIGNMENT_CENTER
 	for l in [_title, _subtitle, _album]:
-		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER if tall else HORIZONTAL_ALIGNMENT_LEFT
-	# In a column of its own the cover takes the height the rest leaves, drawn square in it
-	# (ArtView): a minimum from the height would hold the panel at it.
-	var side := t if tall else art_side()
-	_art.custom_minimum_size = Vector2(side, side)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER if layout == "tall" else HORIZONTAL_ALIGNMENT_LEFT
+	# A large card's title in two lines at the title size before an ellipsis.
+	if large:
+		_title.add_theme_font_size_override("font_size", ThemeManager.font_size("title"))
+		# One line: cut, not wrapped (a wrap would show only its first word).
+		_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if pick[2] > 1 else TextServer.AUTOWRAP_OFF
+		_title.max_lines_visible = pick[2]
+		_title.clip_text = pick[2] == 1
+	else:
+		UI.style_label(_title)
+		_title.autowrap_mode = TextServer.AUTOWRAP_OFF
+		_title.max_lines_visible = -1
+		_title.clip_text = true
+	# The large cover is drawn square in what its box gets (ArtView); only its width is a
+	# minimum, as one from the height would hold the panel at it.
+	match layout:
+		"wide":
+			_art.custom_minimum_size = Vector2(pick[1], t)
+		"tall":
+			_art.custom_minimum_size = Vector2(t, t)
+		_:
+			_art.custom_minimum_size = Vector2.ONE * art_side()
 
 
 ## Moves the cover, text and controls into the layout's boxes.
 func _place() -> void:
-	for n in [_art, _meta, _seek, _buttons, _top]:
+	for n in [_art, _meta, _seek, _buttons, _top, _col]:
 		if n.get_parent():
 			n.get_parent().remove_child(n)
-	var tall := layout == "tall"
-	_art.size_flags_vertical = Control.SIZE_EXPAND_FILL if tall else Control.SIZE_FILL
+	_art.size_flags_vertical = Control.SIZE_EXPAND_FILL if layout == "tall" else Control.SIZE_FILL
 	match layout:
+		"wide":
+			for n in [_meta, _seek, _buttons]:
+				_col.add_child(n)
+			_top.add_child(_art)
+			_top.add_child(_col)
+			_rows.add_child(_top)
 		"tall":
 			for n in [_art, _meta, _seek, _buttons]:
 				_rows.add_child(n)
@@ -278,5 +371,6 @@ func _place() -> void:
 			for n in [_art, _meta, _buttons]:
 				_top.add_child(n)
 			_rows.add_child(_top)
-	# The tall card's boxes fill its height, so the cover can.
-	_rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_top.size_flags_vertical = Control.SIZE_EXPAND_FILL if layout == "wide" else Control.SIZE_FILL
+	# A row on a card taller than it (the stack's media card) sits in its middle.
+	_rows.alignment = BoxContainer.ALIGNMENT_BEGIN if layout == "tall" else BoxContainer.ALIGNMENT_CENTER

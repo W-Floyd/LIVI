@@ -49,6 +49,8 @@ _host=aarch64-unknown-linux-musl
 
 # Set by make-source.sh.
 _livi_commit=
+# Set by pmb-armv7.sh with FAST=1.
+_livi_fast=
 
 source="
 	livi-$_livi_commit.tar.gz
@@ -62,11 +64,31 @@ source="
 	"
 builddir="$srcdir/livi-$_livi_commit/godot-shell"
 
+# _livi_fast: the tree is copied to a fixed path in the cache, unchanged files keeping their
+# mtimes, so cargo's fingerprints (path and mtime) in the kept target dir carry across commits.
+_livi_sync() {
+	mkdir -p "$2"
+	(cd "$1" && find . ! -type d) | while IFS= read -r _f; do
+		cmp -s "$1/$_f" "$2/$_f" || { mkdir -p "$2/${_f%/*}"; rm -f "$2/$_f"; cp -P "$1/$_f" "$2/$_f"; }
+	done
+	(cd "$2" && find . ! -type d) | while IFS= read -r _f; do
+		[ -e "$1/$_f" ] || [ -L "$1/$_f" ] || rm -f "$2/$_f"
+	done
+}
+
 build() {
 	_cache=/mnt/pmbootstrap/sccache/livi-shell
 	mkdir -p "$_cache"
 	export RUSTUP_HOME="$_cache/rustup" CARGO_HOME="$_cache/cargo"
-	export CARGO_TARGET_DIR="$_cache/target"
+	export CARGO_TARGET_DIR="$srcdir/target"
+	if [ -n "$_livi_fast" ]; then
+		export CARGO_TARGET_DIR="$_cache/target"
+		# abuild's is the staged APKBUILD's mtime, and the cc crate's build scripts rerun on it.
+		unset SOURCE_DATE_EPOCH
+		export CARGO_PROFILE_RELEASE_INCREMENTAL=true
+		_livi_sync "$srcdir/livi-$_livi_commit" "$_cache/src"
+		cd "$_cache/src/godot-shell"
+	fi
 	export PATH="$CARGO_HOME/bin:$PATH"
 	unset RUSTC_WRAPPER CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
 

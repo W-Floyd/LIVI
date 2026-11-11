@@ -82,6 +82,15 @@ PMAPORTS_URL=https://gitlab.postmarketos.org/W-Floyd/pmaports.git
 PMAPORTS_REF=2024-kia-ev6
 ```
 
+`FAST=1 pmb-armv7.sh` is for iterating: `--lax` keeps the buildroots instead of zapping and
+reinstalling them, and the APKBUILDs keep cargo's target dir (incremental) and a copy of the
+source at a fixed path in the cache mount, so only changed crates and their dependents
+recompile (both packages, warm: 14 s with no change, ~2.5 min for a line in `livi-core-proto`;
+the default is ~5.5 min). The trade-off: a kept buildroot can hide a missing dependency, a lax
+build only warns on a checksum mismatch, and incremental code is not the release build's. Use
+the default for anything that ships. `OUT=` puts the output (and the staged aports) elsewhere
+than `packaging/out`.
+
 `livi-core` installs beside `livi-headunit`, under `/usr/lib/livi-core`. `livi-shell` installs
 the project (with `.godot/`) and the extension at `/usr/lib/livi-shell/project`, where
 `livi_shell.gdextension` finds `res://bin/linux-arm32/liblivi_godot_shell.so`;

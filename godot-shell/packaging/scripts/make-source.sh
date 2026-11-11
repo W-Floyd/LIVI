@@ -4,6 +4,7 @@
 # with its checksums. The repository's APKBUILDs stay unpinned; the staged copies are for the
 # build only.
 #   packaging/scripts/make-source.sh [pkg...]   -> packaging/out/aports/<pkg>/   (default: both)
+# OUT replaces packaging/out.
 # Then copy packaging/out/aports/* to the pmaports tree's device/testing/ and
 # `pmbootstrap checksum`/`build --arch armv7 livi-core livi-shell`.
 set -eu
@@ -13,7 +14,7 @@ c=$(git -C "$gs" rev-parse HEAD)
 [ -z "$(git -C "$repo" status --porcelain --untracked-files=no)" ] ||
     echo "warning: uncommitted changes are not in the archive" >&2
 for p in ${*:-livi-core livi-shell}; do
-    d=$gs/packaging/out/aports/$p
+    d=${OUT:-$gs/packaging/out}/aports/$p
     rm -rf "$d" && mkdir -p "$d"
     cp "$gs/packaging/alpine/$p"/* "$d"/
     git -C "$repo" archive --prefix="livi-$c/" HEAD | gzip -n > "$d/livi-$c.tar.gz"

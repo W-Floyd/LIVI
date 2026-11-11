@@ -44,6 +44,7 @@ pub trait Speaker: Send + Sync + 'static {
     fn set_visualizer_enabled(&self, on: bool);
     fn take_visualizer(&self) -> Option<(Vec<u8>, u32)>;
     fn output_delay_ms(&self) -> Option<u32>;
+    fn set_backlog(&self, max_ms: u32, target_ms: u32);
 }
 
 pub struct AudioConfig {
@@ -385,6 +386,7 @@ pub struct Host<O: Outside> {
     feed_routes: FeedRoutes,
     helper_feed: Option<O::FeedEars>,
     visualizer_enabled: bool,
+    audio_backlog: Option<(u32, u32)>,
     spectrum: Spectrum,
     wire: Arc<dyn Wire>,
 }
@@ -410,6 +412,7 @@ impl<O: Outside> Host<O> {
             feed_routes: Rc::new(RefCell::new(HashMap::new())),
             helper_feed: None,
             visualizer_enabled: false,
+            audio_backlog: None,
             spectrum: Spectrum::new(),
             wire,
         }
@@ -505,6 +508,7 @@ impl<O: Outside> Host<O> {
                 }
             }
             OP_VISUALIZER => self.set_visualizer_enabled(rest.first().is_some_and(|b| b & 1 != 0)),
+            OP_AUDIO_BACKLOG => self.set_audio_backlog(rest),
             OP_FEED_OPEN => self.open_feed(id, rest),
             OP_FEED_ROUTE => self.route_feed(id, rest),
             OP_FEED_CLOSE => {

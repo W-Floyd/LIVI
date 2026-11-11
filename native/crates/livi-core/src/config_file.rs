@@ -6,8 +6,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use livi_core_proto::config::Config;
 pub use livi_core_proto::config::defaults;
+use livi_core_proto::config::{AUDIO_BACKLOG_MAX_MS, Config};
 use serde_json::{Map, Value};
 
 pub const CAR_NAME_MAX: usize = 20;
@@ -96,6 +96,11 @@ impl ConfigFile {
         if !WIFI_PASSWORD_LEN.contains(&config.wifi_password.chars().count()) {
             println!("[core] wifiPassword is no WPA passphrase, falling back to the default");
             config.wifi_password = self::defaults().wifi_password;
+        }
+        if config.audio_backlog_ms().is_none() {
+            println!("[core] the audio backlog bounds do not fit, falling back to the defaults");
+            config.audio_backlog_max_ms = self::defaults().audio_backlog_max_ms;
+            config.audio_backlog_target_ms = self::defaults().audio_backlog_target_ms;
         }
 
         if !self.path.exists() || file != for_file(&config) {
@@ -345,6 +350,13 @@ pub fn apply_patch(current: &Config, patch: &Value) -> Result<Config, String> {
         && !WIFI_PASSWORD_LEN.contains(&next.wifi_password.chars().count())
     {
         return Err("wifiPassword needs 8 to 63 characters".into());
+    }
+    if next.audio_backlog_ms().is_none() {
+        return Err(format!(
+            "audioBacklogMaxMs needs {} to {} ms, audioBacklogTargetMs less than it",
+            AUDIO_BACKLOG_MAX_MS.start(),
+            AUDIO_BACKLOG_MAX_MS.end()
+        ));
     }
     let mut next = next;
     next.settle_night_modes(|key| patch.contains_key(key));
@@ -775,6 +787,22 @@ pub mod tests {
             Err("unknown setting nightMode".into())
         );
         assert!(apply_patch(&current, &json!({ "wifiPassword": "short" })).is_err());
+        for (patch, fits) in [
+            (
+                json!({ "audioBacklogMaxMs": 1000, "audioBacklogTargetMs": 0 }),
+                true,
+            ),
+            (json!({ "audioBacklogMaxMs": 100 }), false),
+            (json!({ "audioBacklogMaxMs": 300 }), true),
+            (json!({ "audioBacklogTargetMs": 1000 }), false),
+            (
+                json!({ "audioBacklogMaxMs": 99, "audioBacklogTargetMs": 0 }),
+                false,
+            ),
+            (json!({ "audioBacklogMaxMs": 2001 }), false),
+        ] {
+            assert_eq!(apply_patch(&current, &patch).is_ok(), fits, "{patch}");
+        }
         let light = apply_patch(&current, &json!({ "mainUiNightMode": false })).unwrap();
         assert_eq!(light.night_modes(), [false, false, true, true]);
         assert_eq!(light.appearance_mode, AppearanceMode::Auto);

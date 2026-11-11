@@ -263,6 +263,7 @@ impl Services {
             host_ready_rx,
         ));
         tokio::spawn(follow_display_mode(hub.applied(), ctrl.clone()));
+        tokio::spawn(follow_audio_backlog(hub.applied(), gst.clone()));
         tokio::spawn(forward_touches(
             ctrl.touches(),
             asks.input_from_compositor.clone(),
@@ -676,6 +677,22 @@ fn name_of(screen: Screen) -> &'static str {
         Screen::Main => "main",
         Screen::Cluster => "cluster",
         Screen::Aux => "aux",
+    }
+}
+
+async fn follow_audio_backlog(mut applied: watch::Receiver<Config>, gst: GstHost) {
+    let mut told = None;
+    loop {
+        let now = applied.borrow_and_update().audio_backlog_ms();
+        if let Some((max, target)) = now
+            && told != now
+        {
+            gst.set_audio_backlog(max, target);
+            told = now;
+        }
+        if applied.changed().await.is_err() {
+            return;
+        }
     }
 }
 

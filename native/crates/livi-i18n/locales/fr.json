@@ -157,6 +157,8 @@
     "phoneCalls": "Appels",
     "systemSounds": "Sons Système",
     "samplingFrequency": "Fréquence de samplage",
+    "audioBacklogMax": "Retard audio max.",
+    "audioBacklogTarget": "Retard audio après un saut",
     "disableAudio": "Audio désactivé",
     "audioOutputDevice": "Sortie Audio",
     "audioInputDevice": "Entrée Audio",

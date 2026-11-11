@@ -157,6 +157,8 @@
     "phoneCalls": "Phone Calls",
     "systemSounds": "System Sounds",
     "samplingFrequency": "Sampling Frequency",
+    "audioBacklogMax": "Max Audio Lag",
+    "audioBacklogTarget": "Audio Lag After a Skip",
     "disableAudio": "Disable Audio",
     "audioOutputDevice": "Audio Output",
     "audioInputDevice": "Audio Input",

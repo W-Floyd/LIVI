@@ -81,6 +81,27 @@ pub fn schema() -> Node {
                 "settings.samplingFrequency",
                 "Sampling Frequency",
             )),
+            Node::number(
+                Label::new("settings.audioBacklogMax", "Max Audio Lag"),
+                "audioBacklogMaxMs",
+            )
+            .icon("audioBacklogMax")
+            .display_value()
+            .range(Some(100.0), Some(2000.0), Some(10.0))
+            .shown(Shown::Suffix(" ms"))
+            .page(Label::new("settings.audioBacklogMax", "Max Audio Lag")),
+            Node::number(
+                Label::new("settings.audioBacklogTarget", "Audio Lag After a Skip"),
+                "audioBacklogTargetMs",
+            )
+            .icon("audioBacklogTarget")
+            .display_value()
+            .range(Some(0.0), Some(1990.0), Some(10.0))
+            .shown(Shown::Suffix(" ms"))
+            .page(Label::new(
+                "settings.audioBacklogTarget",
+                "Audio Lag After a Skip",
+            )),
             Node::checkbox(
                 Label::new(
                     "settings.huVolumeLinkSystem",

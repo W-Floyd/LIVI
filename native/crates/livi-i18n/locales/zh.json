@@ -157,6 +157,8 @@
     "phoneCalls": "电话",
     "systemSounds": "系统提示音",
     "samplingFrequency": "采样频率",
+    "audioBacklogMax": "最大音频延迟",
+    "audioBacklogTarget": "跳过后的音频延迟",
     "disableAudio": "禁用音频",
     "audioOutputDevice": "音频输出",
     "audioInputDevice": "音频输入",

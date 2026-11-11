@@ -157,6 +157,8 @@
     "phoneCalls": "Телефонні дзвінки",
     "systemSounds": "Системні звуки",
     "samplingFrequency": "Частота дискретизації",
+    "audioBacklogMax": "Макс. затримка звуку",
+    "audioBacklogTarget": "Затримка звуку після пропуску",
     "disableAudio": "Вимкнути аудіо",
     "audioOutputDevice": "Аудіовихід",
     "audioInputDevice": "Аудіовхід",

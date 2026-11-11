@@ -93,6 +93,8 @@ const SETTINGS: &[(&str, &str)] = &[
     ("audioOutput", "SpeakerOutlined"),
     ("audioInput", "MicNoneOutlined"),
     ("samplingFrequency", "EqualizerOutlined"),
+    ("audioBacklogMax", "AvTimerOutlined"),
+    ("audioBacklogTarget", "FastForwardOutlined"),
     ("volumeLink", "LinkOutlined"),
     ("audioOff", "VolumeOffOutlined"),
     ("dab", "RadioOutlined"),

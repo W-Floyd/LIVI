@@ -27,6 +27,30 @@ steps:
   - tap: { node: Settings/Rows/List/Media }
   - expect_action: { SetConfig: { patch: { startPage: /media } } }
   - expect_node: { path: Settings/Heading/Title, text: General }
+  # Live audio's backlog bounds, in ms: a page of steps each.
+  - tap: { node: Settings/Sections/List/Audio }
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("Settings/Rows")
+      for row in ["Max Audio Lag", "Audio Lag After a Skip"]:
+          if not rows.list.has_node(row):
+              return "no %s row in %s" % [row, rows.list.get_children().map(func(n): return n.name)]
+      rows.reveal(rows.list.get_node("Max Audio Lag"))
+  - wait: { frames: 2 }
+  - tap: { node: Settings/Rows/List/Max Audio Lag }
+  - expect_node: { path: Settings/Heading/Title, text: Max Audio Lag }
+  - tap: { node: Settings/Rows/List/Number/+100 }
+  - expect_action: { SetConfig: { patch: { audioBacklogMaxMs: 1100 } } }
+  - tap: { node: Settings/Heading/Up }
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("Settings/Rows")
+      rows.reveal(rows.list.get_node("Audio Lag After a Skip"))
+  - wait: { frames: 2 }
+  - tap: { node: Settings/Rows/List/Audio Lag After a Skip }
+  - expect_node: { path: Settings/Heading/Title, text: Audio Lag After a Skip }
+  - tap: { node: Settings/Rows/List/Number/-100 }
+  - expect_action: { SetConfig: { patch: { audioBacklogTargetMs: 50 } } }
+  - tap: { node: Settings/Heading/Up }
+  - tap: { node: Settings/Sections/List/General }
   # A drag scrolls the list, and the row it ends on is not opened.
   - gdscript: |
       var rows: DragScroll = shell.get_node("Settings/Rows")

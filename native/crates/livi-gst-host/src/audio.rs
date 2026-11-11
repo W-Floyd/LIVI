@@ -48,6 +48,9 @@ impl<O: Outside> Host<O> {
         if self.visualizer_enabled {
             speaker.set_visualizer_enabled(true);
         }
+        if let Some((max, target)) = self.audio_backlog {
+            speaker.set_backlog(max, target);
+        }
         let speaker = Output::new(speaker);
 
         let fed = rest[11] & 2 != 0;
@@ -114,6 +117,9 @@ impl<O: Outside> Host<O> {
         }
         if self.visualizer_enabled {
             speaker.set_visualizer_enabled(true);
+        }
+        if let Some((max, target)) = self.audio_backlog {
+            speaker.set_backlog(max, target);
         }
         Some(speaker)
     }
@@ -187,6 +193,19 @@ impl<O: Outside> Host<O> {
         }
     }
 
+    pub(super) fn set_audio_backlog(&mut self, rest: &[u8]) {
+        let (Some(max), Some(target)) = (u32_le(rest, 0), u32_le(rest, 4)) else {
+            return;
+        };
+        if target >= max {
+            return;
+        }
+        self.audio_backlog = Some((max, target));
+        for a in self.audio.borrow().values() {
+            a.speaker.get().set_backlog(max, target);
+        }
+    }
+
     pub(super) fn set_visualizer_enabled(&mut self, on: bool) {
         self.visualizer_enabled = on;
         self.spectrum.clear();
@@ -236,4 +255,8 @@ impl<O: Outside> Host<O> {
                 .reply(REPLY_URL_STATUS, *id, &url_status_body(&player.status()));
         }
     }
+}
+
+fn u32_le(rest: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(rest.get(at..at + 4)?.try_into().ok()?))
 }

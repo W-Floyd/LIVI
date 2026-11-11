@@ -106,6 +106,7 @@ struct SpeakerLog {
     visualizer_on: Option<bool>,
     visualizer: Vec<u8>,
     output_delay_ms: Option<u32>,
+    backlog: Option<(u32, u32)>,
 }
 
 #[derive(Default, Clone)]
@@ -126,6 +127,10 @@ impl FakeSpeaker {
 
     fn set_output_delay(&self, ms: u32) {
         self.0.lock().unwrap().output_delay_ms = Some(ms);
+    }
+
+    fn backlog(&self) -> Option<(u32, u32)> {
+        self.0.lock().unwrap().backlog
     }
 
     fn visualizer_on(&self) -> Option<bool> {
@@ -179,6 +184,10 @@ impl Speaker for FakeSpeaker {
 
     fn output_delay_ms(&self) -> Option<u32> {
         self.0.lock().unwrap().output_delay_ms
+    }
+
+    fn set_backlog(&self, max_ms: u32, target_ms: u32) {
+        self.0.lock().unwrap().backlog = Some((max_ms, target_ms));
     }
 }
 
@@ -1769,6 +1778,56 @@ fn a_new_output_gives_the_stream_a_new_pipeline_at_its_level() {
     );
     assert_eq!(f.speaker(1).pushed(), vec![vec![7]]);
     assert!(f.speaker(0).pushed().is_empty());
+}
+
+#[test]
+fn every_stream_keeps_the_backlog_bounds_last_told() {
+    let bounds = |max: u32, target: u32| [max.to_le_bytes(), target.to_le_bytes()].concat();
+    // (case, bounds sent before the stream opens, after it, what its pipelines hold)
+    let cases: [(&str, Vec<Vec<u8>>, Vec<Vec<u8>>, Option<(u32, u32)>); 5] = [
+        ("none told", vec![], vec![], None),
+        (
+            "told before",
+            vec![bounds(1000, 0)],
+            vec![],
+            Some((1000, 0)),
+        ),
+        (
+            "told while playing",
+            vec![],
+            vec![bounds(500, 200)],
+            Some((500, 200)),
+        ),
+        (
+            "a target not under max",
+            vec![bounds(1000, 0)],
+            vec![bounds(200, 200)],
+            Some((1000, 0)),
+        ),
+        (
+            "a short body",
+            vec![bounds(1000, 0)],
+            vec![vec![1, 2, 3]],
+            Some((1000, 0)),
+        ),
+    ];
+    for (case, before, after, held) in cases {
+        let mut f = Fixture::new();
+        for b in &before {
+            f.send(OP_AUDIO_BACKLOG, 0, b);
+        }
+        f.send(OP_AUDIO_OPEN, MUSIC, &audio_body(0, false, "speakers"));
+        for b in &after {
+            f.send(OP_AUDIO_BACKLOG, 0, b);
+        }
+        f.send(OP_AUDIO_OUTPUT, 0, b"headphones");
+        assert_eq!(f.speaker(0).backlog(), held, "{case}");
+        assert_eq!(
+            f.speaker(1).backlog(),
+            held,
+            "{case}: the new output's pipeline"
+        );
+    }
 }
 
 #[test]

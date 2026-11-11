@@ -614,6 +614,10 @@ mod tests {
                 |c, r, _| c.level(r as i64, 0.25), vec![set(json!({ "huVolume": 0.25 }))]),
             (&["Audio"], "Disable Audio", json!({ "config": { "disableAudioOutput": false } }),
                 toggle, vec![set(json!({ "disableAudioOutput": true }))]),
+            (&["Audio"], "Max Audio Lag", json!({}),
+                |c, r, s| c.number(r as i64, 500.0, s), vec![set(json!({ "audioBacklogMaxMs": 500 }))]),
+            (&["Audio"], "Audio Lag After a Skip", json!({}),
+                |c, r, s| c.number(r as i64, 0.0, s), vec![set(json!({ "audioBacklogTargetMs": 0 }))]),
             // A phone with a session is shown; one offline is not, but either can be forgotten.
             (&["Devices"], "iPhone", phones(), press, vec![act(Action::SelectDevice { id: "a".into() })]),
             (&["Devices"], "iPhone", phones(), tool0, vec![act(Action::ForgetDevice { id: "a".into() })]),

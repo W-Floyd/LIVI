@@ -129,6 +129,13 @@ pub enum Launch {
     Embedded(Arc<dyn EmbeddedHost>),
 }
 
+fn backlog_body(max_ms: u32, target_ms: u32) -> [u8; 8] {
+    let mut body = [0u8; 8];
+    body[..4].copy_from_slice(&max_ms.to_le_bytes());
+    body[4..].copy_from_slice(&target_ms.to_le_bytes());
+    body
+}
+
 #[derive(Default)]
 struct State {
     out: Option<(u64, mpsc::UnboundedSender<Vec<u8>>)>,
@@ -144,6 +151,7 @@ struct State {
     accept_task: Option<tokio::task::JoinHandle<()>>,
     tap: bool,
     cameras: bool,
+    audio_backlog: Option<(u32, u32)>,
 }
 
 struct Inner {
@@ -341,6 +349,9 @@ impl GstHost {
                 }
                 if st.cameras {
                     let _ = tx.send(frame(OP_CAMERAS_WATCH, 0, &[]));
+                }
+                if let Some((max, target)) = st.audio_backlog {
+                    let _ = tx.send(frame(OP_AUDIO_BACKLOG, 0, &backlog_body(max, target)));
                 }
                 for queued in st.queue.drain(..) {
                     let _ = tx.send(queued);
@@ -582,6 +593,18 @@ impl GstHost {
             self.send(frame(OP_VISUALIZER, 0, &[u8::from(on)]));
         } else if on {
             self.start();
+        }
+    }
+
+    /// Bounds every fed PCM stream's backlog, now and in each host started later.
+    pub fn set_audio_backlog(&self, max_ms: u32, target_ms: u32) {
+        let connected = {
+            let mut st = self.state();
+            st.audio_backlog = Some((max_ms, target_ms));
+            st.out.is_some()
+        };
+        if connected {
+            self.send(frame(OP_AUDIO_BACKLOG, 0, &backlog_body(max_ms, target_ms)));
         }
     }
 
@@ -846,6 +869,25 @@ mod tests {
         );
         gst.set_visualizer_tap(false);
         assert_eq!(again.next().await.rest, [0]);
+    }
+
+    #[tokio::test]
+    async fn the_backlog_bounds_reach_a_running_host_and_each_one_after() {
+        let dir = TempDir::new();
+        let gst = host(&dir);
+        gst.set_audio_backlog(300, 150);
+        assert!(!gst.state().running);
+        let mut first = FakeHost::connect(&gst).await;
+        let told = first.next().await;
+        assert_eq!(
+            (told.op, told.rest),
+            (OP_AUDIO_BACKLOG, backlog_body(300, 150).to_vec())
+        );
+        gst.set_audio_backlog(1000, 0);
+        assert_eq!(first.next().await.rest, backlog_body(1000, 0));
+        drop(first);
+        let mut again = FakeHost::connect(&gst).await;
+        assert_eq!(again.next().await.rest, backlog_body(1000, 0));
     }
 
     #[tokio::test]

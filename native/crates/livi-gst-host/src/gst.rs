@@ -7,6 +7,7 @@ use livi_audio::player::{Config as AudioPipeline, Player as AudioPipelinePlayer}
 use livi_audio::stream::AudioSink;
 use livi_host_proto::{Decoders, Probe};
 use livi_screen_stream::ScreenSink;
+use std::time::Duration;
 
 use crate::{AudioConfig, MediaSink, Outside, Speaker, TapConfig, UplinkConfig, VideoCodec};
 
@@ -51,6 +52,14 @@ impl Speaker for AudioPipelinePlayer {
 
     fn output_delay_ms(&self) -> Option<u32> {
         AudioPipelinePlayer::output_delay(self).and_then(|d| u32::try_from(d.as_millis()).ok())
+    }
+
+    fn set_backlog(&self, max_ms: u32, target_ms: u32) {
+        AudioPipelinePlayer::set_backlog(
+            self,
+            Duration::from_millis(max_ms.into()),
+            Duration::from_millis(target_ms.into()),
+        )
     }
 }
 

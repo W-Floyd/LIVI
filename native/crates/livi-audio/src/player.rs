@@ -101,22 +101,31 @@ const UNIT_HEADROOM: gst::ClockTime = gst::ClockTime::from_mseconds(250);
 
 // Fed PCM is acked to the phone on receipt, so nothing paces the sender to the sink: a stall
 // in the host (its main loop held up by a display restart) comes back as a burst that would
-// play that much late for the rest of the stream. Past HIGH queued ahead of the sink, incoming
-// buffers are dropped until it is back under LOW: one skip, not continuous resampling.
-const BACKLOG_HIGH: Duration = Duration::from_millis(300);
-const BACKLOG_LOW: Duration = Duration::from_millis(150);
-
-#[derive(Default)]
+// play that much late for the rest of the stream. Past `max` queued ahead of the sink,
+// incoming buffers are dropped until it is back to `target`: one skip, not continuous
+// resampling.
 struct Backlog {
+    max: Duration,
+    target: Duration,
     dropping: bool,
+}
+
+impl Default for Backlog {
+    fn default() -> Self {
+        Self {
+            max: Duration::from_millis(1000),
+            target: Duration::from_millis(150),
+            dropping: false,
+        }
+    }
 }
 
 impl Backlog {
     /// Whether a buffer arriving with `queued` already waiting for the sink is played.
     fn admit(&mut self, queued: Duration) -> bool {
-        if queued > BACKLOG_HIGH {
+        if queued > self.max {
             self.dropping = true;
-        } else if queued <= BACKLOG_LOW {
+        } else if queued <= self.target {
             self.dropping = false;
         }
         !self.dropping
@@ -340,7 +349,7 @@ impl Player {
                         "[cp_audio:{}] {} ms queued ahead of the sink, dropping to {} ms",
                         self.label,
                         queued.as_millis(),
-                        BACKLOG_LOW.as_millis()
+                        backlog.target.as_millis()
                     );
                 }
                 return true;
@@ -364,6 +373,16 @@ impl Player {
             clock.next = Some(pts + clock.frame);
         }
         self.appsrc.push_buffer(buffer).is_ok()
+    }
+
+    /// Fed PCM's backlog bounds; `target` below `max`, else ignored.
+    pub fn set_backlog(&self, max: Duration, target: Duration) {
+        if target < max
+            && let Ok(mut backlog) = self.backlog.lock()
+        {
+            backlog.max = max;
+            backlog.target = target;
+        }
     }
 
     pub fn set_volume(&self, level: f64, ms: u64) {
@@ -568,39 +587,82 @@ mod tests {
     #[test]
     fn fed_pcm_stays_within_the_backlog_bound() {
         const PACKET_MS: u64 = 20;
-        // (case, when each packet reaches the host in ms, whether a drop is expected); the sink
-        // drains in real time.
+        // (case, max ms, target ms, when each packet reaches the host in ms, whether a drop is
+        // expected); the sink drains in real time.
         let steady: Vec<u64> = (0..500).map(|i| i * PACKET_MS).collect();
         let jitter: Vec<u64> = (0..500)
-            .map(|i| if (100..110).contains(&i) { 2200 } else { i * PACKET_MS })
+            .map(|i| {
+                if (100..110).contains(&i) {
+                    2200
+                } else {
+                    i * PACKET_MS
+                }
+            })
             .collect();
         let stall_then_burst: Vec<u64> = (0..1500)
             .map(|i| i * PACKET_MS)
-            .map(|t| if (2_000..12_000).contains(&t) { 12_000 } else { t })
+            .map(|t| {
+                if (2_000..12_000).contains(&t) {
+                    12_000
+                } else {
+                    t
+                }
+            })
             .collect();
         let fast_phone: Vec<u64> = (0..30_000).map(|i| i * PACKET_MS * 99 / 100).collect();
+        let ms = Duration::from_millis;
         let cases = [
-            ("steady", steady, false),
-            ("200 ms of wifi jitter", jitter, false),
-            ("10 s stall, then the burst", stall_then_burst, true),
-            ("phone clock 1% fast", fast_phone, true),
+            ("steady", 1000, 150, steady.clone(), false),
+            ("200 ms of wifi jitter", 1000, 150, jitter.clone(), false),
+            (
+                "10 s stall, then the burst",
+                1000,
+                150,
+                stall_then_burst.clone(),
+                true,
+            ),
+            ("phone clock 1% fast", 1000, 150, fast_phone, true),
+            ("jitter under a tight bound", 100, 50, jitter.clone(), true),
+            ("jitter under 300 ms", 300, 150, jitter, false),
+            (
+                "stall under 300 ms",
+                300,
+                150,
+                stall_then_burst.clone(),
+                true,
+            ),
+            (
+                "stall under the loosest bound",
+                2000,
+                0,
+                stall_then_burst,
+                true,
+            ),
+            ("steady under the tightest bound", 100, 0, steady, false),
         ];
 
-        for (case, arrivals, drops) in cases {
-            let mut backlog = Backlog::default();
+        for (case, max, target, arrivals, drops) in cases {
+            let mut backlog = Backlog {
+                max: ms(max),
+                target: ms(target),
+                ..Backlog::default()
+            };
             let (mut queued, mut now, mut dropped, mut worst) = (0u64, 0u64, 0, 0u64);
             for at in arrivals {
                 queued = queued.saturating_sub(at.saturating_sub(now));
                 now = now.max(at);
-                if backlog.admit(Duration::from_millis(queued)) {
+                if backlog.admit(ms(queued)) {
                     queued += PACKET_MS;
                 } else {
                     dropped += 1;
                 }
                 worst = worst.max(queued);
             }
-            let bound = BACKLOG_HIGH.as_millis() as u64 + PACKET_MS;
-            assert!(worst <= bound, "{case}: {worst} ms queued, bound {bound} ms");
+            let bound = max + PACKET_MS;
+            assert!(
+                worst <= bound,
+                "{case}: {worst} ms queued, bound {bound} ms"
+            );
             assert_eq!(dropped > 0, drops, "{case}: {dropped} packets dropped");
         }
     }

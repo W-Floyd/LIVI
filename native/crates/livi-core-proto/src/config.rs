@@ -9,6 +9,8 @@ use crate::state::PerScreen;
 
 pub const WIFI_PASSWORD_MIN: usize = 8;
 pub const WIFI_PASSWORD_MAX: usize = 63;
+/// What `audioBacklogMaxMs` may be set to.
+pub const AUDIO_BACKLOG_MAX_MS: std::ops::RangeInclusive<u32> = 100..=2000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,6 +138,10 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_input_device_label: Option<String>,
     pub visual_audio_delay_ms: u32,
+    /// Live audio (Android Auto, radio) queued ahead of the sink past which incoming buffers
+    /// are dropped, until `audio_backlog_target_ms` is left.
+    pub audio_backlog_max_ms: u32,
+    pub audio_backlog_target_ms: u32,
 
     pub dab_gain_auto: bool,
     pub dab_gain_db: f64,
@@ -489,6 +495,12 @@ pub const NIGHT_MODE_KEYS: [&str; 4] = [
 ];
 
 impl Config {
+    /// The backlog bounds as `(max, target)` ms, when they are ones the host can keep.
+    pub fn audio_backlog_ms(&self) -> Option<(u32, u32)> {
+        let (max, target) = (self.audio_backlog_max_ms, self.audio_backlog_target_ms);
+        (AUDIO_BACKLOG_MAX_MS.contains(&max) && target < max).then_some((max, target))
+    }
+
     pub fn night_modes(&self) -> [bool; 4] {
         [
             self.main_ui_night_mode,
@@ -664,6 +676,8 @@ pub fn defaults() -> Config {
         audio_input_device: empty(),
         audio_input_device_label: empty(),
         visual_audio_delay_ms: 0,
+        audio_backlog_max_ms: 1000,
+        audio_backlog_target_ms: 150,
         dab_gain_auto: true,
         dab_gain_db: 19.7,
         dab_ppm: 0,

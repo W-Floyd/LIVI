@@ -1,9 +1,9 @@
 name: drive-override
-# Settings → Driving: "Passenger mode" lets a passenger unlock for one drive, after a second tap
-# confirms; a pill says so while it lasts, and parking or the ignition going off ends it, so the
-# next drive asks again. "Always offroad" (offered with the developer options) never locks and
-# says so for as long as it is chosen. While the car is driven the choice can only go back to
-# following the car.
+# Settings → Look → Driving: "Passenger mode" lets a passenger unlock for one drive, after a
+# second tap confirms; a pill says so while it lasts, and parking or the ignition going off ends
+# it, so the next drive asks again. "Always offroad" (offered with the developer options) never
+# locks and says so for as long as it is chosen. While the car is driven the choice can only go
+# back to following the car.
 clock: 2026-11-09T08:30:00
 fixtures:
   core: fixtures/parked.json
@@ -11,9 +11,13 @@ fixtures:
   clients:
     - { role: app, app_id: org.livi.test.grid, pattern: grid, size: 640x360 }
 steps:
+  # Look's last group.
   - page: settings
-  - tap: { node: Settings/Sections/List/Driving }
-  - expect_node: { path: Settings/Heading/Title, text: Driving }
+  - tap: { node: Settings/Sections/List/Look }
+  - gdscript: &reveal |
+      var rows: DragScroll = shell.get_node("Settings/Rows")
+      rows.reveal(rows.get_node("List/Developer options"))
+      await runner.frames(2)
   - expect_node: { path: Settings/Rows/List/Parked, visible: "true" }
   - screenshot: settings-driving
   - tap: { node: Settings/Rows/List/While driving/Box/Choice/Passenger mode }
@@ -74,13 +78,16 @@ steps:
   - set: { core: { telemetry: { drivingRegulation: false, gear: P } } }
   - wait: { frames: 100 }
   - page: settings
-  - tap: { node: Settings/Sections/List/Driving }
+  - tap: { node: Settings/Sections/List/Look }
+  - gdscript: *reveal
   - gdscript: |
       if shell.has_node("Settings/Rows/List/While driving/Box/Choice/Always offroad"):
           return "offroad offered without the developer options"
   - tap: { node: Settings/Rows/List/Developer options }
+  - gdscript: *reveal
   - tap: { node: Settings/Rows/List/While driving }
   - tap: { node: Settings/Rows/List/Always offroad }
+  - gdscript: *reveal
   - gdscript: |
       if Drive.mode != "offroad" or not Drive.developer:
           return "mode %s, developer %s" % [Drive.mode, Drive.developer]

@@ -106,3 +106,17 @@ steps:
   - theme: { appearance: night, hand: rhd }
   - wait: { frames: 2 }
   - screenshot: drive-cover-night-rhd
+  # Settings' typing too, with a way out.
+  - set: { core: { config: { carName: LIVI } } }
+  - page: settings
+  - tap: { node: Settings/Sections/List/General }
+  - tap: { node: Settings/Rows/List/Connections }
+  - tap: { node: Settings/Rows/List/Car Name }
+  - wait: { frames: 20 }
+  - expect_node: { path: Settings/Entry/Root/Keyboard/DriveCover, visible: "true" }
+  - expect_node: { path: Settings/Entry/Root/Keyboard/DriveCover/Box/Title, text: Typing is available when parked }
+  - tap: { node: Settings/Entry/Root/Keyboard/DriveCover/Box/Buttons/Close }
+  - wait: { frames: 30 }
+  - gdscript: |
+      if shell.has_node("Settings/Entry"):
+          return "Close left the entry open"

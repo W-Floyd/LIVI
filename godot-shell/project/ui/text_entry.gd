@@ -292,7 +292,7 @@ func _update() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if _closing or not event is InputEventKey or not event.pressed:
+	if _closing or not event is InputEventKey or not event.pressed or Drive.locked():
 		return
 	var k: InputEventKey = event
 	if k.ctrl_pressed or k.alt_pressed or k.meta_pressed:

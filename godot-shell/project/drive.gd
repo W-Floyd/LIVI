@@ -5,7 +5,7 @@ extends Node
 ## video and the keyboard), else out of Park, else the parking brake and speed (`DriveState`).
 ## The phone's projection is never locked here: Android Auto and CarPlay apply their own.
 ##
-## Settings → Driving's "While driving" (`mode`):
+## Settings → Look → Driving, "While driving" (`mode`):
 ##   car        locks as the car says (the default);
 ##   passenger  as `car`, but a passenger may unlock for one drive, confirming each time; it ends
 ##              when the car parks or the ignition goes off, and shows while it lasts;

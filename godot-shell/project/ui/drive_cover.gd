@@ -2,8 +2,8 @@ class_name DriveCover
 extends Control
 ## The parked-only cover: over a hosted app's window (`window_id`) or a keyboard (`typing`)
 ## while the car is driven and Drive locks it. It takes every touch while it shows; the app keeps
-## running under it. Where Settings → Driving lets a passenger unlock, a button asks for it and a
-## second step confirms, each drive.
+## running under it. Where Settings → Look → Driving lets a passenger unlock, a button asks for
+## it and a second step confirms, each drive.
 
 ## A typing cover offers a way out: the keyboard's own keys are under it.
 signal dismissed

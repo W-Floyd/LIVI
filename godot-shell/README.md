@@ -357,7 +357,7 @@ While it locks:
   Close; an app's keys button hides while its app is covered;
 - the phone's projection is never covered: Android Auto and CarPlay apply their own limits.
 
-Settings → Driving's "While driving" chooses the override, kept in
+Settings → Look → Driving, "While driving", chooses the override, kept in
 `$XDG_CONFIG_HOME/livi-shell/driving.json` (not in tests):
 - **Follow the car** (the default).
 - **Passenger mode**: the cover offers "A passenger is using it"; a second tap confirms ("Only a
@@ -369,7 +369,7 @@ Settings → Driving's "While driving" chooses the override, kept in
   shows for as long as it is chosen.
 
 While the car is driven the choice can only go back to Follow the car, and the developer options
-wait until it parks. The section's first row says what the shell thinks (Parked, Driving) and
+wait until it parks. The group's first row says what the shell thinks (Parked, Driving) and
 what decided it. Not done yet: a per-app DriveSafe choice in Settings, the region profiles (album
 art, JAMA's 30 characters), and the stock head unit's list of settings it locks while driving
 (only typing is locked here). Scenarios `drive-lockout`, `drive-override`.

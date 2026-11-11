@@ -9,8 +9,6 @@ extends Control
 signal back_pressed
 
 const LOOK := "look"
-## The driving lockout's choices (Drive).
-const DRIVING := "driving"
 ## Choices with up to this many options, all short, are set in place.
 const INLINE_OPTIONS := 4
 const INLINE_CHARS := 28
@@ -106,7 +104,7 @@ func _ready() -> void:
 	ThemeManager.changed.connect(_style)
 	Core.changed.connect(_on_core_changed)
 	Core.welcome.connect(func(_v): _refresh())
-	Drive.changed.connect(func(): if _driving(): _refresh(true))
+	Drive.changed.connect(func(): if section is String and section == LOOK: _refresh(true))
 	resized.connect(_place)
 	_apps = load_apps()
 	Core.settings_section(int(section) if section is int else -1)
@@ -231,7 +229,7 @@ func _build() -> void:
 	var titles: Array = _view.get("titles", [])
 	if look:
 		_heading_label.text = str(_apps[section].get("title", "")) if _app_open() and _look_pick == "" \
-			else ("Driving" if _driving() else "Look") if _look_pick == "" else _look_row(_look_pick).label
+			else "Look" if _look_pick == "" else _look_row(_look_pick).label
 		_up.visible = _look_pick != ""
 		if _look_pick == "":
 			for r in _look_rows():
@@ -251,7 +249,7 @@ func _build_sections() -> void:
 		c.queue_free()
 	_sections.list.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.5))
 	# The shell's own first: LIVI's list runs past the panel's height.
-	var items: Array = [[LOOK, "Look", "brush"], [DRIVING, "Driving", "car"]]
+	var items: Array = [[LOOK, "Look", "brush"]]
 	for id in _apps:
 		var icon := str(_apps[id].get("icon", ""))
 		items.append([id, str(_apps[id].get("title", id)), icon if Icons.PATHS.has(icon) else "gear"])
@@ -875,8 +873,6 @@ func _on_apply() -> void:
 func _look_rows() -> Array:
 	if _app_open():
 		return _app_rows()
-	if _driving():
-		return _driving_rows()
 	var themes := []
 	for t in ThemeManager.theme_names():
 		themes.append([t, t.capitalize()])
@@ -897,6 +893,7 @@ func _look_rows() -> Array:
 		{key = "home_phone", kind = "switch", label = "Phone on home", detail = "Android Auto or CarPlay beside the cards", checked = ThemeManager.home_phone, enabled = true},
 		_look_choice("status_position", "Status bar", [["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"], ["off", "Off"]]),
 	]
+	rows.append_array(_driving_rows())
 	return rows
 
 
@@ -923,11 +920,11 @@ func _look_set(key: String, value: Variant) -> void:
 	if _app_open():
 		_app_set(key, value)
 		return
-	if _driving():
-		if key == "developer":
-			Drive.set_developer(bool(value))
-		else:
-			Drive.set_mode(str(value))
+	if key == "drive_mode":
+		Drive.set_mode(str(value))
+		return
+	if key == "drive_developer":
+		Drive.set_developer(bool(value))
 		return
 	var look := {}
 	look[key] = value
@@ -935,11 +932,7 @@ func _look_set(key: String, value: Variant) -> void:
 	ThemeManager.save_look()
 
 
-func _driving() -> bool:
-	return section is String and section == DRIVING
-
-
-## The lockout while driving (Drive). While the car is driven its choice can only go back to
+## The lockout while driving (Drive), Look's last group. While the car is driven its choice can only go back to
 ## following the car, and the developer options wait until it parks.
 func _driving_rows() -> Array:
 	var by := {regulation = "the car's driving lockout", gear = "the gear", parking_brake = "the parking brake and speed",
@@ -957,8 +950,8 @@ func _driving_rows() -> Array:
 	var modes := [["car", "Follow the car"], ["passenger", "Passenger mode"]]
 	if Drive.developer:
 		modes.append(["offroad", "Always offroad"])
-	var details := {car = "Locks apps and typing as the car says", passenger = "A passenger can unlock each drive",
-		offroad = "Never locks: for testing only"}
+	# Short: an inline choice shares the row with them.
+	var details := {car = "Locks as the car says", passenger = "A passenger may unlock", offroad = "Never locks: testing only"}
 	var options := []
 	var shown := ""
 	for m in modes:
@@ -970,10 +963,11 @@ func _driving_rows() -> Array:
 	if Drive.moving and Drive.mode == "car":
 		mode_detail = "Change it when parked"
 	return [
-		{key = "now", kind = "info", label = now, detail = detail, enabled = true},
-		{key = "mode", kind = "value", label = "While driving", detail = mode_detail, value = "" if _inline(options) else shown,
+		{key = "", kind = "heading", label = "Driving"},
+		{key = "drive_now", kind = "info", label = now, detail = detail, enabled = true},
+		{key = "drive_mode", kind = "value", label = "While driving", detail = mode_detail, value = "" if _inline(options) else shown,
 			options = options, enabled = not Drive.moving or Drive.mode != "car"},
-		{key = "developer", kind = "switch", label = "Developer options", detail = "Offers Always offroad" if not Drive.moving else "Change it when parked",
+		{key = "drive_developer", kind = "switch", label = "Developer options", detail = "Offers Always offroad" if not Drive.moving else "Change it when parked",
 			checked = Drive.developer, enabled = not Drive.moving},
 	]
 

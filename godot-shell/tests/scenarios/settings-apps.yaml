@@ -1,0 +1,81 @@
+name: settings-apps
+# An app's settings from the schema it installs (godot-maps' "Maps"): a section of the Settings
+# page whose rows write the app's values file, which the app may change too; and the resolved
+# look the shell writes for hosted apps (tokens.json).
+viewport: { width: 1920, height: 720 }
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+steps:
+  - gdscript: |
+      SettingsPage.app_dirs = PackedStringArray([runner._tests.path_join("fixtures/app-settings")])
+      var home := OS.get_temp_dir().path_join("livi-shell-settings-apps")
+      SettingsPage.config_home = home
+      DirAccess.make_dir_recursive_absolute(home.path_join("godot-maps"))
+      var f := FileAccess.open(home.path_join("godot-maps/settings.json"), FileAccess.WRITE)
+      f.store_string('{"theme": "dark", "kept": 1}')
+      f.close()
+  - page: settings
+  - gdscript: |
+      if not shell.has_node("Settings/Sections/List/Maps"):
+          return "no Maps section"
+      # A values path out of the config dir is refused.
+      if shell.has_node("Settings/Sections/List/Escape"):
+          return "a schema writing outside the config dir was taken"
+  - tap: { node: Settings/Sections/List/Maps }
+  - expect_node: { path: Settings/Heading/Title, text: Maps }
+  - wait: { frames: 3 }
+  - gdscript: |
+      var rows := "Settings/Rows/List/"
+      if not shell.get_node(rows + "Map colours/Box/Choice/Night").button_pressed:
+          return "Map colours does not show the file's dark"
+      if not shell.get_node(rows + "Road markings/Box/Switch").on:
+          return "Road markings does not show its default"
+      if shell.get_node(rows + "Road colours/Box/Level/Slider").value < 0.6:
+          return "Road colours does not show its default"
+  - tap: { node: Settings/Rows/List/Road markings }
+  - tap: { node: Settings/Rows/List/Map colours/Box/Choice/Auto }
+  # Too many options to set in place: its own list, closed by the pick.
+  - tap: { node: Settings/Rows/List/Tile cache }
+  - expect_node: { path: Settings/Heading/Title, text: Tile cache }
+  - tap: { node: Settings/Rows/List/800 MB }
+  - expect_node: { path: Settings/Heading/Title, text: Maps }
+  - gdscript: |
+      var v = JSON.parse_string(FileAccess.get_file_as_string(SettingsPage.config_home.path_join("godot-maps/settings.json")))
+      if not v is Dictionary or v.get("road_markings") != false or v.get("theme") != "auto" or int(v.get("tile_cache_mb", 0)) != 800 or int(v.get("kept", 0)) != 1:
+          return "values file: %s" % [v]
+  # The app writes the file too: the open page follows.
+  - gdscript: |
+      var f := FileAccess.open(SettingsPage.config_home.path_join("godot-maps/settings.json"), FileAccess.WRITE)
+      f.store_string('{"road_markings": true, "theme": "light"}')
+      f.close()
+      await runner.frames(45)
+      var rows := "Settings/Rows/List/"
+      if not shell.get_node(rows + "Road markings/Box/Switch").on or not shell.get_node(rows + "Map colours/Box/Choice/Day").button_pressed:
+          return "the page did not follow the app's change"
+  # tokens.json: the look resolved, rewritten when it changes.
+  - gdscript: |
+      ThemeManager.tokens_file = SettingsPage.config_home.path_join("livi-shell/tokens.json")
+      ThemeManager.set_look({appearance_mode = "night", text_scale = 1.2, hand = "rhd"})
+      var t = JSON.parse_string(FileAccess.get_file_as_string(ThemeManager.tokens_file))
+      var bad := ""
+      if not t is Dictionary:
+          bad = "no tokens.json"
+      elif t.appearance != "night" or t.hand != "rhd" or not is_equal_approx(float(t.text_scale), 1.2) or int(t.version) != 1:
+          bad = "tokens look: %s" % [[t.appearance, t.hand, t.text_scale, t.version]]
+      elif Color(t.colors.accent) != ThemeManager.c.accent or Color(t.colors.bg) != ThemeManager.c.bg:
+          bad = "tokens colors: %s" % [t.colors]
+      elif not is_equal_approx(float(t.px.body), snappedf(ThemeManager.px.body, 0.01)) or not t.fonts.body.has("weight"):
+          bad = "tokens px or fonts: %s %s" % [t.px, t.fonts]
+      elif not FileAccess.file_exists(str(t.fonts.body.get("path", ""))):
+          bad = "tokens font path: %s" % [t.fonts.body]
+      ThemeManager.set_look({appearance_mode = "day", text_scale = 1.0, hand = "lhd"})
+      t = JSON.parse_string(FileAccess.get_file_as_string(ThemeManager.tokens_file))
+      if bad == "" and (not t is Dictionary or t.appearance != "day"):
+          bad = "tokens.json not rewritten"
+      ThemeManager.tokens_file = ""
+      for p in ["livi-shell/tokens.json", "godot-maps/settings.json"]:
+          DirAccess.remove_absolute(SettingsPage.config_home.path_join(p))
+      SettingsPage.app_dirs = SettingsPage.default_app_dirs()
+      SettingsPage.config_home = SettingsPage.default_config_home()
+      return bad

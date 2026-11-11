@@ -1,7 +1,8 @@
 class_name SettingsPage
 extends Control
 ## Settings: LIVI's own (the tree and values stock LIVI's UI shows, from livi-ui-model through
-## `Core.settings_*`, which also sends what each touch changes) and the shell's look. Sections on
+## `Core.settings_*`, which also sends what each touch changes), the shell's look, and the apps'
+## that describe theirs (`load_apps`). Sections on
 ## the left, the open one's rows on the right; both lists drag. A short choice is set in place,
 ## a long one opens its list; a change that restarts the phone's connection waits for Apply.
 
@@ -18,6 +19,15 @@ const CONFIRM_MS := 4000
 ## Core sections whose change can show on a settings page.
 const READS := ["config", "system", "sessions", "devices", "precondition", "telemetry", "mfi", "dab", "fm", "update", "cluster", "cameras"]
 const REFRESH_S := 0.25
+## An app's values file is read again this often while its section is open: the app writes it too.
+const APP_WATCH_S := 0.5
+## Apps' settings: `<dir>/*.json`, one schema per app (godot-maps installs one): `id`, `title`,
+## `icon` (an Icons name), `values` (its values file, under `config_home`), and `sections`:
+## [{title, rows: [{key, kind: toggle | choice | slider | text | info, label, detail, default,
+## options: [{value, label}] (choice), min, max, labels (slider)}]}]. The values file is a JSON
+## object of key -> value; a key missing is its default. Rewritten whole, through a rename.
+static var app_dirs := default_app_dirs()
+static var config_home := default_config_home()
 
 var top_inset := 0.0
 
@@ -25,7 +35,12 @@ var top_inset := 0.0
 var section: Variant = 0
 var _view := {}
 var _shown_json := ""
+## The look's or an app's row whose options are open.
 var _look_pick := ""
+## "app:<id>" -> that app's schema.
+var _apps := {}
+var _app_text := ""
+var _app_watch_s := 0.0
 ## What a second tap acts on: a row's index, or "row/tool".
 var _armed := ""
 var _armed_ms := 0
@@ -90,6 +105,7 @@ func _ready() -> void:
 	Core.changed.connect(_on_core_changed)
 	Core.welcome.connect(func(_v): _refresh())
 	resized.connect(_place)
+	_apps = load_apps()
 	Core.settings_section(int(section) if section is int else -1)
 	_style()
 
@@ -106,6 +122,11 @@ func _process(delta: float) -> void:
 	if _armed != "" and Time.get_ticks_msec() - _armed_ms > CONFIRM_MS:
 		_armed = ""
 		_refresh(true)
+	_app_watch_s += delta
+	if _app_open() and not _sliding and _app_watch_s >= APP_WATCH_S:
+		_app_watch_s = 0.0
+		if _app_file_text() != _app_text:
+			_refresh(true)
 
 
 func _draw() -> void:
@@ -123,7 +144,7 @@ func _on_core_changed(sections: PackedStringArray) -> void:
 			return
 
 
-## Opens a section: LOOK or LIVI's by index.
+## Opens a section: LOOK, an app's ("app:<id>") or LIVI's by index.
 func open_section(s: Variant) -> void:
 	section = s
 	_look_pick = ""
@@ -212,11 +233,12 @@ func _build() -> void:
 	_rows.list.add_theme_constant_override("separation", roundi(g * 0.6))
 	var titles: Array = _view.get("titles", [])
 	if look:
-		_heading_label.text = "Look" if _look_pick == "" else _look_row(_look_pick).label
+		_heading_label.text = str(_apps[section].get("title", "")) if _app_open() and _look_pick == "" \
+			else "Look" if _look_pick == "" else _look_row(_look_pick).label
 		_up.visible = _look_pick != ""
 		if _look_pick == "":
 			for r in _look_rows():
-				_rows.list.add_child(_row(r, r.key))
+				_rows.list.add_child(_group_heading(r.label) if r.kind == "heading" else _row(r, r.key))
 		else:
 			_add_picks(_look_row(_look_pick).options, func(i): _look_set(_look_pick, _look_row(_look_pick).options[i].value); _look_pick = ""; _refresh(true))
 	else:
@@ -233,6 +255,9 @@ func _build_sections() -> void:
 	_sections.list.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.5))
 	# The shell's own first: LIVI's list runs past the panel's height.
 	var items: Array = [[LOOK, "Look", "brush"]]
+	for id in _apps:
+		var icon := str(_apps[id].get("icon", ""))
+		items.append([id, str(_apps[id].get("title", id)), icon if Icons.PATHS.has(icon) else "gear"])
 	var i := 0
 	for s in _view.get("sections", []):
 		items.append([i, str(s.get("label", "")), _section_icon(str(s.get("icon", "")))])
@@ -584,7 +609,7 @@ func _slider(s: Dictionary, id: Variant) -> HBoxContainer:
 	sl.name = "Slider"
 	sl.min_value = 0.0
 	sl.max_value = 1.0
-	sl.step = 0.01
+	sl.step = float(s.get("step", 0.01))
 	sl.value = float(s.get("level", 0.0))
 	sl.focus_mode = Control.FOCUS_NONE
 	sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -597,13 +622,16 @@ func _slider(s: Dictionary, id: Variant) -> HBoxContainer:
 	sl.drag_started.connect(func(): _sliding = true)
 	sl.value_changed.connect(func(v):
 		var now := Time.get_ticks_msec()
-		if _sliding and now - _slide_ms >= SLIDE_MS:
+		if _sliding and now - _slide_ms >= SLIDE_MS and id is int:
 			_slide_ms = now
 			Core.settings_level(int(id), v))
 	sl.drag_ended.connect(func(_changed):
 		_sliding = false
 		_slide_ms = 0
-		Core.settings_level(int(id), sl.value)
+		if id is String:
+			_look_set(id, lerpf(float(s.get("min", 0.0)), float(s.get("max", 1.0)), sl.value))
+		else:
+			Core.settings_level(int(id), sl.value)
 		_refresh())
 	var box := UI.hbox([sl, text], 0.8)
 	box.name = "Level"
@@ -774,7 +802,7 @@ func _livi_or_look(id: Variant, what: String) -> void:
 	if id is String:
 		match what:
 			"toggle":
-				_look_set(id, not ThemeManager.get(id))
+				_look_set(id, not bool(_look_row(id).get("checked", false)))
 			"open":
 				_look_pick = id
 				_rows.offset = 0.0
@@ -846,8 +874,10 @@ func _on_apply() -> void:
 	_refresh(true)
 
 
-## The shell's own look, as rows in the same shape as LIVI's.
+## The shell's own look, or the open app's settings, as rows in the same shape as LIVI's.
 func _look_rows() -> Array:
+	if _app_open():
+		return _app_rows()
 	var themes := []
 	for t in ThemeManager.theme_names():
 		themes.append([t, t.capitalize()])
@@ -887,10 +917,140 @@ func _look_row(key: String) -> Dictionary:
 
 
 func _look_set(key: String, value: Variant) -> void:
+	if _app_open():
+		_app_set(key, value)
+		return
 	var look := {}
 	look[key] = value
 	ThemeManager.set_look(look)
 	ThemeManager.save_look()
+
+
+## `$XDG_DATA_HOME`, then each of `$XDG_DATA_DIRS`, under `livi-shell/settings`.
+static func default_app_dirs() -> PackedStringArray:
+	var home := OS.get_environment("XDG_DATA_HOME")
+	var dirs := PackedStringArray([home if home != "" else OS.get_environment("HOME").path_join(".local/share")])
+	var data := OS.get_environment("XDG_DATA_DIRS")
+	dirs.append_array((data if data != "" else "/usr/local/share:/usr/share").split(":", false))
+	var out := PackedStringArray()
+	for d in dirs:
+		out.append(d.path_join("livi-shell/settings"))
+	return out
+
+
+static func default_config_home() -> String:
+	var d := OS.get_environment("XDG_CONFIG_HOME")
+	return d if d != "" else OS.get_environment("HOME").path_join(".config")
+
+
+## The apps' schemas in `app_dirs`, by "app:<id>"; an earlier dir's wins, as XDG's do.
+static func load_apps() -> Dictionary:
+	var out := {}
+	for dir in app_dirs:
+		for f in DirAccess.get_files_at(dir) if DirAccess.dir_exists_absolute(dir) else PackedStringArray():
+			if not f.ends_with(".json"):
+				continue
+			var d = JSON.parse_string(FileAccess.get_file_as_string(dir.path_join(f)))
+			if not d is Dictionary or not d.get("sections") is Array:
+				continue
+			var values := str(d.get("values", ""))
+			if values == "" or values.begins_with("/") or ".." in values.split("/"):
+				push_warning("settings: %s: values must be a path under the config dir" % f)
+				continue
+			var id := "app:" + str(d.get("id", f.get_basename()))
+			if not out.has(id):
+				out[id] = d
+	return out
+
+
+func _app_open() -> bool:
+	return section is String and _apps.has(section)
+
+
+func _app_file() -> String:
+	return config_home.path_join(str(_apps[section].values))
+
+
+func _app_file_text() -> String:
+	return FileAccess.get_file_as_string(_app_file()) if FileAccess.file_exists(_app_file()) else ""
+
+
+func _app_values() -> Dictionary:
+	_app_text = _app_file_text()
+	var d = JSON.parse_string(_app_text) if _app_text != "" else null
+	return d if d is Dictionary else {}
+
+
+## The open app's schema as rows, a heading before each of its sections.
+func _app_rows() -> Array:
+	var values := _app_values()
+	var rows := []
+	for sec in _apps[section].sections:
+		rows.append({key = "", kind = "heading", label = str(sec.get("title", ""))})
+		for r in sec.get("rows", []):
+			var key := str(r.get("key", ""))
+			rows.append(_app_row(r, values.get(key, r.get("default"))))
+	return rows
+
+
+func _app_row(r: Dictionary, v: Variant) -> Dictionary:
+	var out := {key = str(r.get("key", "")), kind = "value", label = str(r.get("label", "")), detail = str(r.get("detail", "")), enabled = true}
+	match str(r.get("kind", "")):
+		"toggle":
+			out.kind = "switch"
+			out.checked = v is bool and v
+		"choice":
+			var options := []
+			var shown := ""
+			for o in r.get("options", []):
+				var sel := _same(o.get("value"), v)
+				options.append({label = str(o.get("label", "")), value = o.get("value"), selected = sel})
+				if sel:
+					shown = str(o.get("label", ""))
+			out.options = options
+			out.value = "" if _inline(options) else shown
+		"slider":
+			var lo := float(r.get("min", 0.0))
+			var hi := float(r.get("max", 1.0))
+			var level := clampf((float(v) - lo) / (hi - lo), 0.0, 1.0) if hi > lo and (v is float or v is int) else 0.0
+			var labels: Array = r.get("labels", [])
+			# Labels name evenly spaced stops; the slider snaps to them.
+			var stops := labels.size() - 1
+			var text := str(labels[roundi(level * stops)]) if stops >= 0 else str(snappedf(lerpf(lo, hi, level), 0.01))
+			out.slider = {level = level, text = text, step = 1.0 / stops if stops > 0 else 0.01, min = lo, max = hi}
+		_:
+			out.value = str(v) if v != null else ""
+	return out
+
+
+static func _same(a: Variant, b: Variant) -> bool:
+	if (a is float or a is int) and (b is float or b is int):
+		return is_equal_approx(float(a), float(b))
+	return typeof(a) == typeof(b) and a == b
+
+
+## Sets one key in the open app's values file, keeping the rest as they are now.
+func _app_set(key: String, value: Variant) -> void:
+	var values := _app_values()
+	values[key] = value
+	var path := _app_file()
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	var text := JSON.stringify(values, "  ")
+	var f := FileAccess.open(path + ".tmp", FileAccess.WRITE)
+	if f == null:
+		push_error("settings: cannot write %s" % path)
+		return
+	f.store_string(text)
+	f.close()
+	DirAccess.rename_absolute(path + ".tmp", path)
+	_app_text = text
+	_refresh(true)
+
+
+func _group_heading(text: String) -> Label:
+	var l := UI.label(text.to_upper(), "strong", "caption", "dim")
+	l.name = ("%s heading" % text).validate_node_name()
+	return l
 
 
 func _flat_button(button_name: String, icon_name: String) -> Button:

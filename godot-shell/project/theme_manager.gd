@@ -26,6 +26,10 @@ var ev_page := "auto"          # auto | image | live: which "Electric vehicle" p
 ## The driver's choices that `save_look` keeps; `look_file` is where ("" keeps nothing: tests).
 const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style"]
 var look_file := ""
+## The resolved look for apps the shell hosts, rewritten on every change (`write_tokens`); "" writes
+## none. Beside `look_file`.
+var tokens_file := ""
+var _tokens_written := ""
 
 ## Godot's button states as the state maps of a pack's selectors name them.
 const BUTTON_STATES := {
@@ -84,6 +88,8 @@ static func default_look_file() -> String:
 ## (a pack removed) is skipped.
 func load_look(file: String) -> void:
 	look_file = file
+	tokens_file = file.get_base_dir().path_join("tokens.json")
+	write_tokens()
 	var saved = JSON.parse_string(FileAccess.get_file_as_string(file)) if FileAccess.file_exists(file) else null
 	if not saved is Dictionary:
 		return
@@ -241,7 +247,54 @@ func apply() -> void:
 	for role in ["display", "body", "strong"]:
 		fonts[role] = _font(spec.fonts[role])
 	_build_theme()
+	write_tokens()
 	changed.emit()
+
+
+## The contract with hosted apps (godot-maps reads it), so they need not know theme files:
+## `version`; the look's `theme_name`, `appearance` (day | night, resolved), `hand`, `near`,
+## `text_scale`, `material`, `reduced_motion`, `quality`; `colors` (token -> "#rrggbb[aa]"),
+## `series`, `px` (size token -> panel pixels), and `fonts` (display | body | strong ->
+## {weight, path}: path only when the font is a file on disk).
+func write_tokens() -> void:
+	if tokens_file == "" or spec.is_empty():
+		return
+	var colors := {}
+	for k in c:
+		colors[k] = "#" + c[k].to_html(c[k].a < 1.0)
+	var font_files := {}
+	for role in ["display", "body", "strong"]:
+		var font: Dictionary = spec.fonts[role]
+		var path := _fonts_dir.path_join(font.file)
+		if path.begins_with("res://"):
+			path = ProjectSettings.globalize_path(path)
+		var entry := {}
+		if font.has("weight"):
+			entry.weight = int(font.weight)
+		if FileAccess.file_exists(path):
+			entry.path = path
+		font_files[role] = entry
+	var sizes := {}
+	for k in px:
+		sizes[k] = snappedf(px[k], 0.01)
+	var tokens := {version = 1, theme_name = theme_name, appearance = appearance, hand = hand, near = near,
+		text_scale = text_scale, material = material, reduced_motion = reduced_motion, quality = quality,
+		colors = colors, series = series.map(func(s: Color) -> String: return "#" + s.to_html(false)),
+		px = sizes, fonts = font_files}
+	var text := JSON.stringify(tokens, "  ")
+	if text == _tokens_written:
+		return
+	DirAccess.make_dir_recursive_absolute(tokens_file.get_base_dir())
+	# Through a rename: an app polling it never reads half a file.
+	var tmp := tokens_file + ".tmp"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	if f == null:
+		push_error("look: cannot write %s" % tmp)
+		return
+	f.store_string(text)
+	f.close()
+	DirAccess.rename_absolute(tmp, tokens_file)
+	_tokens_written = text
 
 
 func font_size(role: String) -> int:

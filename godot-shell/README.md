@@ -276,6 +276,23 @@ as they open, so their rows ask for a second tap.
 (`~/.config/...`), read at start (not in tests). Its day or night is Auto (the core's
 `mainUiNightMode`, which follows LIVI's own appearance setting), Day or Night.
 
+The look resolved is also written, on every change, to `tokens.json` beside `look.json`: the
+contract for apps the shell hosts (godot-maps), so they need not read theme files. It holds
+`version` (1), the look's choices (`theme_name`, `appearance` resolved to day or night, `hand`,
+`near`, `text_scale`, `material`, `reduced_motion`, `quality`), `colors` (token to `#rrggbb[aa]`),
+`series`, `px` (size token to panel pixels) and `fonts` (`display`, `body`, `strong`: `weight`,
+and `path` when the font is a file on disk). It is replaced through a rename, never half-written.
+
+An app adds its settings as a section by installing a schema,
+`<XDG data dir>/livi-shell/settings/<name>.json` (godot-maps: `/usr/share/livi-shell/settings/godot-maps.json`):
+`id`, `title`, `icon` (an `Icons` name), `values` (its values file, relative to `$XDG_CONFIG_HOME`)
+and `sections: [{ title, rows: [{ key, kind, label, detail, default, ... }] }]`, where `kind` is
+`toggle`, `choice` (`options: [{ value, label }]`), `slider` (`min`, `max`, and `labels` for
+evenly spaced stops), `text` or `info` (both shown only). The section's rows read and write the
+values file, a JSON object of key to value (a key missing is its default), rewritten whole through
+a rename; the app watches it, and the open section follows the app's own writes. Scenario
+`settings-apps` (fixtures in `tests/fixtures/app-settings/`).
+
 ## A car model
 
 The EV page draws a procedural car. `car: auto` (the default outside tests; scenarios use

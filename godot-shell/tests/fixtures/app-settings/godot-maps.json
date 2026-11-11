@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "godot-maps",
+  "title": "Maps",
+  "icon": "pin",
+  "values": "godot-maps/settings.json",
+  "sections": [
+    {
+      "title": "Map",
+      "rows": [
+        {"key": "theme", "kind": "choice", "label": "Map colours", "detail": "Auto follows LIVI's map night mode", "default": "auto",
+          "options": [{"value": "auto", "label": "Auto"}, {"value": "light", "label": "Day"}, {"value": "dark", "label": "Night"}]},
+        {"key": "road_markings", "kind": "toggle", "label": "Road markings", "default": true},
+        {"key": "tile_cache_mb", "kind": "choice", "label": "Tile cache", "default": 400,
+          "options": [{"value": 0, "label": "Off"}, {"value": 100, "label": "100 MB"}, {"value": 200, "label": "200 MB"}, {"value": 400, "label": "400 MB"}, {"value": 800, "label": "800 MB"}, {"value": 1600, "label": "1.6 GB"}]}
+      ]
+    },
+    {
+      "title": "Look",
+      "rows": [
+        {"key": "road_color_level", "kind": "slider", "label": "Road colours", "default": 0.6666666666666666,
+          "min": 0, "max": 1, "labels": ["Shaded", "Muted", "Normal", "Bright"]}
+      ]
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 class_name ChargeCard
 extends Card
-## While the car charges or its charger has a plug (`charging`, `chargerReady`): the time to full,
+## While the car charges (`charging`; not `chargerReady`, the on-board charger's ready, which is
+## set with no plug in too): the time to full,
 ## and for AC and DC the car's limit, the range at it and its time estimate. A row shows only
 ## with what the car reports; the charge port's state is the car's (CarStatus).
 
@@ -51,7 +52,7 @@ func _style() -> void:
 ## Shows for `t`, the core's telemetry; false (and hidden) when nothing is plugged in.
 func show_for(t: Dictionary) -> bool:
 	_t = t
-	visible = t.get("charging") == true or t.get("chargerReady") == true
+	visible = t.get("charging") == true
 	_fill()
 	return visible
 

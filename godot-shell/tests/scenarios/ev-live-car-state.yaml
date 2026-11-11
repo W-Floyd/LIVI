@@ -33,11 +33,6 @@ steps:
               if rects[i][1].intersects(rects[j][1]):
                   return "%s overlaps %s" % [rects[i][0], rects[j][0]]
   - screenshot: ev-live-charging
-  # Plugged in, not charging: no time to full.
-  - set: { core: { telemetry: { charging: false } } }
-  - wait: { frames: 2 }
-  - expect_node: { path: EvLive/ChargeCard/Box/Head/Title, text: Plugged in }
-  - expect_node: { path: EvLive/ChargeCard/Box/Head/Big, visible: "false" }
   # Only what the car reports: no DC limit, a dash.
   - set: { core: { telemetry: { chargeLimitDcPct: null, chargeTimeAcMin: null, chargeTimeDcMin: null } } }
   - wait: { frames: 2 }
@@ -46,6 +41,11 @@ steps:
       if shell.has_node("EvLive/ChargeCard/Box/Facts/TimeAC"):
           return "a row the car does not report"
   - set: { core: { telemetry: { chargeLimitDcPct: 80, chargeTimeAcMin: 430, chargeTimeDcMin: 38 } } }
+  # Not charging, the charger ready: no card. chargerReady is the on-board charger's ready
+  # (OBC_SYSRDYSTA), 1 with no plug in too.
+  - set: { core: { telemetry: { charging: false } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/ChargeCard, visible: "false" }
   # Unplugged: no card. Doors open, a low 12 V battery, the climate (its blower, as the range's
   # name has it) and the battery heater on. A set goes leaf by leaf: the climate object first.
   - set: { core: { telemetry: { climate: {} } } }

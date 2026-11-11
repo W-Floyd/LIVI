@@ -27,10 +27,10 @@ index ac473ce..f06bcce 100644
 +arm_ss.add(when: 'CONFIG_TCC803X', if_true: files('tcc803x.c'))
 diff --git a/hw/arm/tcc803x.c b/hw/arm/tcc803x.c
 new file mode 100644
-index 0000000..ab17974
+index 0000000..7c8695e
 --- /dev/null
 +++ b/hw/arm/tcc803x.c
-@@ -0,0 +1,249 @@
+@@ -0,0 +1,261 @@
 +/*
 + * Telechips TCC803x (Kia EV6 Gen5W head unit) experimental machine.
 + *
@@ -152,10 +152,22 @@ index 0000000..ab17974
 +    s->con = graphic_console_init(dev, 0, &qfb_ops, s);
 +}
 +
++/* The VRAM is a RAM block and migrates by itself; the surface is rebuilt from r[]. */
++static const VMStateDescription qfb_vmstate = {
++    .name = TYPE_TCC_QFB,
++    .version_id = 1,
++    .minimum_version_id = 1,
++    .fields = (const VMStateField[]) {
++        VMSTATE_UINT32_ARRAY(r, QfbState, 8),
++        VMSTATE_END_OF_LIST()
++    }
++};
++
 +static void qfb_class_init(ObjectClass *oc, void *data)
 +{
 +    DeviceClass *dc = DEVICE_CLASS(oc);
 +    dc->realize = qfb_realize;
++    dc->vmsd = &qfb_vmstate;
 +}
 +
 +static const TypeInfo qfb_info = {

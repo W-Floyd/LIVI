@@ -74,3 +74,21 @@ setup, EV home widget, FM radio, home settings, voice memo, user profile all ren
 
 The guest asks the fbdev for RGBA byte order and bochs ignores it, so `emuctl screenshot` has red and blue swapped.
 `swap-rb.py in.png out.png` fixes that (needs Pillow).
+
+## Performance
+
+`emuctl` runs QEMU (`virt`, Cortex-A7, 4 vCPUs, 2 GiB, `tcg,thread=multi,tb-size=512`) in Docker. The same command line run natively
+on an Apple-silicon Mac (raw `disk.raw` with `snapshot=on`, serial console over a unix socket, boot polled with
+`getprop sys.boot_completed`), host idle, wall seconds from QEMU start to `sys.boot_completed=1`, N=2 each:
+
+| QEMU | boot | `input tap` |
+|---|---|---|
+| Docker (`emuctl`, earlier measurement) | ~45 s | n/a |
+| native Homebrew 11.1.3 | 42.8, 43.0 s | 1.2 s |
+| native 10.0.3 (the `tools/tcc803x-qemu` build) | 37.4, 38.8 s | 1.2 s |
+
+So native is not slower than Docker (the earlier 75 s native figure was not reproduced) and a plain `emuctl`-free run is a few seconds
+faster. The guest clock equals wall time. This path is already near the floor for TCG: 4 vCPUs, no discard/dexopt stalls, no
+`-d` logging. The stock-kernel machine (`tools/tcc803x-qemu`) now boots in 55-57 s with 4 vCPUs, so the two are within 1.5x; its README has the
+breakdown and the `savevm`/`loadvm` snapshot recipe (boot once, resume in about a second), which should work here too with a
+qcow2 disk (`bochs-display`, `virtio-*` and `intel-hda` have migration state) but was not tried.

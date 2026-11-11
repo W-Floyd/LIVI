@@ -10,10 +10,12 @@ Nothing Kia-derived is committed. The scripts read the firmware from local paths
 |---|---|
 | `qemu-tcc803x.patch` | diff against QEMU `v10.0.3`: `hw/arm/tcc803x.c`, SiP-SMC hook, SDHCI tweaks |
 | `Dockerfile`, `build.sh` | build `qemu-system-arm` into the docker volume `tcc803x-qemu-build` |
+| `build-native.sh` | build the same QEMU natively (no docker); prints the binary, use it as `QEMU=` |
 | `tcc803x-qemu.dts` | DT for the stock kernel (own file, from the mainline `tcc803x.dtsi` + stock driver strings) |
 | `extract-boot.sh` | split `boot.img` into `kernel` + `ramdisk.gz` |
 | `make-emmc.sh` | pad a GPT by-name image to 8 GiB (QEMU eMMC must be a power of two) |
-| `run.sh` | run the machine; serial console on stdout |
+| `run.sh` | run the machine; serial console on stdout (docker, or native with `QEMU=`) |
+| `bench.py` | cold-boot timing: wall to `sys.boot_completed`, guest/wall clock, `input tap` latency |
 
 ## Run
 
@@ -26,13 +28,13 @@ K=~/Documents/Personal/git/kia-ev6/scratch
 EMMC=$W/emmc8g.img BOOT_DIR=$W/boot TIMEOUT=100 ./run.sh
 ```
 
-`run.sh` knobs: `APPEND` (kernel cmdline), `DEBUG` (qemu `-d` flags, default `guest_errors,unimp`),
+`run.sh` knobs: `SMP` (vCPUs, default 4), `QEMU` (native binary, see Performance), `APPEND` (kernel cmdline), `DEBUG` (qemu `-d`
+flags, default none; `guest_errors,unimp` logs the unimplemented accesses and SiP calls to `qemu.log`, printed as a summary),
 `EXTRA` (more qemu args, e.g. `-trace sdhci_*`). The eMMC is attached with `snapshot=on`: nothing is written back.
-The qemu log (unimp accesses, SiP calls) is in docker volume `tcc803x-qemu-run` as `qemu.log`; `run.sh` prints a summary.
 
 ## Machine
 
-4x Cortex-A15 (stand-in for the A53 cluster in AArch32; `-smp` defaults to 4 but the cmdline uses `maxcpus=1`),
+4x Cortex-A15 (stand-in for the A53 cluster in AArch32; `-smp` defaults to 4, PSCI `CPU_ON` brings the others up),
 RAM at `0x20000000`, GIC-400 distributor/CPU interface at `0x17301000`/`0x17302000` (224 SPIs, the stock
 `NR_IRQS` is 256), armv8 generic timer (PPIs 13/14/11/10), PSCI over SMC, PL011 x4 at `0x16600000 + n*0x10000`
 (SPI 88..91), `generic-sdhci` at `0x16440000` (SPI 74) with an `emmc` card, and `unimplemented-device` over
@@ -57,10 +59,10 @@ RAM at `0x20000000`, GIC-400 distributor/CPU interface at `0x17301000`/`0x173020
 
 ## Status
 
-Reaches the stock Android 4.4.2 userland: kernel boot log on `ttyTCC0`, SMP bring-up skipped (`maxcpus=1`),
+Reaches the stock Android 4.4.2 userland: kernel boot log on `ttyTCC0`, SMP bring-up over PSCI (4 vCPUs),
 ramdisk `/init` and `init.rc` run, `/system` (the decrypted V015 `system.ext4`) and every by-name partition
 mount from the emulated eMMC (`mmcblk0p1..15`), property service, `rild`, `healthd`, input devices and the
-console shell start (`shell@wp_daudioplus_ecokmc_us:/ $`). 100 s of wall time is about 34 s of guest time.
+console shell start (`shell@wp_daudioplus_ecokmc_us:/ $`). (Numbers in this paragraph and the next are from the first docker runs with `maxcpus=1`; see Performance for current ones.)
 
 Stubs and what each was needed for:
 
@@ -135,4 +137,65 @@ setup was in front.
 print `Division by zero in kernel` (`mmc_mmc_erase_timeout`, 70-130 times per run). `make-emmc.sh` clones with `cp -c` where possible.
 `DATA_MIB`/`CACHE_MIB` for `tools/gen5w-stock/build-emmc.sh` resize the partitions (3072/512 still fits 8 GiB).
 `drive.py`: `PROMPT_TIMEOUT` (default 120) for slow commands; `input tap` takes 30-120 s here, so wait before the next tap.
-Not modelled: SMP (`maxcpus=1`), `/dev/ttyTCC2` (micomd), audio mixer, Mali/VPU/USB/ethernet.
+Not modelled: `/dev/ttyTCC2` (micomd), audio mixer, Mali/VPU/USB/ethernet.
+
+## Performance
+
+Measured on an Apple M-series Mac (TCG, 32-bit guests cannot use HVF), host otherwise idle, `bench.py` with the root-console
+ramdisk, `-m 1024`. Wall seconds from QEMU start to `sys.boot_completed=1` (N runs), guest clock vs wall, `input tap` round trip:
+
+| config | boot | guest/wall | tap |
+|---|---|---|---|
+| native QEMU 10.0.3, `maxcpus=1` (old default) | 78-86 s (N=9); 3 more runs stalled for minutes (see below) | 1.0 (0.56 in a stalled run) | 1.1-2.2 s |
+| native, `-smp 2`, no `maxcpus` | 57 s (N=2) | 1.0 | 1.2 s |
+| native, `-smp 4`, no `maxcpus` (new default) | 55-57 s (N=9) | 1.0 | 1.1-1.2 s |
+| native `-smp 4` + `-loadvm` of a booted snapshot | 1.6 s to a working console, consent screen at once | n/a | 1.2 s |
+| docker, `maxcpus=1`, `-d guest_errors,unimp` (previous agent) | ~200 s | ~0.33 | 30-120 s |
+
+What matters:
+
+- **vCPUs.** The guest is CPU-bound for its whole boot (`top`: Idle 0 %; `surfaceflinger` composing in software at a steady 50-57 %
+  of a CPU, Launcher3 13 %, `system_server`, a dozen app starts), and a TCG vCPU is one host thread. Bring-up over the existing PSCI
+  handler works unmodified: remove `maxcpus=1` and pass `-smp 4` (`run.sh` default). 83 -> 55 s, and no more of the stalls
+  below. 2 vCPUs are as fast as 4 (boot is only partly parallel), 4 are cheaper in tail latency.
+- **Single-vCPU stalls.** With `maxcpus=1` 3 of 12 runs went into a mode where the guest soft-locked up
+  (`BUG: soft lockup - CPU#0 stuck for 49s! [surfaceflinger]`, 149 s `system_server`), `am`/`input` hung for minutes, QEMU used
+  70 % of a core instead of 100 % and the guest clock ran at 0.56x wall. Not reproduced on demand (the healthy runs pass the same point) and not seen in 9 runs with 4
+  vCPUs. This, plus docker-for-Mac, is what the earlier "3x slow clock, 30-120 s taps" were; the clock itself is not slow
+  (kernel timestamps match wall time in every healthy run, TCG is not `-icount`).
+- **Native, not docker.** `build-native.sh` builds the patched QEMU on the Mac (about 3 minutes); no docker VM in between.
+  Docker Desktop was unusable during this work, so the docker number above is the earlier measurement, not re-run.
+- **Snapshots** (below) make everything after the first boot cost seconds.
+
+What does not matter (measured, 4 vCPUs): `-d guest_errors,unimp -D` (the log is 11 KB: 57 s vs 55 s), `tb-size=2048`
+(57 s), `-display none` vs scan-out (the QFB device only converts when a display listener asks, none with `-display none`),
+dexopt (the stock apps are odexed; `logcat` has no dexopt activity at boot), the 5 `tcc_adc_getdata` log lines per
+second (kernel/serial noise only). Host profile of the vCPU thread (`sample`): 60 % in generated code, 25 % softmmu TLB
+fills/flushes (`get_phys_addr`, `tlb_flush`), 4 % `helper_lookup_tb_ptr`; no device model shows up, so the rest is TCG itself.
+
+Not done: `surfaceflinger` composing every frame is the largest single guest cost. `qfb.c` leaves `pixclock` and the margins at
+0, so the fbdev gralloc assumes 60 Hz; giving it a 15-20 Hz `pixclock` (`1e12 / (hz * 1920 * 720)` ps) should cut that load by
+3-4x. Needs a rebuild of `qfb.ko` (docker was unavailable), so untried.
+
+### Snapshot: boot once, then resume in seconds
+
+`savevm`/`loadvm` work with the custom devices (the `tcc803x-qfb` registers have a `vmstate` in the patch; the VRAM is a RAM block and
+migrates itself). They need a qcow2 disk; a backing-file overlay keeps the raw image untouched:
+
+```sh
+qemu-img create -f qcow2 -b $W/emmc8g.img -F raw $W/ov.qcow2
+# drive.py script: boot, wait, dismiss the black com.mobis.welcome overlay, save
+#   am force-stop com.mobis.welcome
+#   #sleep 10
+#   #savevm booted
+QEMU=... EMMC=$W/ov.qcow2 BOOT_DIR=$W/boot RAMDISK=ramdisk.emu.gz ./drive.py script.txt out.log
+# later, each run on a copy (loadvm writes to the overlay; cp -c is a clone on APFS)
+cp -c $W/ov.qcow2 $W/run.qcow2
+QEMU=... EMMC=$W/run.qcow2 LOADVM=booted BOOT_DIR=$W/boot RAMDISK=ramdisk.emu.gz ./run.sh
+```
+
+The state file is about 650 MiB (RAM) in the overlay. After `loadvm` the console answers in about a second, the consent screen is on
+the display immediately and the whole consent -> home click-through takes under 10 s (taps 1-3 s each). The first command typed
+into the serial console in the first second after `loadvm` can be lost; send a newline first.
+Recommended for golden screenshots: one cold boot to `boot_completed` + `am force-stop com.mobis.welcome`, `savevm`, then
+`loadvm` per capture session (or simply keep one machine running and use `#shot`/QMP `screendump`: the guest clock is real time).

@@ -75,7 +75,6 @@ struct Sent {
     speed_mm_s: Option<i32>,
     rpm_e3: Option<i32>,
     gear: Option<i64>,
-    night_mode: Option<bool>,
     parking_brake: Option<bool>,
     driving_status: Option<i64>,
     lights: Option<(Option<i32>, Option<i32>, Option<bool>)>,
@@ -203,13 +202,6 @@ impl AaTelemetry {
         {
             sent.gear = Some(g);
             out.push(Sensor::Gear(g as i32));
-        }
-        if changed("nightMode")
-            && let Some(night) = flag(next, "nightMode")
-            && sent.night_mode != Some(night)
-        {
-            sent.night_mode = Some(night);
-            out.push(Sensor::NightMode(night));
         }
         if changed("parkingBrake")
             && let Some(on) = flag(next, "parkingBrake")
@@ -372,12 +364,8 @@ mod tests {
         let sent = t.sensors(&Map::new(), &first, now);
         assert_eq!(
             sent,
-            [
-                Sensor::Speed(20_389),
-                Sensor::Rpm(2500),
-                Sensor::Gear(100),
-                Sensor::NightMode(true),
-            ]
+            [Sensor::Speed(20_389), Sensor::Rpm(2500), Sensor::Gear(100),],
+            "the night comes from the config's main map"
         );
         let tick = map(json!({ "speedKph": 73.40001, "rpm": 2.5, "gear": "D", "nightMode": true }));
         assert!(t.sensors(&first, &tick, now).is_empty());

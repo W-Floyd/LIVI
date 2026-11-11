@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Additional terms: see NOTICE
 
+use livi_aa_stack::sensors::Sensor;
 use livi_core_proto::config::{AppearanceMode, defaults};
 use livi_core_proto::input::Point;
 use livi_core_proto::state::Maneuver;
@@ -1357,6 +1358,12 @@ async fn only_the_config_sets_the_night_modes() {
         rig.drain(),
         [],
         "telemetry reaches carplay through the config"
+    );
+    assert!(
+        !rig.aa_drain()
+            .iter()
+            .any(|c| matches!(c, AaCmd::Sensor(Sensor::NightMode(_)))),
+        "and android auto, through its config"
     );
 
     let mut day = cfg.clone();

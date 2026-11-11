@@ -32,6 +32,8 @@ pub struct AaConfig {
     pub hevc_supported: bool,
     pub vp9_supported: bool,
     pub av1_supported: bool,
+    /// The phone's night sensor: answers its start and goes to every session on change; wins
+    /// over a `Sensor::NightMode`.
     pub initial_night_mode: Option<bool>,
     pub cluster_enabled: bool,
     pub cluster_width: u32,

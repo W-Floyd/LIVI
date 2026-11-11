@@ -1536,13 +1536,14 @@ pub(crate) mod tests {
         assert!(s.on_link_closed(None).is_empty());
     }
 
-    // The car's night, replayed on connect before the session runs, answers
-    // the phone's night sensor start; a forced appearance wins.
+    // The config's night answers the phone's night sensor start, over a
+    // NightMode sensor given before the session runs.
     #[test]
     fn the_night_sensor_starts_in_the_cars_night() {
         for (forced, car, want) in [
             (None, None, 0x00),
             (None, Some(true), 0x01),
+            (Some(true), None, 0x01),
             (Some(false), Some(true), 0x00),
             (Some(true), Some(false), 0x01),
         ] {

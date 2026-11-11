@@ -574,7 +574,8 @@ fn aa_config(
         cfg,
         widths,
         codecs,
-        cfg.appearance_mode.night_mode(),
+        // The effective main-map night; a car's nightMode reaches it through the config.
+        Some(cfg.main_map_night_mode),
         &addresses,
     )
 }
@@ -823,7 +824,7 @@ impl ConfigSource {
 
 #[cfg(test)]
 mod tests {
-    use livi_core_proto::config::defaults;
+    use livi_core_proto::config::{AppearanceMode, defaults};
     use livi_core_proto::theme::livi_theme;
 
     use super::*;
@@ -1152,6 +1153,18 @@ mod tests {
         )
         .info;
         assert_eq!((info.main.ui_night, info.main.map_night), (true, false));
+        // Android Auto's is the main map's, in Auto too: the car's night, or one a
+        // setting left behind, reaches it only through the config.
+        for (mode, map) in [
+            (AppearanceMode::Night, false),
+            (AppearanceMode::Auto, true),
+            (AppearanceMode::Auto, false),
+        ] {
+            cfg.appearance_mode = mode;
+            cfg.main_map_night_mode = map;
+            let aa = aa_config(&cfg, &HashMap::new(), None, Codecs::default(), &addresses());
+            assert_eq!(aa.initial_night_mode, Some(map), "{mode:?}");
+        }
     }
 
     #[test]

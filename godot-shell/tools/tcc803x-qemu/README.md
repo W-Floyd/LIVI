@@ -32,7 +32,7 @@ EMMC=$W/emmc8g.img BOOT_DIR=$W/boot TIMEOUT=100 ./run.sh
 `run.sh` knobs: `SMP` (vCPUs, default 4), `QEMU` (native binary, see Performance), `APPEND` (kernel cmdline), `CAR`
 (the car's identity on the command line as the bootloader passes it, default the EV6's `vehicle_info=0xcc country_info=0x01`
 and hardware ids; without it the system comes up as `ECOKMC`, another car, and the EV app shows that car's settings),
-`MICOM` (chardev of the micom UART, see "Micom link"), `DEBUG` (qemu `-d`
+`MICOM` and `GPS` (chardevs of the micom and GNSS UARTs, see "Micom link", "GNSS link"), `DEBUG` (qemu `-d`
 flags, default none; `guest_errors,unimp` logs the unimplemented accesses and SiP calls to `qemu.log`, printed as a summary),
 `EXTRA` (more qemu args, e.g. `-trace sdhci_*`). The eMMC is attached with `snapshot=on`: nothing is written back.
 
@@ -226,6 +226,15 @@ the display immediately and the whole consent -> home click-through takes under 
 into the serial console in the first second after `loadvm` can be lost; send a newline first.
 Recommended for golden screenshots: one cold boot to `boot_completed` + `am force-stop com.mobis.welcome`, `savevm`, then
 `loadvm` per capture session (or simply keep one machine running and use `#shot`/QMP `screendump`: the guest clock is real time).
+
+## GNSS link
+
+`/dev/ttyTCC3` is the fourth PL011, `0x16630000`, SPI 91 (`serial3` alias), on QEMU's fourth `-serial`: `GPS=unix:$SOCK,server=on,wait=off`.
+The stock kernel's `dupttyd` opens it at boot and makes `/dev/ttyGPS0-2` of it, which the HAL (`gps.tcc803x.so`) opens. go-hippod's
+`cmd/hippo-fake -connect unix:$SOCK -gpx route.gpx` plays the module: the HAL takes its version reply and LocationManager's `gps` fixes
+(`dumpsys location`) follow the track with its time, speed and heading. Start the fake before the HAL stops draining: after its feed
+went away once, the HAL stopped reading and QEMU kept the dead connection; a new boot recovers. Flows with a position need a snapshot
+taken with `GPS` attached (the `ui` one predates it).
 
 ## Stock UI flows
 

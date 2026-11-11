@@ -12,6 +12,7 @@
 #      DEBUG     qemu -d flags (default none; `guest_errors,unimp` logs to qemu.log, harmless but noisy)
 #      MICOM     with QEMU: chardev for the micom UART, /dev/ttyTCC2 (e.g. unix:/tmp/m.sock,server=on,wait=off
 #                for micom-fake -connect; default null, micomd then reads nothing)
+#      GPS       with QEMU: chardev for the GNSS UART, /dev/ttyTCC3 (default null)
 #      EXTRA     extra qemu args
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -28,7 +29,7 @@ if [ -n "${QEMU:-}" ]; then
   W=${TMPDIR:-/tmp}/tcc803x-run.$$; mkdir -p "$W"; trap 'rm -rf "$W"' EXIT
   clang -E -P -x assembler-with-cpp "$HERE/tcc803x-qemu.dts" | dtc -q -I dts -O dtb -o "$W/t.dtb" -
   set -- -M tcc803x -m 1024 -smp "$SMP" -kernel "$BOOT_DIR/kernel" -dtb "$W/t.dtb" -initrd "$BOOT_DIR/$RAMDISK" \
-    -append "$APPEND" -display none -serial mon:stdio -serial null -serial "${MICOM:-null}"
+    -append "$APPEND" -display none -serial mon:stdio -serial null -serial "${MICOM:-null}" -serial "${GPS:-null}"
   case "${EMMC:-}" in
     "") ;;
     *.qcow2) set -- "$@" -drive "if=sd,index=0,format=qcow2,file=$EMMC" ;;

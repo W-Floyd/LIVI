@@ -24,6 +24,7 @@
 		/* the PL011 driver numbers ttyTCC<n> by alias, else by probe order */
 		serial0 = &uart0;
 		serial2 = &uart2;
+		serial3 = &uart3;
 	};
 
 	chosen {
@@ -77,6 +78,15 @@
 		compatible = "arm,pl011", "arm,primecell";
 		reg = <0x16620000 0x1000>;
 		interrupts = <GIC_SPI 90 IRQ_TYPE_LEVEL_HIGH>;
+		clock-names = "uartclk", "apb_pclk";
+		clocks = <&uartclk>, <&uartclk>;
+	};
+
+	/* the GNSS module, /dev/ttyTCC3 (the kernel's dupttyd makes ttyGPS0 of it for the HAL); QEMU's fourth -serial */
+	uart3: serial@16630000 {
+		compatible = "arm,pl011", "arm,primecell";
+		reg = <0x16630000 0x1000>;
+		interrupts = <GIC_SPI 91 IRQ_TYPE_LEVEL_HIGH>;
 		clock-names = "uartclk", "apb_pclk";
 		clocks = <&uartclk>, <&uartclk>;
 	};

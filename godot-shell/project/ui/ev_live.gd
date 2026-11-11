@@ -499,6 +499,8 @@ func _bind() -> void:
 		nm.text = stop_name
 		nm.visible = stop_name != ""
 	_place()
+	if ui_hidden:
+		_apply_hidden()
 
 
 ## Whether the car's blower runs (stock: its level 1 to 14). False when nothing reported it.
@@ -679,6 +681,9 @@ func _place() -> void:
 	var end: Vector2 = a.on_far if above else a.on
 	var r := Rect2(on.position, on.size)
 	_leader = [end, Vector2(clampf(end.x, r.position.x, r.end.x), clampf(end.y, r.position.y, r.end.y))]
+	# Placing shows what has data; hidden wins, in the same frame (a frame later it flickers).
+	if ui_hidden:
+		_apply_hidden()
 	queue_redraw()
 
 

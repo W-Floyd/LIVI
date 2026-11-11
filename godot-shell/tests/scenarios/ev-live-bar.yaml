@@ -20,6 +20,21 @@ steps:
   - expect_node: { path: EvLive/next_departure, visible: false }
   - expect_node: { path: EvLive/Settings, visible: false }
   - screenshot: ev-live-bar-hidden
+  # Hidden holds through the data and the look changing: not one drawn frame shows a label.
+  - set: { core: { telemetry: { fuelPct: 61, rangeKm: 230 }, navigation: { chargingStop: { distanceM: 5000 } } } }
+  - gdscript: &still_hidden |
+      for i in 8:
+          await RenderingServer.frame_pre_draw
+          for n in ["Battery", "RangeOn", "RangeOff", "ChargerLabel", "CarStatus", "next_departure", "Settings"]:
+              var c: Control = shell.get_node_or_null("EvLive/" + n)
+              if c and c.visible:
+                  return "%s drawn at frame %d with the controls hidden" % [n, i]
+  - set: { core: { telemetry: { climate: { source: car, fanLevel: 2, on: true }, rangeClimateOffKm: 260 } } }
+  - gdscript: *still_hidden
+  - theme: { appearance: day }
+  - gdscript: *still_hidden
+  - theme: { appearance: night }
+  - gdscript: *still_hidden
   - tap: { node: EvLive/TitleBar/HideUI }
   - wait: { frames: 3 }
   - expect_node: { path: EvLive/Battery, visible: true }

@@ -1471,6 +1471,12 @@ async fn android_auto_takes_the_screen_like_carplay() {
 
     rig.p.on_aa(AaEvent::HostUiRequested { id: 5 });
     assert_eq!(rig.front(), Front::Livi);
+    rig.want(Front::Projection);
+    assert_eq!(
+        rig.front(),
+        Front::Projection,
+        "the same ask again takes the screen back"
+    );
     rig.p.on_aa(AaEvent::Disconnected { id: 5 });
     assert_eq!(rig.sessions(), (None, 0, 0));
     rig.p.on_aa(AaEvent::Connected { id: 9 });

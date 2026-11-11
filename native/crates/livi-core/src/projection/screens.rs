@@ -24,9 +24,14 @@ impl Projection {
     pub(super) fn asked(&mut self, asked: PerScreen<Front>) {
         let before = self.wants.main;
         let last = std::mem::replace(&mut self.asked, asked);
+        // The same ask again re-asserts it: the phone may have taken the screen back since
+        // (host_ui), and a UI restarted or not answering that would otherwise never get it.
+        let again = asked == last;
         let camera = self.reverse_camera();
         for screen in [Screen::Main, Screen::Cluster, Screen::Aux] {
-            if asked.get(screen) != last.get(screen) && !(camera && screen == Screen::Main) {
+            if (again || asked.get(screen) != last.get(screen))
+                && !(camera && screen == Screen::Main)
+            {
                 *self.wants.get_mut(screen) = *asked.get(screen);
             }
         }

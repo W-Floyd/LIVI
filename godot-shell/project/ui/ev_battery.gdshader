@@ -1,4 +1,4 @@
-// The battery block: modules in a grid, lit from the rear forward up to the charge.
+// The battery block: one smooth slab, lit from the rear forward up to the charge.
 shader_type spatial;
 render_mode specular_schlick_ggx;
 
@@ -19,15 +19,11 @@ void fragment() {
 	float u = (lp.x - x_min) / x_len;
 	float aa = max(fwidth(u), 1e-3);
 	float lit = 1.0 - smoothstep(fill - aa, fill + aa, u);
-	// Module seams.
-	vec2 cell = vec2(lp.x * 2.6, lp.z * 3.0);
-	vec2 g = abs(fract(cell) - 0.5);
-	float seam = smoothstep(0.43, 0.5, max(g.x, g.y));
 	// The charge's front edge shines.
 	float front = (1.0 - smoothstep(0.0, 0.05, abs(u - fill))) * step(0.001, fill);
 	vec3 base = mix(c_empty.rgb, c_fill.rgb, lit);
-	ALBEDO = base * (1.0 - 0.45 * seam);
+	ALBEDO = base;
 	METALLIC = 0.35;
 	ROUGHNESS = mix(0.5, 0.3, lit);
-	EMISSION = c_fill.rgb * glow * (lit * (0.55 - 0.3 * seam) + front * 0.8);
+	EMISSION = c_fill.rgb * glow * (lit * 0.55 + front * 0.8);
 }

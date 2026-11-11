@@ -81,6 +81,15 @@ var _nav_window := -1
 var _nav_seen := []
 ## The launcher's list was read for the navigation app (`nav_app`).
 var _apps_scanned := false
+## The navigation app kept running (`_keep_nav`): the one started since it was designated, the
+## restarts so far after it exited, when its window last mapped, and the wait before the next.
+var _nav_kept := ""
+var _nav_restarts := 0
+var _nav_up_ms := 0
+var _nav_retry: Timer
+## Seconds before each restart; the last repeats. Running this long resets them.
+const NAV_RETRY_S := [2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
+const NAV_STABLE_S := 60.0
 const SPLIT_S := 0.35
 ## The keyboard for a hosted app's field (AppKeyboard), over the driver's side of the app page
 ## while the app wants text; the app is configured to the rest of the width meanwhile, so it lays
@@ -211,6 +220,12 @@ func _ready() -> void:
 	Drive.changed.connect(_update_keys_button)
 	launcher.show_window.connect(bring_forward)
 	launcher.changed.connect(_update_source)
+	# Deferred: `changed` comes from inside the launcher's own calls.
+	launcher.changed.connect(func(): _keep_nav.call_deferred())
+	_nav_retry = Timer.new()
+	_nav_retry.one_shot = true
+	_nav_retry.timeout.connect(_keep_nav.bind(true))
+	add_child(_nav_retry)
 	_source.picked.connect(_pick_source)
 	ThemeManager.changed.connect(_on_nav_look)
 	_nav_seen = [ThemeManager.nav_app, ThemeManager.home_source]
@@ -218,8 +233,10 @@ func _ready() -> void:
 	_style()
 	_refresh()
 	_tell_app_area()
-	# The navigation app shows in the slot from the start, with no phone yet.
+	# The navigation app runs from the start, whatever page is restored; on home it shows in the
+	# slot, with no phone yet.
 	if ThemeManager.nav_app != "":
+		_keep_nav.call_deferred()
 		_show_app.call_deferred()
 
 
@@ -877,10 +894,12 @@ func _nav_window_id() -> int:
 ## The toggle's segment tapped: kept in the look, which shows it (`_on_nav_look`).
 func _pick_source(source: String) -> void:
 	if source == "nav":
-		# Again after a launch that failed: the driver asked for it.
+		# Again after a launch that failed or the driver's close: they asked for it.
 		launcher.failed.erase(nav_app())
+		launcher.user_closed.erase(nav_app())
 	ThemeManager.set_look({home_source = source})
 	ThemeManager.save_look()
+	_keep_nav(true)
 	_show_app()
 
 
@@ -892,9 +911,52 @@ func _on_nav_look() -> void:
 		return
 	_nav_seen = now
 	launcher.failed.erase(ThemeManager.nav_app)
+	launcher.user_closed.erase(ThemeManager.nav_app)
+	_keep_nav(true)
 	_show_app()
 	_tell_front()
 	_ask_area(true)
+
+
+## Keeps the navigation app running while it is designated, quietly (no app page): started once
+## the launcher lists it, whatever page shows, and again after an exit the driver did not ask for
+## (their close from the switcher), after `NAV_RETRY_S`. `now`: the wait is over, or the driver
+## asked for it.
+func _keep_nav(now := false) -> void:
+	var id := nav_app()
+	if id == "":
+		_nav_kept = ""
+		_nav_retry.stop()
+		return
+	var state := launcher.state(id)
+	if state == "running":
+		if _nav_kept != id:
+			_nav_kept = id
+			_nav_restarts = 0
+		if _nav_up_ms == 0:
+			_nav_up_ms = Time.get_ticks_msec()
+		return
+	if state == "launching" or launcher.user_closed.has(id):
+		return
+	if _nav_kept != id:
+		# Designated (or at start): now.
+		_nav_kept = id
+		_nav_restarts = 0
+	elif not now:
+		# Gone: again after a wait, shorter once it had run a while.
+		if not _nav_retry.is_stopped():
+			return
+		if _nav_up_ms > 0 and Time.get_ticks_msec() - _nav_up_ms >= NAV_STABLE_S * 1000.0:
+			_nav_restarts = 0
+		_nav_up_ms = 0
+		var wait: float = NAV_RETRY_S[mini(_nav_restarts, NAV_RETRY_S.size() - 1)]
+		_nav_restarts += 1
+		launcher._log("launcher: %s, the navigation app, %s: again in %d s" % [id, "failed" if state == "failed" else "exited", wait])
+		_nav_retry.start(wait)
+		return
+	_nav_up_ms = 0
+	launcher.failed.erase(id)
+	launcher.open(id, false)
 
 
 ## The toggle shows on home while the phone and the navigation app are both there and the slot
@@ -1029,11 +1091,9 @@ func _show_app() -> void:
 	_update_split()
 	var id := -1
 	if _slot_nav():
-		# One window in one place: the navigation app's moves here from the app page. Started
-		# when it is not running, without the app page.
+		# One window in one place: the navigation app's moves here from the app page. `_keep_nav`
+		# starts it.
 		id = _nav_window_id()
-		if id < 0 and ThemeManager.home_phone and launcher.state(nav_app()) == "":
-			launcher.open(nav_app(), false)
 	else:
 		# Home's slot is otherwise the phone's: a hosted app is the app page's.
 		var phone := _projection_page or _page_name == "home"

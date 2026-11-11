@@ -200,7 +200,7 @@ steps:
       if not shell._scene or not pill in shell._scene.surfaces:
           return "no slab for the pill"
   # A navigation app (the test client's grid, following each configure and logging it) designated:
-  # with the phone there the slot stays the phone's and the app does not start; a toggle under the
+  # with the phone there the slot stays the phone's and the app starts unseen; a toggle under the
   # cards on the slot's side, clear of both, picks between them.
   - theme: { theme_name: instrument, appearance: day, hand: lhd, home_split: 0.0 }
   - gdscript: |
@@ -215,8 +215,9 @@ steps:
       await runner.frames(3)
       if shell.slot_source() != "phone" or not shell._projection.window.to_core:
           return "with the phone: the slot shows %s" % shell.slot_source()
-      if shell.launcher.state("org.livi.test.grid") != "":
-          return "the navigation app started before it was picked"
+      # Designated, it starts at once, quietly.
+      if not shell.launcher.state("org.livi.test.grid") in ["launching", "running"] or shell._page_name != "home":
+          return "designated: %s, page %s" % [shell.launcher.state("org.livi.test.grid"), shell._page_name]
   - gdscript: &source |
       var t: Control = shell.get_node("Page/Source")
       var r := t.get_global_rect()
@@ -464,3 +465,66 @@ steps:
           return "no phone: the slot shows %d (%s), the handle %s" % [shell._projection.window.window_id, shell.slot_source(), shell.get_node("Page/PhoneHandle").visible]
       if shell.get_node("Page/Source").visible:
           return "a toggle with nothing to toggle to"
+  # A restart with it designated (the shell rebuilt, as at boot) and the page restored to Apps or
+  # Settings: it starts at once, quietly, wherever the shell opens. A catalog read late starts it
+  # once it lists it.
+  - gdscript: |
+      for page in ["apps", "settings", "late"]:
+          var old: Control = runner._shell
+          ThemeManager.set_look({nav_app = "org.livi.test.grid", home_source = "nav"})
+          # Its launcher stops what it started.
+          old.get_parent().remove_child(old)
+          old.free()
+          for i in 600:
+              if Wayland.find_window("org.livi.test.grid") < 0:
+                  break
+              await runner.frames(1)
+          if Wayland.find_window("org.livi.test.grid") >= 0:
+              return "%s: the app outlived the shell" % page
+          var s: Control = load("res://shell.tscn").instantiate()
+          if page == "late":
+              s._apps_scanned = true
+          runner._vp.add_child(s)
+          runner._shell = s
+          s.open_page.call_deferred("home" if page == "late" else page)
+          await runner.frames(30)
+          if page == "late":
+              if s.launcher.state("org.livi.test.grid") != "":
+                  return "late: started before the catalog listed it"
+              s.launcher.refresh()
+          for i in 600:
+              if Wayland.find_window("org.livi.test.grid") >= 0:
+                  break
+              await runner.frames(1)
+          if Wayland.find_window("org.livi.test.grid") < 0:
+              return "%s: the navigation app did not start" % page
+          await runner.frames(3)
+          if s._page_name != ("home" if page == "late" else page):
+              return "%s: the page is %s" % [page, s._page_name]
+  # Killed, it is started again after a wait; closed from the switcher, it stays closed.
+  - gdscript: |
+      var s: Control = runner._shell
+      var w: int = Wayland.find_window("org.livi.test.grid")
+      OS.kill(Wayland.window_pid(w))
+      for i in 300:
+          if Wayland.find_window("org.livi.test.grid") < 0:
+              break
+          await runner.frames(1)
+      await runner.frames(60)
+      if Wayland.find_window("org.livi.test.grid") >= 0:
+          return "started again with no wait"
+      for i in 600:
+          if Wayland.find_window("org.livi.test.grid") >= 0:
+              break
+          await runner.frames(1)
+      w = Wayland.find_window("org.livi.test.grid")
+      if w < 0:
+          return "not started again after it was killed"
+      s.launcher.close(w)
+      for i in 600:
+          if Wayland.find_window("org.livi.test.grid") < 0:
+              break
+          await runner.frames(1)
+      await runner.frames(300)
+      if Wayland.find_window("org.livi.test.grid") >= 0 or s.launcher.state("org.livi.test.grid") != "":
+          return "started again after the driver closed it: %s" % s.launcher.state("org.livi.test.grid")

@@ -375,7 +375,10 @@ starts without the app page if it is not running and stays running when the phon
 the phone keeps video focus only while it is shown. Its window is configured to the slot
 (`Wayland.set_window_area`, a window's own area over the app area) whenever the split settles, as
 the phone is asked for its area; opened from Apps, the same window moves to the app page at the app
-area, and back to the slot on home. Its keyboard covers the cards. It counts as DriveSafe.
+area, and back to the slot on home. Its keyboard covers the cards. It counts as DriveSafe. It is kept
+running while designated, whatever page shows: started when the shell starts (once the launcher
+lists it), and after an exit again in 2 s, doubling to 60 s (reset after a minute up), unless the
+driver closed it from the switcher.
 Scenario `home-phone-toggle`.
 
 ## While driving

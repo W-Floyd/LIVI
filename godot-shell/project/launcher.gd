@@ -32,6 +32,9 @@ var recent: Array[int] = []
 var launching := {}
 ## App id -> why its last launch failed.
 var failed := {}
+## Apps whose window the driver closed (`close`) since they were last opened: the shell does not
+## start its navigation app again by itself after that.
+var user_closed := {}
 
 var _catalog := AppCatalog.new()
 ## App id -> the PID this launcher started it as; its process group is the same number.
@@ -153,6 +156,7 @@ func slow(id: String) -> bool:
 ## Shows the app's window when it runs; otherwise starts it, unless it is starting already.
 ## `show` false starts it without bringing its window forward when it maps (home's slot shows it).
 func open(id: String, show := true) -> void:
+	user_closed.erase(id)
 	var mine := windows_of(id)
 	if not mine.is_empty():
 		if show:
@@ -203,6 +207,8 @@ func close(window: int) -> void:
 	if not windows.has(window):
 		return
 	Wayland.close(window)
+	if windows[window].app != "":
+		user_closed[windows[window].app] = true
 	var pid: int = _pids.get(windows[window].app, -1)
 	if pid < 0:
 		return

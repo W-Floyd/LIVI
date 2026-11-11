@@ -5,6 +5,7 @@
 # DATA_MIB/CACHE_MIB override the emulator tool's partition sizes (520/278 MiB).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/../../scripts/dotenv.sh"
 WORK=${WORK:?}; EMU=${EMU:?}; SYSTEM_EXT4=${SYSTEM_EXT4:?}
 mkdir -p "$WORK/image"
 docker image inspect gen5w-build >/dev/null 2>&1 || docker build --platform linux/arm64 -t gen5w-build "$HERE"

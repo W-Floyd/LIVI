@@ -1,6 +1,7 @@
 # Sourced by the other scripts. Paths are overridable from the environment.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
+. "$REPO/scripts/dotenv.sh"
 REF="${REF:-$REPO/ref/kia/ev6/2024}"
 OUT="${OUT:-$REF/waydroid}"            # everything derived from Kia assets lives here (gitignored)
 APP="${APP:-HKMC_TAppEV3}"

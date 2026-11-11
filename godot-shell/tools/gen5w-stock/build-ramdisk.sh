@@ -5,6 +5,7 @@
 # usage: WORK=... BOOT_IMG=.../boot.img ./build-ramdisk.sh
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/../../scripts/dotenv.sh"
 WORK=${WORK:?}; BOOT_IMG=${BOOT_IMG:?stock boot.img}
 mkdir -p "$WORK/bootimg"
 python3 -I - "$BOOT_IMG" "$WORK/bootimg" <<'PY'

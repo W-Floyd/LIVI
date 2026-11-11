@@ -79,6 +79,7 @@ func _init() -> void:
 	_toggle.toggle_mode = true
 	_toggle.focus_mode = Control.FOCUS_NONE
 	_toggle.toggled.connect(func(on): set_extras(on))
+	Keyboard.touch_only(_toggle)
 	add_child(_toggle)
 	_hide = Button.new()
 	_hide.name = "Hide"
@@ -87,6 +88,7 @@ func _init() -> void:
 	_hide.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hide.visible = false
 	_hide.pressed.connect(close.bind(false))
+	Keyboard.touch_only(_hide)
 	add_child(_hide)
 	_extras = Control.new()
 	_extras.name = "Extras"
@@ -232,11 +234,8 @@ func _build_extras() -> void:
 		b.set_meta("id", id)
 		b.focus_mode = Control.FOCUS_NONE
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		# Fn rebuilds the row: on release, as Keyboard's layer keys.
-		if id == "fn":
-			b.pressed.connect(_extra.bind(id))
-		else:
-			b.button_down.connect(_extra.bind(id))
+		Keyboard.touch_only(b)
+		b.button_down.connect(_extra.bind(id))
 		_extras.add_child(b)
 	_style_extras()
 	_place_extras()

@@ -40,16 +40,14 @@ steps:
   - tap: { node: Settings/Entry/Root/Keyboard/Keys/a }
   - tap: { node: Settings/Entry/Root/Keyboard/Keys/Space }
   - expect_node: { path: Settings/Entry, text: "Kia " }
-  # ?123 and ABC by finger, as the panel sends one: a touch and the mouse press Godot makes of it.
+  # ?123 and ABC by finger, as the panel sends one: the mouse press Godot makes of it, then the
+  # touch; the layer switches on the press, once.
   - gdscript: |
       var kb: Keyboard = shell.get_node("Settings/Entry/Root/Keyboard")
       for id in ["symbols", "letters"]:
           var at: Vector2 = kb.key(id).get_global_rect().get_center()
           for down in [true, false]:
-              var t := InputEventScreenTouch.new()
-              t.position = at
-              t.pressed = down
-              runner._vp.push_input(t)
+              # Godot sends the emulated mouse first.
               var m := InputEventMouseButton.new()
               m.device = InputEvent.DEVICE_ID_EMULATION
               m.button_index = MOUSE_BUTTON_LEFT
@@ -58,10 +56,14 @@ steps:
               m.global_position = at
               m.pressed = down
               runner._vp.push_input(m)
+              var t := InputEventScreenTouch.new()
+              t.position = at
+              t.pressed = down
+              runner._vp.push_input(t)
+              # On the press, in the same frame.
+              if kb.layer != id:
+                  return "%s: the layer is %s after the %s" % [id, kb.layer, "press" if down else "release"]
               await runner.frames(1)
-          await runner.frames(1)
-          if kb.layer != id:
-              return "after %s by finger the layer is %s" % [id, kb.layer]
   - tap: { node: Settings/Entry/Root/Keyboard/Keys/Symbols }
   - theme: { appearance: night }
   - wait: { frames: 20 }

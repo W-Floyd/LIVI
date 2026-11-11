@@ -76,7 +76,10 @@ var done_ready := true:
 		done_ready = v
 		_style_keys()
 
+## The layer showing, named Keys; the others are built too, hidden, named Keys_<layer>, so a
+## layer key switches at once rather than building forty buttons.
 var _keys: Control
+var _layers := {}
 var _held: Button
 var _repeat := 0.0
 var _shift_at := -1.0
@@ -86,11 +89,13 @@ var _now := 0.0
 func _init() -> void:
 	name = "Keyboard"
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	_keys = Control.new()
-	_keys.name = "Keys"
-	_keys.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_keys)
 	resized.connect(_place)
+
+
+## A finger's press comes as a touch and, first, as the mouse Godot emulates from it: the button
+## takes the touch alone, so a key acts once and on the press.
+static func touch_only(b: BaseButton) -> void:
+	b.gui_input.connect(func(e: InputEvent): if e is InputEventMouse and e.device == InputEvent.DEVICE_ID_EMULATION: b.accept_event())
 
 
 func _ready() -> void:
@@ -117,26 +122,47 @@ func _draw() -> void:
 
 ## The key with this id or character, for tests and for a host that wants to point at one.
 func key(id: String) -> Button:
-	return _keys.get_node_or_null(NodePath(_node_name(id))) as Button
+	return _keys.get_node_or_null(NodePath(_node_name(id))) as Button if _keys else null
 
 
 func _build() -> void:
-	for k in _keys.get_children():
-		_keys.remove_child(k)
-		k.queue_free()
+	for l in _layers.values():
+		remove_child(l)
+		l.queue_free()
+	_layers.clear()
+	_keys = null
 	_held = null
-	for row in _rows():
-		for k in row:
-			var id: String = k[0] if k is Array else k
-			if _keys.has_node(NodePath(_node_name(id))):
+	for l in LAYERS:
+		var c := Control.new()
+		c.name = "Keys_" + l
+		c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		c.visible = false
+		c.set_meta("layer", l)
+		add_child(c)
+		_layers[l] = c
+		for row in _rows(l):
+			for k in row:
+				var id: String = k[0] if k is Array else k
+				var b := _key_button(id)
 				# A second shift: same key, its own node.
-				var twin := _key_button(id)
-				twin.name = _node_name(id) + "2"
-				_keys.add_child(twin)
-			else:
-				_keys.add_child(_key_button(id))
+				if c.has_node(NodePath(b.name)):
+					b.name = b.name + "2"
+				b.set_meta("layer", l)
+				c.add_child(b)
+	_show(layer)
 	_style_keys()
 	_place()
+
+
+## The layer's keys in front, named Keys.
+func _show(l: String) -> void:
+	if _keys:
+		_keys.visible = false
+		_keys.name = "Keys_" + str(_keys.get_meta("layer"))
+	layer = l
+	_keys = _layers[l]
+	_keys.name = "Keys"
+	_keys.visible = true
 
 
 func _key_button(id: String) -> Button:
@@ -147,11 +173,8 @@ func _key_button(id: String) -> Button:
 	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	b.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
 	b.expand_icon = false
+	touch_only(b)
 	b.button_down.connect(_down.bind(b))
-	if id in ["symbols", "letters", "more"]:
-		# On release: a finger's press comes as a touch and as Godot's mouse from it, and on the
-		# second the new layer's key in the same place would switch straight back.
-		b.pressed.connect(func(): layer = id; _build())
 	return b
 
 
@@ -163,10 +186,10 @@ static func _node_name(id: String) -> String:
 	return "U%04X" % id.unicode_at(0)
 
 
-## The layer's rows, with `extras` in the letters' last row.
-func _rows() -> Array:
-	var rows: Array = LAYERS[layer]
-	if layer != "letters" or extras.size() != 3:
+## A layer's rows, with `extras` in the letters' last row.
+func _rows(l: String) -> Array:
+	var rows: Array = LAYERS[l]
+	if l != "letters" or extras.size() != 3:
 		return rows
 	rows = rows.duplicate(true)
 	var last: Array = rows[-1]
@@ -175,7 +198,12 @@ func _rows() -> Array:
 
 
 func _place() -> void:
-	var rows: Array = _rows()
+	for l in _layers:
+		_place_layer(l)
+
+
+func _place_layer(l: String) -> void:
+	var rows: Array = _rows(l)
 	var g: float = ThemeManager.px.gap
 	var pad := g * 1.5
 	var units := 0.0
@@ -183,12 +211,12 @@ func _place() -> void:
 		units = maxf(units, _row_units(row))
 	var u := (size.x - pad * 2.0) / units
 	var kh := minf((size.y - pad * 2.0) / rows.size(), ThemeManager.px.touch * 2.2)
-	if layer == "number":
+	if l == "number":
 		# A keypad's keys need not be as wide as the whole side.
 		u = minf(u, kh * 1.6)
 	var top := (size.y - kh * rows.size()) / 2.0
 	var i := 0
-	var keys := _keys.get_children()
+	var keys: Array = _layers[l].get_children()
 	for r in rows.size():
 		var row: Array = rows[r]
 		var x := (size.x - _row_units(row) * u) / 2.0
@@ -212,54 +240,70 @@ func _row_units(row: Array) -> float:
 func _style_keys() -> void:
 	if _keys == null:
 		return
-	var fs := roundi(ThemeManager.px.title * 1.3)
-	for b in _keys.get_children():
-		var id: String = b.get_meta("id")
-		var special := id.length() > 1
-		b.text = _label(id)
-		b.icon = null
-		var icon := _icon(id)
-		if icon != "":
-			b.icon = Icons.texture(icon, ThemeManager.px.icon * 1.3)
-		b.add_theme_font_override("font", ThemeManager.fonts.strong)
-		b.add_theme_font_size_override("font_size", fs if not special or id == "sign" else ThemeManager.font_size("body"))
-		var fill: Color = ThemeManager.c.surface2
-		var ink: Color = ThemeManager.c.text
-		if id == "done":
-			fill = ThemeManager.c.accent
-			ink = ThemeManager.c.on_accent
-		elif id == "shift" and shift > 0:
-			fill = ThemeManager.c.accent if shift == 2 else ThemeManager.c.surface2.lerp(ThemeManager.c.accent, 0.35)
-			ink = ThemeManager.c.on_accent if shift == 2 else ThemeManager.c.text
-		elif special:
-			fill = ThemeManager.c.bg
-		var normal := _box(fill)
-		var lit := _box(ThemeManager.c.accent)
-		b.set_meta("normal", normal)
-		b.set_meta("lit", lit)
-		for s in ["normal", "hover", "focus", "disabled"]:
-			b.add_theme_stylebox_override(s, normal)
-		for s in ["pressed", "hover_pressed"]:
-			b.add_theme_stylebox_override(s, lit)
-		for k in ["font_color", "font_hover_color", "font_focus_color", "font_disabled_color"]:
-			b.add_theme_color_override(k, ink)
-		for k in ["icon_normal_color", "icon_hover_color", "icon_focus_color", "icon_disabled_color"]:
-			b.add_theme_color_override(k, ink)
-		for k in ["font_pressed_color", "font_hover_pressed_color", "icon_pressed_color", "icon_hover_pressed_color"]:
-			b.add_theme_color_override(k, ThemeManager.c.on_accent)
-		b.disabled = (id == "sign" and not negative) or (id == "." and layer == "number" and not decimals)
-		b.modulate.a = 0.45 if b.disabled or (id == "done" and not done_ready) else 1.0
+	for c in _layers.values():
+		for b in c.get_children():
+			_style_key(b)
 	queue_redraw()
 
 
-func _label(id: String) -> String:
+## After shift: the letters' case and the shift keys, not every key's boxes.
+func _style_shift() -> void:
+	for b in _layers["letters"].get_children():
+		var id: String = b.get_meta("id")
+		if id == "shift":
+			_style_key(b)
+		elif id.length() == 1:
+			b.text = _label(id, "letters")
+
+
+func _style_key(b: Button) -> void:
+	var fs := roundi(ThemeManager.px.title * 1.3)
+	var id: String = b.get_meta("id")
+	var l: String = b.get_meta("layer")
+	var special := id.length() > 1
+	b.text = _label(id, l)
+	b.icon = null
+	var icon := _icon(id)
+	if icon != "":
+		b.icon = Icons.texture(icon, ThemeManager.px.icon * 1.3)
+	b.add_theme_font_override("font", ThemeManager.fonts.strong)
+	b.add_theme_font_size_override("font_size", fs if not special or id == "sign" else ThemeManager.font_size("body"))
+	var fill: Color = ThemeManager.c.surface2
+	var ink: Color = ThemeManager.c.text
+	if id == "done":
+		fill = ThemeManager.c.accent
+		ink = ThemeManager.c.on_accent
+	elif id == "shift" and shift > 0:
+		fill = ThemeManager.c.accent if shift == 2 else ThemeManager.c.surface2.lerp(ThemeManager.c.accent, 0.35)
+		ink = ThemeManager.c.on_accent if shift == 2 else ThemeManager.c.text
+	elif special:
+		fill = ThemeManager.c.bg
+	var normal := _box(fill)
+	var lit := _box(ThemeManager.c.accent)
+	b.set_meta("normal", normal)
+	b.set_meta("lit", lit)
+	for s in ["normal", "hover", "focus", "disabled"]:
+		b.add_theme_stylebox_override(s, normal)
+	for s in ["pressed", "hover_pressed"]:
+		b.add_theme_stylebox_override(s, lit)
+	for k in ["font_color", "font_hover_color", "font_focus_color", "font_disabled_color"]:
+		b.add_theme_color_override(k, ink)
+	for k in ["icon_normal_color", "icon_hover_color", "icon_focus_color", "icon_disabled_color"]:
+		b.add_theme_color_override(k, ink)
+	for k in ["font_pressed_color", "font_hover_pressed_color", "icon_pressed_color", "icon_hover_pressed_color"]:
+		b.add_theme_color_override(k, ThemeManager.c.on_accent)
+	b.disabled = (id == "sign" and not negative) or (id == "." and l == "number" and not decimals)
+	b.modulate.a = 0.45 if b.disabled or (id == "done" and not done_ready) else 1.0
+
+
+func _label(id: String, l: String) -> String:
 	if id == "done":
 		return done_label
 	if LABELS.has(id):
 		return LABELS[id]
 	if _icon(id) != "":
 		return ""
-	return id.to_upper() if shift > 0 and layer == "letters" else id
+	return id.to_upper() if shift > 0 and l == "letters" else id
 
 
 func _icon(id: String) -> String:
@@ -305,16 +349,16 @@ func _down(b: Button) -> void:
 			else:
 				shift = 1 - shift
 			_shift_at = _now
-			_style_keys()
+			_style_shift()
 		"symbols", "letters", "more":
-			pass
+			_show(id)
 		"sign":
 			typed.emit("-")
 		_:
 			typed.emit(id.to_upper() if shift > 0 and layer == "letters" else id)
 			if shift == 1:
 				shift = 0
-				_style_keys()
+				_style_shift()
 
 
 func _unlight(id: int) -> void:

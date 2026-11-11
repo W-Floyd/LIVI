@@ -1,7 +1,7 @@
 //! The Wayland server the shell embeds, with no Godot types: Godot's main thread calls
 //! `dispatch` once a frame, takes each window's newest frame, and calls `frame_done` after.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
@@ -139,6 +139,8 @@ pub struct Window {
     /// Buffer pixels per surface unit, as the toplevel's last real buffer came: the window's
     /// frames are in buffer pixels and input is in surface units, whatever the client honoured.
     pub buffer_scale: f64,
+    /// The app asked to be fullscreen (and not since to leave it); else maximized and tiled.
+    pub fullscreen: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,6 +174,8 @@ pub struct State {
     /// Scales by the PID the shell started a client as; a client matches by its own PID or its
     /// process group, so what an app forks is scaled with it.
     pub launch_scales: HashMap<i32, f64>,
+    /// PIDs (or process groups) whose windows start fullscreen rather than maximized.
+    pub launch_fullscreen: HashSet<i32>,
     /// Where hosted apps show, in panel pixels (`set_app_area`): the panel less what the shell
     /// keeps beside it. Projection video keeps the whole panel.
     pub app_area: (i32, i32),
@@ -287,6 +291,7 @@ impl Server {
             _fractional: FractionalScaleManagerState::new::<State>(&dh),
             dh: dh.clone(),
             launch_scales: HashMap::new(),
+            launch_fullscreen: HashSet::new(),
             app_area: PANEL_PX,
             pointer,
             keyboard,
@@ -800,6 +805,27 @@ impl State {
         })
     }
 
+    /// Whether the client's windows start fullscreen: its PID or process group in `launch_fullscreen`.
+    fn client_fullscreen(&self, client: &Client) -> bool {
+        let Ok(pid) = client.get_credentials(&self.dh).map(|c| c.pid) else { return false };
+        // SAFETY: a plain syscall on a number.
+        let group = unsafe { libc::getpgid(pid) };
+        self.launch_fullscreen.contains(&pid) || self.launch_fullscreen.contains(&group)
+    }
+
+    /// Every window of the window's client fullscreen or maximized from now on, configured at
+    /// once; the app may still ask otherwise.
+    pub fn set_window_fullscreen(&mut self, id: u64, on: bool) {
+        let Some(client) = self.windows.iter().find(|w| w.id == id).and_then(|w| w.toplevel.wl_surface().client()) else {
+            return;
+        };
+        let toplevels: Vec<ToplevelSurface> =
+            self.windows.iter().filter(|w| w.toplevel.wl_surface().client().as_ref() == Some(&client)).map(|w| w.toplevel.clone()).collect();
+        for t in toplevels {
+            self.answer_state_request(&t, Some(on));
+        }
+    }
+
     /// Scales the window's client, every window of it, at once: wp_fractional_scale and
     /// preferred_buffer_scale may change at any time, and a new configure gives the new size.
     pub fn set_window_scale(&mut self, id: u64, s: f64) {
@@ -851,12 +877,17 @@ impl State {
 
     /// A state request is answered with a configure (the protocol wants one), as the window is;
     /// before the initial configure, the first commit sends that.
-    fn answer_state_request(&mut self, toplevel: &ToplevelSurface) {
-        let Some(w) = self.windows.iter().find(|w| &w.toplevel == toplevel) else { return };
+    /// `fullscreen` is the app's ask to go fullscreen or back, kept for every later configure.
+    fn answer_state_request(&mut self, toplevel: &ToplevelSurface, fullscreen: Option<bool>) {
+        let Some(w) = self.windows.iter_mut().find(|w| &w.toplevel == toplevel) else { return };
+        if let Some(on) = fullscreen {
+            w.fullscreen = on;
+            set_window_states(toplevel, on);
+        }
         if !toplevel.is_initial_configure_sent() {
             return;
         }
-        let size = self.window_size(w);
+        let size = self.window_size(self.windows.iter().find(|w| &w.toplevel == toplevel).unwrap());
         toplevel.with_pending_state(|st| st.size = Some(size.into()));
         toplevel.send_configure();
     }
@@ -1252,16 +1283,18 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, toplevel: ToplevelSurface) {
-        // The panel is the only place a window can be: fullscreen on it.
+        // The app area is the only place a window can be: maximized in it, or fullscreen.
         use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgState;
-        let scale = toplevel.wl_surface().client().map_or(1.0, |c| self.client_scale(&c));
+        let client = toplevel.wl_surface().client();
+        let scale = client.as_ref().map_or(1.0, |c| self.client_scale(c));
+        let fullscreen = client.as_ref().is_some_and(|c| self.client_fullscreen(c));
         // wl_output's integer scale reaches only surfaces on the output.
         self.output.enter(toplevel.wl_surface());
         // The size goes with the initial configure, on the first commit, once the app_id is known.
         toplevel.with_pending_state(|s| {
-            s.states.set(XdgState::Fullscreen);
             s.states.set(XdgState::Activated);
         });
+        set_window_states(&toplevel, fullscreen);
         let id = self.next_id;
         self.next_id += 1;
         self.windows.push(Window {
@@ -1278,6 +1311,7 @@ impl XdgShellHandler for State {
             canvas: None,
             canvas_size: (0, 0),
             native: false,
+            fullscreen,
             scale,
             buffer_scale: 1.0,
         });
@@ -1312,23 +1346,23 @@ impl XdgShellHandler for State {
         let _ = popup.send_configure();
     }
 
-    // Fullscreen at the app area whatever is asked. smithay's defaults configure at once, which
-    // before the first commit is the initial configure, sizeless: Firefox maximizes then, and
-    // drew at its own default size.
+    // The app area whatever is asked, maximized unless the app goes fullscreen. smithay's
+    // defaults configure at once, which before the first commit is the initial configure,
+    // sizeless: Firefox maximizes then, and drew at its own default size.
     fn maximize_request(&mut self, toplevel: ToplevelSurface) {
-        self.answer_state_request(&toplevel);
+        self.answer_state_request(&toplevel, None);
     }
 
     fn unmaximize_request(&mut self, toplevel: ToplevelSurface) {
-        self.answer_state_request(&toplevel);
+        self.answer_state_request(&toplevel, None);
     }
 
     fn fullscreen_request(&mut self, toplevel: ToplevelSurface, _: Option<WlOutput>) {
-        self.answer_state_request(&toplevel);
+        self.answer_state_request(&toplevel, Some(true));
     }
 
     fn unfullscreen_request(&mut self, toplevel: ToplevelSurface) {
-        self.answer_state_request(&toplevel);
+        self.answer_state_request(&toplevel, Some(false));
     }
 
     fn grab(&mut self, popup: PopupSurface, _: WlSeat, _: Serial) {
@@ -1405,6 +1439,28 @@ impl DataDeviceHandler for State {
     }
 }
 delegate_data_device!(State);
+
+/// The states a window is configured with from now on. Maximized and tiled on every edge, a
+/// toolkit keeps its title bar and draws no shadow or rounded corners; fullscreen, apps hide
+/// their bars (Console overlays its header on the terminal), so only when the app asks.
+fn set_window_states(toplevel: &ToplevelSurface, fullscreen: bool) {
+    use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgState;
+    toplevel.with_pending_state(|s| {
+        let tiled = [XdgState::Maximized, XdgState::TiledLeft, XdgState::TiledRight, XdgState::TiledTop, XdgState::TiledBottom];
+        for st in tiled {
+            if fullscreen {
+                s.states.unset(st);
+            } else {
+                s.states.set(st);
+            }
+        }
+        if fullscreen {
+            s.states.set(XdgState::Fullscreen);
+        } else {
+            s.states.unset(XdgState::Fullscreen);
+        }
+    });
+}
 
 /// wl_output's scale is per bound resource, so each client gets its own.
 fn send_output_scale(o: &WlOutput, s: f64) {
@@ -1484,6 +1540,7 @@ mod tests {
             text_input: None,
             maximize: false,
             popup: false,
+            fullscreen: Vec::new(),
         }
     }
 
@@ -1624,32 +1681,63 @@ mod tests {
 
     /// A window is configured at the app area over its scale, projection video at the panel's;
     /// a new area reconfigures open windows. The client draws at what it is configured to, also
-    /// when it asks to be maximized before its first commit.
+    /// when it asks to be maximized before its first commit. Windows are maximized and tiled
+    /// unless launched fullscreen or the app asks; its last ask, or the shell's live change,
+    /// holds through later configures.
     #[test]
     fn windows_are_configured_to_the_app_area() {
+        use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::State as XdgState;
         let beside = (1823, 657);
-        for (app_id, s, area, want, then, maximize) in [
-            ("org.test.app", 1.0, PANEL_PX, (1920, 720), (1823, 657), false),
-            ("org.test.app", 1.75, beside, (1042, 375), (1097, 411), false),
-            ("livi-video-main", 1.0, beside, (1920, 720), (1920, 720), false),
-            ("org.test.app", 1.0, beside, (1823, 657), (1920, 720), true),
-            ("org.test.app", 1.75, beside, (1042, 375), (1097, 411), true),
+        let none: &[bool] = &[];
+        for (app_id, s, area, want, then, maximize, launch_fullscreen, asks, fullscreen) in [
+            ("org.test.app", 1.0, PANEL_PX, (1920, 720), (1823, 657), false, false, none, false),
+            ("org.test.app", 1.75, beside, (1042, 375), (1097, 411), false, false, none, false),
+            ("livi-video-main", 1.0, beside, (1920, 720), (1920, 720), false, false, none, false),
+            ("org.test.app", 1.0, beside, (1823, 657), (1920, 720), true, false, none, false),
+            ("org.test.app", 1.75, beside, (1042, 375), (1097, 411), true, false, none, false),
+            ("org.test.app", 1.0, beside, (1823, 657), (1920, 720), false, false, &[true], true),
+            ("org.test.app", 1.0, beside, (1823, 657), (1920, 720), false, false, &[true, false], false),
+            ("org.test.app", 1.0, beside, (1823, 657), (1920, 720), false, false, &[true, false, true], true),
+            ("org.test.app", 1.0, beside, (1823, 657), (1920, 720), false, true, none, true),
+            ("org.test.app", 1.0, beside, (1823, 657), (1920, 720), false, true, &[false], false),
         ] {
             let mut server = scaled(s);
+            if launch_fullscreen {
+                server.state.launch_fullscreen.insert(std::process::id() as i32);
+            }
             server.state.set_app_area(area.0, area.1);
             let mut o = opts(Pattern::Grid, None, false);
             o.app_id = app_id.into();
             o.maximize = maximize;
+            o.fullscreen = asks.to_vec();
             (o.width, o.height) = (0, 0);
             let _client = client(&mut server, o);
-            let case = format!("{app_id} {s} {area:?} maximize={maximize}");
+            let case = format!("{app_id} {s} {area:?} maximize={maximize} launched fullscreen={launch_fullscreen} asks {asks:?}");
             assert!(pump(&mut server, |st| st.events.contains(&WindowEvent::Mapped(1))), "{case}");
+            // The asks, sent after the first frame.
+            for _ in 0..20 {
+                server.dispatch().unwrap();
+                thread::sleep(Duration::from_millis(2));
+            }
             let f = pixels(server.state.windows[0].frame.as_ref().unwrap());
             assert_eq!((f.width as i32, f.height as i32), want, "{case}");
+            let states = |server: &Server| {
+                server.state.windows[0].toplevel.with_pending_state(|st| {
+                    [XdgState::Fullscreen, XdgState::Maximized, XdgState::TiledLeft, XdgState::TiledRight, XdgState::TiledTop, XdgState::TiledBottom]
+                        .map(|x| st.states.contains(x))
+                })
+            };
+            let want_states = |fs: bool| [fs, !fs, !fs, !fs, !fs, !fs];
+            assert_eq!(states(&server), want_states(fullscreen), "{case}");
             let next = if area == PANEL_PX { beside } else { PANEL_PX };
             server.state.set_app_area(next.0, next.1);
             let size = server.state.windows[0].toplevel.with_pending_state(|st| st.size);
             assert_eq!(size, Some(then.into()), "{case} then {next:?}");
+            assert_eq!(states(&server), want_states(fullscreen), "{case} then {next:?}");
+            // The shell's choice, live: the same size, the other state.
+            server.state.set_window_fullscreen(1, !fullscreen);
+            assert_eq!(server.state.windows[0].toplevel.with_pending_state(|st| st.size), Some(then.into()), "{case} switched");
+            assert_eq!(states(&server), want_states(!fullscreen), "{case} switched");
         }
     }
 

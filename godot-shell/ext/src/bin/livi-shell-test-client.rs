@@ -22,6 +22,7 @@ fn main() {
         text_input: None,
         maximize: false,
         popup: false,
+        fullscreen: Vec::new(),
     };
     let mut args = std::env::args().skip(1);
     let usage = || -> ! {

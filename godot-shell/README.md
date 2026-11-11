@@ -293,8 +293,11 @@ compiles shaders and reads everything cold), is marked on its tile; after 10 s i
 starting. The log says `launched <id> in <ms>` when the window maps. XWayland is not served, so
 X11-only apps don't show.
 
-Windows are fullscreen at the app area over the app's scale, whatever they ask: a maximize or
-fullscreen request is answered with that size (Firefox maximizes before its first commit). Menus
+Windows fill the app area over the app's scale, whatever they ask, maximized and tiled on every
+edge (title bars, no shadows or rounded corners), or fullscreen when the app asks (a Leave
+Fullscreen goes back) or its menu's Window choice says so (`app_window_modes` in the look,
+applied at launch and live). Requests are answered with that size (Firefox maximizes before its
+first commit). Menus
 and popovers (xdg popups) are drawn into their window where the positioner puts them, slid or
 flipped as it allows to stay inside it, and take input; a tap outside a grabbing popup closes it
 and goes no further, as does leaving the app page (scenario `app-popup`). Keyboard focus stays

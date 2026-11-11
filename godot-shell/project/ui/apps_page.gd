@@ -178,8 +178,8 @@ func _update_running() -> void:
 
 
 ## The app's menu over the page: its size on the panel, `Default` (apps.yaml's, else the shell's)
-## or one of `Launcher.SCALES`, each a button `Menu/Panel/Box/Sizes/s<percent>` (`s0` the default).
-## A tap beside it closes it.
+## or one of `Launcher.SCALES`, each a button `Menu/Panel/Box/Sizes/s<percent>` (`s0` the default),
+## and its window, `Menu/Panel/Box/Modes/maximized` or `fullscreen`. A tap beside it closes it.
 func open_menu(id: String) -> void:
 	close_menu()
 	var a := launcher.app(id)
@@ -204,28 +204,16 @@ func open_menu(id: String) -> void:
 	var own := int(a.get("scale", 0))
 	var chosen := int(ThemeManager.app_scales.get(id, 0))
 	for p in [0] + Launcher.SCALES:
-		var b := Button.new()
-		b.name = "s%d" % p
-		b.text = "Default (%d %%)" % (own if own > 0 else Launcher.default_scale()) if p == 0 else "%d %%" % p
-		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(ThemeManager.px.touch * 1.6, ThemeManager.px.touch)
-		b.add_theme_font_size_override("font_size", ThemeManager.font_size("body"))
-		b.add_theme_color_override("font_color", ThemeManager.c.text)
-		b.add_theme_color_override("font_hover_color", ThemeManager.c.text)
-		b.add_theme_color_override("font_pressed_color", ThemeManager.c.text)
-		var fill: Color = ThemeManager.c.accent.lerp(ThemeManager.c.surface2, 0.6) if p == chosen else ThemeManager.c.surface
-		for state in ["normal", "hover", "pressed", "focus"]:
-			var sb := _flat(fill)
-			sb.set_content_margin_all(g * 1.5)
-			sb.set_border_width_all(2)
-			sb.border_color = ThemeManager.c.accent if p == chosen else ThemeManager.c.line
-			b.add_theme_stylebox_override(state, sb)
 		var pct: int = p
-		b.pressed.connect(func():
-			launcher.set_app_scale(id, pct)
-			close_menu.call_deferred())
-		sizes.add_child(b)
-	var col := UI.vbox([UI.label(a.name, "display", "title"), UI.label("Size on the panel", "body", "caption", "dim"), sizes], 1.5)
+		var text: String = "Default (%d %%)" % (own if own > 0 else Launcher.default_scale()) if p == 0 else "%d %%" % p
+		sizes.add_child(_choice("s%d" % p, text, p == chosen, func(): launcher.set_app_scale(id, pct)))
+	var modes := UI.hbox([], 1.0)
+	modes.name = "Modes"
+	for m in ["maximized", "fullscreen"]:
+		var mode: String = m
+		modes.add_child(_choice(m, m.capitalize(), launcher.window_mode_of(id) == m, func(): launcher.set_app_window_mode(id, mode)))
+	var col := UI.vbox([UI.label(a.name, "display", "title"), UI.label("Size on the panel", "body", "caption", "dim"), sizes,
+		UI.label("Window", "body", "caption", "dim"), modes], 1.5)
 	col.name = "Box"
 	panel.add_child(col)
 	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -234,6 +222,31 @@ func open_menu(id: String) -> void:
 	_menu.add_child(panel)
 	add_child(_menu)
 	UI.restyle(_menu)
+
+
+## One of the menu's choices; picking it applies `pick` and closes the menu.
+func _choice(node_name: String, text: String, chosen: bool, pick: Callable) -> Button:
+	var g: float = ThemeManager.px.gap
+	var b := Button.new()
+	b.name = node_name
+	b.text = text
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(ThemeManager.px.touch * 1.6, ThemeManager.px.touch)
+	b.add_theme_font_size_override("font_size", ThemeManager.font_size("body"))
+	b.add_theme_color_override("font_color", ThemeManager.c.text)
+	b.add_theme_color_override("font_hover_color", ThemeManager.c.text)
+	b.add_theme_color_override("font_pressed_color", ThemeManager.c.text)
+	var fill: Color = ThemeManager.c.accent.lerp(ThemeManager.c.surface2, 0.6) if chosen else ThemeManager.c.surface
+	for state in ["normal", "hover", "pressed", "focus"]:
+		var sb := _flat(fill)
+		sb.set_content_margin_all(g * 1.5)
+		sb.set_border_width_all(2)
+		sb.border_color = ThemeManager.c.accent if chosen else ThemeManager.c.line
+		b.add_theme_stylebox_override(state, sb)
+	b.pressed.connect(func():
+		pick.call()
+		close_menu.call_deferred())
+	return b
 
 
 func close_menu() -> void:

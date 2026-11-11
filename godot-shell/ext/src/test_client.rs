@@ -171,6 +171,8 @@ pub struct Opts {
     /// tap and slid to fit. Events: `popup configure X Y W H`, `popup done`, and input on it as
     /// `popup touch down 0 X Y` (surface-local, so shadow included).
     pub popup: bool,
+    /// After the first frame, asks to go fullscreen (true) or leave it (false), in order.
+    pub fullscreen: Vec<bool>,
 }
 
 const POPUP_SIZE: (i32, i32) = (160, 96);
@@ -553,6 +555,15 @@ pub fn run(conn: Connection, opts: &Opts) -> io::Result<Report> {
             app.frame_due = false;
         }
         target.commit();
+        if drawn == 0 {
+            for &on in &opts.fullscreen {
+                if on {
+                    toplevel.set_fullscreen(None);
+                } else {
+                    toplevel.unset_fullscreen();
+                }
+            }
+        }
         drawn += 1;
         if opts.animate.is_some_and(|n| drawn >= n) {
             break;

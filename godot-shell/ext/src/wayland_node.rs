@@ -461,6 +461,34 @@ impl WaylandCompositor {
         }
     }
 
+    /// Clients whose PID or process group is `pid` start their windows fullscreen rather than
+    /// maximized; false forgets the PID.
+    #[func]
+    fn set_process_fullscreen(&mut self, pid: i64, on: bool) {
+        if let Some(s) = self.server.as_mut() {
+            if on {
+                s.state.launch_fullscreen.insert(pid as i32);
+            } else {
+                s.state.launch_fullscreen.remove(&(pid as i32));
+            }
+        }
+    }
+
+    /// Makes the window's client fullscreen or maximized now, all its windows; the app may still
+    /// ask otherwise.
+    #[func]
+    fn set_window_fullscreen(&mut self, id: i64, on: bool) {
+        if let Some(s) = self.server.as_mut() {
+            s.state.set_window_fullscreen(id as u64, on);
+        }
+    }
+
+    /// Whether the window is fullscreen (else maximized).
+    #[func]
+    fn window_fullscreen(&self, id: i64) -> bool {
+        self.server.as_ref().and_then(|s| s.state.windows.iter().find(|w| w.id == id as u64)).is_some_and(|w| w.fullscreen)
+    }
+
     /// Closes the window's popups (menus, popovers), or every window's for -1.
     #[func]
     fn dismiss_popups(&mut self, id: i64) {

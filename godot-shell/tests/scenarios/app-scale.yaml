@@ -89,3 +89,17 @@ steps:
           return "the menu stayed"
       if ThemeManager.app_scales != {"org.livi.test.extra": 200}:
           return "saved %s" % ThemeManager.app_scales
+  # The window's mode, from the same menu: fullscreen at once, kept with the look, and back.
+  - page: apps
+  - gdscript: shell.get_node("Apps").open_menu("org.livi.test.extra")
+  - expect_node: { path: Apps/Menu/Panel/Box/Modes/maximized, text: Maximized }
+  - tap: { node: Apps/Menu/Panel/Box/Modes/fullscreen }
+  - gdscript: |
+      var w = Wayland.find_window("org.livi.test.extra")
+      if not Wayland.window_fullscreen(w) or ThemeManager.app_window_modes != {"org.livi.test.extra": "fullscreen"}:
+          return "fullscreen %s, saved %s" % [Wayland.window_fullscreen(w), ThemeManager.app_window_modes]
+      if Wayland.texture(w).get_size() != Vector2(1280, 720):
+          return "extra is %s" % Wayland.texture(w).get_size()
+      shell.launcher.set_app_window_mode("org.livi.test.extra", "maximized")
+      if Wayland.window_fullscreen(w) or ThemeManager.app_window_modes != {}:
+          return "still fullscreen %s, saved %s" % [Wayland.window_fullscreen(w), ThemeManager.app_window_modes]

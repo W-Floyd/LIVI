@@ -36,6 +36,8 @@ var failed := {}
 var _catalog := AppCatalog.new()
 ## App id -> the PID this launcher started it as; its process group is the same number.
 var _pids := {}
+## App id -> the window mode its windows were last given (`window_mode_of`).
+var _modes := {}
 var _poll_at := 0
 ## Whether the shell keeps a settings portal; while it is not served, apps get the look in their
 ## environment at launch instead, and do not follow it live.
@@ -177,6 +179,8 @@ func open(id: String) -> void:
 		_log("launcher: %s started as %d at %d %%: %s" % [id, pid, scale_of(id), " ".join(a.argv)])
 		# Before the compositor next dispatches, which is when the client can connect.
 		Wayland.set_process_scale(pid, scale_of(id) / 100.0)
+		Wayland.set_process_fullscreen(pid, window_mode_of(id) == "fullscreen")
+		_modes[id] = window_mode_of(id)
 		_pids[id] = pid
 		launching[id] = {pid = pid, started = Time.get_ticks_msec(), timeout_s = int(a.timeout_s), exit = -1, slow = false}
 	changed.emit()
@@ -211,6 +215,7 @@ func stop_all() -> void:
 	for id in _pids:
 		_catalog.stop(_pids[id], false)
 		Wayland.set_process_scale(_pids[id], 0)
+		Wayland.set_process_fullscreen(_pids[id], false)
 	_pids.clear()
 	launching.clear()
 
@@ -240,6 +245,7 @@ func _process(_delta: float) -> void:
 				_log("launcher: %s's process %d exited 0 before its window: waiting for one from another" % [id, _pids[id]])
 		if code > 0:
 			Wayland.set_process_scale(_pids[id], 0)
+			Wayland.set_process_fullscreen(_pids[id], false)
 			_pids.erase(id)
 	for id in launching.keys():
 		var l: Dictionary = launching[id]
@@ -320,7 +326,25 @@ func set_app_scale(id: String, percent: int) -> void:
 	ThemeManager.save_look()
 
 
-## Windows of launched apps whose scale has changed get the new one.
+## How the app's windows start: `maximized` (the default) or `fullscreen`, its own in Settings.
+## The app may still go fullscreen or leave it itself.
+func window_mode_of(id: String) -> String:
+	return "fullscreen" if ThemeManager.app_window_modes.get(id, "") == "fullscreen" else "maximized"
+
+
+## Saved with the look; open windows follow at once.
+func set_app_window_mode(id: String, mode: String) -> void:
+	var modes: Dictionary = ThemeManager.app_window_modes.duplicate()
+	if mode == "fullscreen":
+		modes[id] = mode
+	else:
+		modes.erase(id)
+	ThemeManager.set_look({app_window_modes = modes})
+	ThemeManager.save_look()
+
+
+## Windows of launched apps whose scale or window mode has changed get the new one. A mode is
+## sent only when the setting changes, so an app's own fullscreen choice stands until then.
 func _rescale() -> void:
 	for w in windows:
 		var id: String = windows[w].app
@@ -329,6 +353,11 @@ func _rescale() -> void:
 		var s := scale_of(id) / 100.0
 		if not is_equal_approx(Wayland.window_scale(w), s):
 			Wayland.set_window_scale(w, s)
+		var mode := window_mode_of(id)
+		if _modes.get(id, "maximized") != mode:
+			Wayland.set_window_fullscreen(w, mode == "fullscreen")
+	for id in _pids:
+		_modes[id] = window_mode_of(id)
 
 
 ## Launched apps follow the shell's look through the portal.

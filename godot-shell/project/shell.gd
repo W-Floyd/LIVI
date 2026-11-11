@@ -60,10 +60,16 @@ var launcher: Launcher
 ## What plays, for home's player and the media page.
 var now_playing: NowPlaying
 ## Home's split, 0 to 1: the phone's picture beside the cards, or (no picture) the cards over the
-## whole width. Tweened between; `_split_to` is where it is going.
+## whole width. `_split_to` is where it is going: 0 the phone at its width, 1 none.
 var _split := 1.0
 var _split_to := 1.0
+## The cards' width, and where it is going (`_slide`); the slot takes the rest.
+var _side_w := 0.0
+var _side_to := -1.0
 var _split_tween: Tween
+## The handle is being dragged, from the cards at `_drag_w0`.
+var _dragging := false
+var _drag_w0 := 0.0
 var _phone_present := false
 const SPLIT_S := 0.35
 ## The keyboard for a hosted app's field (AppKeyboard), over the driver's side of the app page
@@ -124,7 +130,8 @@ func _init() -> void:
 	var handle := PhoneHandle.new()
 	handle.name = "PhoneHandle"
 	handle.visible = false
-	handle.chose.connect(func(show): if show != ThemeManager.home_phone: ThemeManager.set_look({home_phone = show}))
+	handle.dragged.connect(_on_handle_drag)
+	handle.released.connect(_on_handle_release)
 	body.sort_children.connect(_place_handle)
 	page.add_child(handle)
 	add_child(page)
@@ -210,9 +217,7 @@ func _style() -> void:
 	cards.column = ThemeManager.px.side - roundi(g * 1.5) * 2
 	cards.column_left = ThemeManager.side_left()
 	_body.move_child(_side, 0 if ThemeManager.side_left() else 1)
-	_handle.cards_left = ThemeManager.side_left()
-	_handle.tooltip_text = "Hide the phone" if ThemeManager.home_phone else "Show the phone"
-	_set_split(_split)
+	_resplit()
 	_place_handle.call_deferred()
 	# The page passes input through where the projection shows.
 	$Page.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -391,10 +396,12 @@ func open_page(page: String) -> String:
 	$Page.visible = home or page == "apps" or page == "media" or (live and not own_bar)
 	_body.visible = home
 	# Off home, the split is where it will be when home shows again.
-	if not home and _split_tween:
-		_split_tween.kill()
+	if not home and (_split_tween or _dragging):
+		if _split_tween:
+			_split_tween.kill()
 		_split_tween = null
-		_set_split(_split_to)
+		_dragging = false
+		_resplit()
 	_projection.visible = _app_page or (home and _split < 1.0)
 	# Every page change: leaving the full-panel pages puts the picture back in home's slot. The
 	# slot's size is stale until the body, hidden till now, lays out: the phone is asked after.
@@ -586,7 +593,7 @@ func _place_projection(ask := true) -> void:
 	_projection.position = r.position
 	_projection.size = r.size
 	# The picture follows the slot every frame; the phone is asked for where it settles.
-	if ask and _split_tween == null:
+	if ask and _split_tween == null and not _dragging:
 		_ask_area()
 
 
@@ -599,7 +606,7 @@ func _place_next_frame() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED and _side:
 		_layout_status()
-		_set_split(_split)
+		_resplit()
 		_place_keyboard()
 	elif what == NOTIFICATION_PREDELETE and _ev_live and not _ev_live.is_inside_tree():
 		_ev_live.free()
@@ -612,34 +619,125 @@ func _update_split() -> void:
 	if present != _phone_present:
 		_phone_present = present
 		_handle.visible = present
-		_set_split(_split)
+		_resplit()
 		_place_handle.call_deferred()
 		phone_changed.emit(present)
 	# The driver can keep home to the cards while a phone is connected (Look → Phone on home).
 	var want := 0.0 if present and ThemeManager.home_phone else 1.0
-	if want == _split_to:
+	_slide(want, _side_target(want))
+
+
+## The phone's widths home snaps to: about a third, a half and two thirds of the body, none
+## narrower than the cards' column nor leaving the cards less than it. Android Auto takes any
+## area (a phone that refuses one is letterboxed), so the cards set the limits.
+func _snaps() -> Array[float]:
+	var full := _rect_beside_status().size.x
+	var lo: float = ThemeManager.px.side
+	var hi := maxf(lo, full - lo)
+	var out: Array[float] = []
+	for f in [1.0 / 3.0, 0.5, 2.0 / 3.0]:
+		var w := roundf(clampf(full * f, lo, hi))
+		if out.is_empty() or w - out.back() >= ThemeManager.px.touch:
+			out.append(w)
+	return out
+
+
+## The phone's width while shown: the snap nearest the look's share, the widest by default.
+func _phone_width() -> float:
+	var snaps := _snaps()
+	var want: float = ThemeManager.home_split * _rect_beside_status().size.x
+	if ThemeManager.home_split <= 0.0:
+		return snaps.back()
+	var best: float = snaps[0]
+	for s in snaps:
+		if absf(s - want) < absf(best - want):
+			best = s
+	return best
+
+
+func _side_target(want: float) -> float:
+	var full := _rect_beside_status().size.x
+	return full if want == 1.0 else full - _phone_width()
+
+
+## The split where the look puts it, unless it is moving.
+func _resplit() -> void:
+	if _split_tween == null and not _dragging:
+		_side_to = _side_target(_split_to)
+		_set_side(_side_to)
+
+
+## To the cards' width `to` (`want` 1: no phone), animated on home, at once elsewhere or under
+## reduced motion.
+func _slide(want: float, to: float) -> void:
+	if want == _split_to and is_equal_approx(to, _side_to):
 		return
 	_split_to = want
+	_side_to = to
 	_stat.hero = want == 1.0
 	_fit.call_deferred()
 	if _split_tween:
 		_split_tween.kill()
 		_split_tween = null
 	if ThemeManager.reduced_motion or _page_name != "home" or not is_visible_in_tree():
-		_set_split(want)
+		_set_side(to)
 		_split_settled()
 		return
 	_projection.visible = true
 	_split_tween = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	_split_tween.tween_method(_set_split, _split, want, SPLIT_S)
+	_split_tween.tween_method(_set_side, _side_w, to, SPLIT_S)
 	_split_tween.finished.connect(_split_settled)
 
 
-func _set_split(v: float) -> void:
-	_split = v
-	_side.custom_minimum_size.x = lerpf(ThemeManager.px.side, _rect_beside_status().size.x, v)
-	(_side.get_node("Panel") as HomeCards).wide = v
+## The cards `w` wide and the slot the rest. Past the narrowest phone they blend into the
+## dashboard (`_split` 1); before it they are one column filling the side.
+func _set_side(w: float) -> void:
+	var full := _rect_beside_status().size.x
+	var least := full - _snaps()[0]
+	_side_w = w
+	_side.custom_minimum_size.x = w
+	_split = clampf(inverse_lerp(least, full, w), 0.0, 1.0) if full > least else 1.0
+	var cards: HomeCards = _side.get_node("Panel")
+	cards.wide = _split
+	var m: float = _side.get_theme_constant("margin_left") * 2.0
+	cards.column = maxf(0.0, lerpf(minf(w, least), ThemeManager.px.side, _split) - m)
 	_place_handle()
+
+
+## The handle dragged `dx` since the press: the divider follows the finger, the picture stretched
+## to the slot meanwhile, the phone not asked until the release.
+func _on_handle_drag(dx: float) -> void:
+	if not _dragging:
+		_dragging = true
+		_drag_w0 = _side_w
+		if _split_tween:
+			_split_tween.kill()
+			_split_tween = null
+		if _page_name == "home":
+			_projection.visible = true
+	var full := _rect_beside_status().size.x
+	var w := _drag_w0 + (dx if ThemeManager.side_left() else -dx)
+	_set_side(clampf(w, full - _snaps().back(), full))
+
+
+## Released: to the nearest snap, or none (the slot's edge), kept in the look.
+func _on_handle_release() -> void:
+	if not _dragging:
+		return
+	_dragging = false
+	var full := _rect_beside_status().size.x
+	var phone := full - _side_w
+	var best := 0.0
+	for s in _snaps():
+		if absf(s - phone) < absf(best - phone):
+			best = s
+	_side_to = -1.0
+	_slide(1.0 if best == 0.0 else 0.0, full - best)
+	var look := {home_phone = best > 0.0}
+	if best > 0.0:
+		look.home_split = best / full
+	ThemeManager.set_look(look)
+	ThemeManager.save_look()
 
 
 func _split_settled() -> void:

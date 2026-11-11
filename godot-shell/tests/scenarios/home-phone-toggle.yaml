@@ -1,8 +1,10 @@
 name: home-phone-toggle
-# With a phone connected, a split handle in the gutter between home's slot and the cards (a slim
-# pill, no column of its own) hides the phone's picture (Look → Phone on home) on a tap or a swipe
-# toward the cards, and shows it again on a tap or a swipe toward the slot's side from a tab at
-# the content's edge. Its target is a full touch size laid over both. No phone, no handle.
+# With a phone connected, a split divider in the gutter between home's slot and the cards (a slim
+# pill, no column of its own) drags the split: toward the slot's edge shrinks the phone, to the
+# edge hides it (Look → Phone on home) and leaves a tab there to drag it out again. A release
+# snaps to the nearest of the phone's widths or none, kept in the look, and asks the phone once
+# for the area. A tap does nothing. Its target is a full touch size laid over both sides. No
+# phone, no handle.
 clock: 2026-11-09T08:30:00
 fixtures:
   core: fixtures/parked.json
@@ -31,60 +33,97 @@ steps:
           return "the pill at %s in %s" % [p, content]
       if p.intersects(cards) or p.intersects(slot):
           return "the pill %s meets the slot %s or the cards %s" % [p, slot, cards]
+      if side.size.x < ThemeManager.px.side - 0.5:
+          return "the cards %s narrower than their column" % side
       if not ThemeManager.home_phone:
           var off := content.end.x - p.end.x if ThemeManager.side_left() else p.position.x - content.position.x
           if absf(off) > 0.5 or slot.size.x > 0.5:
               return "hidden: the tab at %s, not at the edge of %s (slot %s)" % [p, content, slot]
-      elif slot.size.x < 600.0:
+      elif slot.size.x < ThemeManager.px.side - 0.5:
           return "shown: the slot %s" % slot
   - expect_node: { path: Page/Body/Slot, visible: true }
   - screenshot: { name: home-phone-toggle-shown, tolerance: 8 }
-  - tap: { node: Page/PhoneHandle }
-  - wait: { frames: 2 }
-  - gdscript: |
-      if ThemeManager.home_phone or shell.get_node("Page/Body/Slot").size.x > 0.5 or shell._projection.visible:
-          return "the picture is still on home (slot %s)" % shell.get_node("Page/Body/Slot").size
-  - gdscript: *clear
-  - screenshot: home-phone-toggle-hidden
-  - tap: { node: Page/PhoneHandle }
-  - wait: { frames: 2 }
-  - gdscript: *clear
-  # Taps and swipes from each state: [gesture, shown before, shown after]. A swipe toward where
-  # the phone already is, or up the handle, changes nothing.
-  - gdscript: &gestures |
-      for row in [["tap", true, false], ["tap", false, true], ["cards", true, false], ["slot", false, true],
-              ["slot", true, true], ["cards", false, false], ["up", true, true], ["up", false, false]]:
-          ThemeManager.set_look({home_phone = row[1]})
-          await runner.frames(2)
+  # Drags from each width: [from, to, snapped]. The phone's widths are the snaps (s0 < s1 < s2, the
+  # widest the default) or none; a release between them takes the nearest, beyond them the last.
+  # A tap, a drag inside the slop or up the handle changes nothing. The phone is asked once per
+  # release that changes the slot, with its size, and never mid-drag.
+  - gdscript: &drags |
+      var snaps: Array = shell._snaps()
+      if snaps.size() != 3 or snaps[0] < ThemeManager.px.side - 0.5:
+          return "snaps %s" % [snaps]
+      var full: float = shell.get_node("Page/Body").size.x
+      var v := {hidden = 0.0, s0 = snaps[0], s1 = snaps[1], s2 = snaps[2], mid01 = (snaps[0] + snaps[1]) / 2.0 - 10.0,
+          past12 = snaps[1] + 30.0, near0 = snaps[0] * 0.4, far0 = snaps[0] * 0.6, beyond = full + 200.0, under = -200.0}
+      var slot: Control = shell.get_node("Page/Body/Slot")
+      var areas := func():
+          return Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea")
+      for row in [["s2", "s0", "s0"], ["s0", "s1", "s1"], ["s1", "s2", "s2"], ["s2", "hidden", "hidden"], ["hidden", "past12", "s1"],
+              ["s1", "mid01", "s0"], ["s0", "near0", "hidden"], ["hidden", "far0", "s0"], ["s0", "beyond", "s2"], ["s2", "under", "hidden"],
+              ["hidden", "tap", "hidden"], ["s1", "tap", "s1"], ["s1", "tiny", "s1"], ["s1", "up", "s1"]]:
+          ThemeManager.set_look({home_phone = row[0] != "hidden", home_split = v[row[0]] / full if row[0] != "hidden" else ThemeManager.home_split})
+          await runner.frames(3)
+          var before: float = slot.size.x
+          if absf(before - v[row[0]]) > 0.5:
+              return "%s: the slot is %s from %s" % [row, before, v[row[0]]]
+          Core.fake_clear()
           var at: Vector2 = shell.get_node("Page/PhoneHandle/Pill").get_global_rect().get_center()
-          var x := -1.0 if ThemeManager.side_left() == (row[0] == "cards") else 1.0
-          var d: Vector2 = {tap = Vector2.ZERO, up = Vector2(0.0, -1.0)}.get(row[0], Vector2(x, 0.0)) * ThemeManager.px.touch * 1.5
-          for i in 6:
+          # Away from the slot's edge grows the phone.
+          var out := -1.0 if ThemeManager.side_left() else 1.0
+          var d := Vector2.ZERO
+          match row[1]:
+              "tap":
+                  pass
+              "tiny":
+                  d.x = ThemeManager.px.touch_gap * 0.5
+              "up":
+                  d.y = -ThemeManager.px.touch * 1.5
+              _:
+                  d.x = (v[row[1]] - before) * out
+          for i in 9:
               var m := InputEventMouseMotion.new()
-              m.position = at + d * (i / 5.0)
+              m.position = at + d * (i / 8.0)
               m.button_mask = MOUSE_BUTTON_MASK_LEFT if i > 0 else 0
               runner._vp.push_input(m)
-              if i == 0 or i == 5:
+              if i == 0:
                   var b := InputEventMouseButton.new()
                   b.position = m.position
                   b.button_index = MOUSE_BUTTON_LEFT
-                  b.pressed = i == 0
-                  b.button_mask = MOUSE_BUTTON_MASK_LEFT if i == 0 else 0
+                  b.pressed = true
+                  b.button_mask = MOUSE_BUTTON_MASK_LEFT
                   runner._vp.push_input(b)
               await runner.frames(1)
           await runner.frames(2)
-          if ThemeManager.home_phone != row[2]:
-              return "%s with the phone %s: shown %s (%s)" % [row[0], "shown" if row[1] else "hidden", ThemeManager.home_phone, ThemeManager.hand]
-      ThemeManager.set_look({home_phone = true})
+          if not areas.call().is_empty():
+              return "%s: asked mid-drag %s" % [row, areas.call()]
+          var u := InputEventMouseButton.new()
+          u.position = at + d
+          u.button_index = MOUSE_BUTTON_LEFT
+          runner._vp.push_input(u)
+          await runner.frames(3)
+          var want: float = v[row[2]]
+          if ThemeManager.home_phone != (row[2] != "hidden") or absf(slot.size.x - want) > 0.5:
+              return "%s (%s): shown %s, the slot %s, not %s" % [row, ThemeManager.hand, ThemeManager.home_phone, slot.size.x, want]
+          if row[2] != "hidden" and absf(ThemeManager.home_split * full - want) > 0.5:
+              return "%s: the look keeps %s of %s" % [row, ThemeManager.home_split, full]
+          var got: Array = areas.call()
+          var asked := 0 if row[2] == "hidden" or absf(want - before) < 0.5 else 1
+          if got.size() != asked or (asked == 1 and absf(got[0].action.width - want) > 1.0):
+              return "%s: asked %s, not %d of width %s" % [row, got.map(func(m): return m.action), asked, want]
+      ThemeManager.set_look({home_phone = true, home_split = 0.0})
       await runner.frames(2)
-  # Every edge of the status bar, and none.
-  - theme: { status_position: left }
   - gdscript: *clear
-  - theme: { status_position: right }
+  - theme: { home_phone: false }
   - gdscript: *clear
+  - screenshot: home-phone-toggle-hidden
+  # Every edge of the status bar, and none, at each width.
+  - theme: { status_position: left, home_phone: true, home_split: 0.34 }
+  - gdscript: *clear
+  - theme: { status_position: right, home_split: 0.5 }
+  - gdscript: *clear
+  - screenshot: home-phone-toggle-half-status-right
   - theme: { status_position: bottom }
   - gdscript: *clear
-  - theme: { status_position: off }
+  - theme: { status_position: off, home_split: 0.0 }
   - gdscript: *clear
   - theme: { home_phone: false }
   - gdscript: *clear
@@ -92,18 +131,43 @@ steps:
   - gdscript: *clear
   - theme: { status_position: top, home_phone: true }
   - gdscript: *clear
-  # The driver's side: the cards and the handle move over, the gestures mirrored.
+  # Kept in the look: a restart comes back at the width last chosen.
+  - gdscript: |
+      var file := OS.get_user_data_dir().path_join("home-phone-toggle-look.json")
+      ThemeManager.look_file = file
+      ThemeManager.set_look({home_split = 1.0 / 3.0})
+      ThemeManager.save_look()
+      ThemeManager.defaults()
+      # Defaults animate.
+      await runner.frames(40)
+      var slot: Control = shell.get_node("Page/Body/Slot")
+      var widest: float = shell._snaps().back()
+      if absf(slot.size.x - widest) > 0.5:
+          return "defaults: the slot %s, not %s" % [slot.size.x, widest]
+      ThemeManager.load_look(file)
+      DirAccess.remove_absolute(file)
+      DirAccess.remove_absolute(ThemeManager.tokens_file)
+      ThemeManager.look_file = ""
+      ThemeManager.tokens_file = ""
+      await runner.frames(2)
+      if absf(slot.size.x - shell._snaps()[0]) > 0.5:
+          return "restarted: the slot %s, not %s" % [slot.size.x, shell._snaps()[0]]
+      ThemeManager.set_look({home_split = 0.0, reduced_motion = true})
+      await runner.frames(2)
+  # The driver's side, and the phone nearer the driver on the panel: mirrored, always from the
+  # slot's edge.
   - theme: { hand: rhd }
-  - wait: { frames: 2 }
   - gdscript: *clear
-  - gdscript: *gestures
+  - gdscript: *drags
   - theme: { home_phone: false }
-  - wait: { frames: 2 }
   - gdscript: *clear
   - screenshot: home-phone-toggle-hidden-rhd
   - theme: { status_position: right }
   - gdscript: *clear
-  - theme: { status_position: top }
+  - theme: { status_position: top, home_phone: true, hand: lhd, near: panel }
+  - gdscript: *clear
+  - gdscript: *drags
+  - theme: { near: projection, hand: rhd }
   # Night, glass, and a scene theme's slab behind the pill.
   - theme: { home_phone: true, appearance: night }
   - gdscript: *clear

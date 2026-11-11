@@ -509,12 +509,12 @@ func _refresh(sections := {}) -> void:
 	_stat.fraction = -1.0 if soc == null else soc / 100.0
 	var km = t.call("rangeKm")
 	_stat.sub_label = "Range"
-	_stat.sub_value = "–" if km == null else "%d km" % roundi(km)
+	_stat.sub_value = "–" if km == null else Units.range_text(km)
 	var ev_km = t.call("rangeElectricKm")
 	if power == "hybrid" and ev_km != null:
-		_stat.sub_label = "Range · %d km electric" % roundi(ev_km)
+		_stat.sub_label = "Range · %s electric" % Units.range_text(ev_km)
 	var amb = t.call("ambientC")
-	_status.outside = "" if amb == null else "%d °C" % roundi(amb)
+	_status.outside = "" if amb == null else Units.temperature(amb)
 	_status.charge = "" if soc == null else "%d %%" % roundi(soc)
 	_status.charge_icon = "bolt" if power == "electric" else "fuel"
 	_status.phone = "Pixel"

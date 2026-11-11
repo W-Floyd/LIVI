@@ -271,12 +271,10 @@ func _restyle() -> void:
 	_override(_l(_on, "on_name"), "mainview_text_range_climateon")
 	_override(_l(_on, "on_value"), "mainview_text_climateon_range_value")
 	_override(_l(_on, "on_unit"), "mainview_text_climateon_range_unit")
-	_l(_on, "on_unit").text = _str("km")
 	_l(_off, "off_name").text = _str("off")
 	_override(_l(_off, "off_name"), "mainview_text_range_climateoff")
 	_override(_l(_off, "off_value"), "mainview_text_climateoff_range_value")
 	_override(_l(_off, "off_unit"), "mainview_text_climateoff_range_unit")
-	_l(_off, "off_unit").text = _str("km")
 	for b in [_on, _off, _charger, _battery]:
 		(b.box as Control).visible = false
 	_numeral_base.clear()
@@ -365,7 +363,7 @@ func _badges() -> Array:
 
 ## The sections `_bind` reads. A phone session changes the others (track, route) many times a
 ## second, and each bind is a layout pass: one per frame, only for these.
-const BOUND := ["telemetry", "navigation"]
+const BOUND := ["telemetry", "navigation", "config"]
 var _bind_queued := false
 
 
@@ -405,8 +403,12 @@ func _bind() -> void:
 	(_battery.box as Control).visible = true
 	_l(_battery, "battery_value").text = "–" if soc == null else str(roundi(float(soc)))
 	_show_on = km != null
-	_l(_on, "on_value").text = str(roundi(on_km))
-	_l(_off, "off_value").text = str(roundi(off_km))
+	_l(_on, "on_value").text = str(Units.range_value(on_km))
+	_l(_off, "off_value").text = str(Units.range_value(off_km))
+	# The pack's unit string is km.
+	var unit := _str("km") if not Units.imperial() else Units.range_unit()
+	_l(_on, "on_unit").text = unit
+	_l(_off, "off_unit").text = unit
 	var low := on_km <= EvScene.LOW_RANGE_KM
 	_l(_on, "on_name").text = _str("on")
 	# Low range says so in an icon as well as the warning color.
@@ -425,10 +427,9 @@ func _bind() -> void:
 				on_name = "mainview_text_range_climateon"}[n])
 	_show_charger = stop_km >= 0.0
 	if _show_charger:
-		var m := stop_km * 1000.0
-		var far := m >= 1000.0
-		_l(_charger, "charger_value").text = ("%.1f" % stop_km).trim_suffix(".0") if far else str(roundi(m))
-		_l(_charger, "charger_unit").text = _str("km") if far else STRINGS.m
+		var d := Units.distance(stop_km)
+		_l(_charger, "charger_value").text = d[0]
+		_l(_charger, "charger_unit").text = _str("km") if d[1] == "km" else d[1]
 		var nm := _l(_charger, "charger_name")
 		nm.text = stop_name
 		nm.visible = stop_name != ""

@@ -167,7 +167,7 @@ func _on_core_changed(sections: PackedStringArray) -> void:
 	if _bind_queued:
 		return
 	for s in sections:
-		if s == "telemetry" or s == "navigation":
+		if s == "telemetry" or s == "navigation" or s == "config":
 			_bind_queued = true
 			_bind_now.call_deferred()
 			return
@@ -192,14 +192,16 @@ func _bind() -> void:
 			(badge as Panel).add_theme_stylebox_override("panel", ThemeManager.pack.box(key, ThemeManager.appearance))
 	var km = Core.get_value("/telemetry/rangeKm")
 	if km != null:
-		_set_text("mainview_text_climateon_range_value", str(roundi(km)))
+		_set_text("mainview_text_climateon_range_value", str(Units.range_value(km)))
+		if Units.imperial():
+			_set_text("mainview_text_climateon_range_unit", Units.range_unit())
 	var stop = Core.get_value("/navigation/chargingStop")
 	if stop is Dictionary:
 		var m = stop.get("distanceM")
 		if m != null:
-			var far: bool = m >= 1000
-			_set_text("mainview_text_nearyby_station_range_value", ("%.1f" % (m / 1000.0)).trim_suffix(".0") if far else str(roundi(m)))
-			_set_text("mainview_text_nearyby_station_range_unit", "km" if far else "m")
+			var d := Units.distance(m / 1000.0)
+			_set_text("mainview_text_nearyby_station_range_value", d[0])
+			_set_text("mainview_text_nearyby_station_range_unit", d[1])
 		if stop.get("name"):
 			_set_text("mainview_text_nearyby_station_location", str(stop.name))
 

@@ -1,0 +1,77 @@
+name: units
+# Values in LIVI's config units: temperature by temperatureUnit, distance and speed by speedUnit,
+# as livi-ui-model's dashboard readings show them, and switched live when the config changes.
+clock: 2026-11-09T17:42:00
+fixtures:
+  core: fixtures/to-charger.json
+theme: { theme_name: instrument, appearance: night }
+steps:
+  - gdscript: |
+      # [speedUnit, temperatureUnit, function, input, expected]
+      var cases := [
+          ["kmh", "celsius", "temperature", 4.0, "4 °C"],
+          ["kmh", "celsius", "temperature", -2.5, "-3 °C"],
+          ["kmh", "fahrenheit", "temperature", 4.0, "39 °F"],
+          ["kmh", "fahrenheit", "temperature", 20.0, "68 °F"],
+          ["kmh", "fahrenheit", "temperature", -20.0, "-4 °F"],
+          ["kmh", "celsius", "range_text", 148.0, "148 km"],
+          ["mph", "celsius", "range_text", 148.0, "92 mi"],
+          ["mph", "celsius", "range_text", 100.0, "62 mi"],
+          ["kmh", "celsius", "distance_text", 42.0, "42 km"],
+          ["kmh", "celsius", "distance_text", 9.26, "9.3 km"],
+          ["kmh", "celsius", "distance_text", 0.74, "740 m"],
+          ["kmh", "celsius", "distance_text", 0.9996, "1000 m"],
+          ["mph", "celsius", "distance_text", 42.0, "26.1 mi"],
+          ["mph", "celsius", "distance_text", 1.609344, "1 mi"],
+          ["mph", "celsius", "distance_text", 0.17, "0.1 mi"],
+          ["mph", "celsius", "distance_text", 0.12, "394 ft"],
+          ["kmh", "celsius", "speed_text", 88.0, "88 km/h"],
+          ["mph", "celsius", "speed_text", 100.0, "62 mph"],
+      ]
+      var bad := PackedStringArray()
+      for c in cases:
+          Core.fake_set("config/speedUnit", c[0])
+          Core.fake_set("config/temperatureUnit", c[1])
+          var got: String = Callable(Units, c[2]).call(c[3])
+          if got != c[4]:
+              bad.append("%s %s %s(%s): %s, not %s" % [c[0], c[1], c[2], c[3], got, c[4]])
+      Core.fake_set("config/speedUnit", "kmh")
+      Core.fake_set("config/temperatureUnit", "celsius")
+      return "\n".join(bad)
+  # Home: the stat tile's range, the stop card's distance and the outside temperature.
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Stat, sub_value: "148 km" }
+  - expect_node: { path: Page/Status, outside: "4 °C" }
+  - set: { core: { config: { speedUnit: mph, temperatureUnit: fahrenheit } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: Page/Body/Side/Panel/Stat, sub_value: "92 mi" }
+  - expect_node: { path: Page/Status, outside: "39 °F" }
+  - gdscript: |
+      var stop: StopCard = shell.get_node("Page/Body/Side/Panel/Stop")
+      if stop._facts[0].text != "26.1 mi":
+          return "stop card distance %s" % stop._facts[0].text
+  - screenshot: { name: units-home-imperial, compare: false }
+  # The live page: labels in mi and ft, the road still in km.
+  - page: ev_live
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "92" }
+  - expect_node: { path: EvLive/RangeOn/Row1/on_unit, text: mi }
+  - expect_node: { path: EvLive/RangeOff/Row1/off_unit, text: mi }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "26.1" }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_unit, text: mi }
+  - gdscript: |
+      var s: EvScene = shell.get_node("EvLive/Scene")
+      if not (is_equal_approx(s.km_on, 148.0) and is_equal_approx(s.stop_km, 42.0)):
+          return "scene not in km: %s %s" % [s.km_on, s.stop_km]
+  - screenshot: { name: units-ev-live-imperial, compare: false }
+  - set: { core: { navigation: { chargingStop: { distanceM: 120 } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "394" }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_unit, text: ft }
+  # Back to metric, live.
+  - set: { core: { config: { speedUnit: kmh, temperatureUnit: celsius }, navigation: { chargingStop: { distanceM: 740 } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "148" }
+  - expect_node: { path: EvLive/RangeOn/Row1/on_unit, text: km }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "740" }
+  - expect_node: { path: EvLive/ChargerLabel/Row0/charger_unit, text: m }

@@ -41,8 +41,8 @@ func _fill() -> void:
 		return
 	var kw := int(stop.get("powerW", 0) / 1000)
 	_title.text = "Charger · %d kW" % kw if kw > 0 else "No charging stop"
-	var km = stop.get("distanceM")
-	_facts[0].text = "%d km" % roundi(km / 1000.0) if km != null else "–"
+	var m = stop.get("distanceM")
+	_facts[0].text = Units.distance_text(m / 1000.0) if m != null else "–"
 	var pct = stop.get("arrivalPct")
 	_facts[1].text = "%d %%" % roundi(pct) if pct != null else "–"
 	var low: bool = pct != null and pct < LOW_ARRIVAL_PCT

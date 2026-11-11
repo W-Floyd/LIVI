@@ -26,6 +26,7 @@ const PURPOSE_TERMINAL := 13
 const HINT_AUTO_CAPITALIZATION := 0x4
 const HINT_HIDDEN_TEXT := 0x40
 const HINT_SENSITIVE_DATA := 0x80
+const HINT_MULTILINE := 0x200
 ## Terminals by app_id, for those launched without a desktop entry saying TerminalEmulator.
 const TERMINALS := ["org.gnome.Console", "kgx", "org.gnome.Terminal", "org.gnome.Ptyxis", "foot", "footclient",
 	"Alacritty", "kitty", "org.wezfurlong.wezterm", "xterm", "XTerm", "org.kde.konsole", "konsole",
@@ -43,6 +44,8 @@ var window_id := -1
 var secret := false
 ## The app is a terminal (set before `configure`): the extra row shows from the start.
 var terminal := false
+## Done is Enter, which sends Return and keeps the keyboard; the bar's hide key puts it away.
+var enter_key := false
 var keyboard: Keyboard
 ## Off 0, for the next key 1, locked 2.
 var mods := {"ctrl": 0, "alt": 0, "super": 0}
@@ -52,6 +55,7 @@ var fn_on := false
 ## The field's text as the app reports it (GTK does, Godot does not), shown over the keys.
 var _preview: Label
 var _toggle: Button
+var _hide: Button
 var _extras: Control
 var _mod_at := {}
 var _now := 0.0
@@ -76,6 +80,14 @@ func _init() -> void:
 	_toggle.focus_mode = Control.FOCUS_NONE
 	_toggle.toggled.connect(func(on): set_extras(on))
 	add_child(_toggle)
+	_hide = Button.new()
+	_hide.name = "Hide"
+	_hide.tooltip_text = "Hide the keyboard"
+	_hide.focus_mode = Control.FOCUS_NONE
+	_hide.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hide.visible = false
+	_hide.pressed.connect(close.bind(false))
+	add_child(_hide)
 	_extras = Control.new()
 	_extras.name = "Extras"
 	_extras.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -85,7 +97,7 @@ func _init() -> void:
 	add_child(keyboard)
 	keyboard.typed.connect(_type)
 	keyboard.erased.connect(_key.bind(KEY_BACKSPACE))
-	keyboard.submitted.connect(func(): _key(KEY_ENTER); close(true))
+	keyboard.submitted.connect(_submit)
 	keyboard.cancelled.connect(close.bind(false))
 	resized.connect(_place)
 
@@ -93,6 +105,12 @@ func _init() -> void:
 func _ready() -> void:
 	ThemeManager.changed.connect(_style)
 	_style()
+
+
+func _submit() -> void:
+	_key(KEY_ENTER)
+	if not enter_key:
+		close(true)
 
 
 static func terminal_app(app_id: String) -> bool:
@@ -106,6 +124,12 @@ func configure(id: int, field: Dictionary) -> void:
 	window_id = id
 	var purpose := int(field.get("purpose", 0))
 	var hint := int(field.get("hint", 0))
+	terminal = terminal or purpose == PURPOSE_TERMINAL
+	# Return is a key of the text there, not the end of it: Enter, and the keyboard stays.
+	enter_key = terminal or hint & HINT_MULTILINE != 0
+	_hide.visible = enter_key
+	# text-input-v3 has no search purpose; a web address is the one field whose action is known.
+	keyboard.done_label = "Enter" if enter_key else "Go" if purpose == PURPOSE_URL else "Done"
 	secret = purpose in [PURPOSE_PASSWORD, PURPOSE_PIN] or hint & (HINT_HIDDEN_TEXT | HINT_SENSITIVE_DATA) != 0
 	keyboard.quiet = secret
 	keyboard.extras = ["/", ":", "-"] if purpose == PURPOSE_URL else ["_", "-", "@"] if purpose == PURPOSE_EMAIL else []
@@ -115,8 +139,8 @@ func configure(id: int, field: Dictionary) -> void:
 	if hint & HINT_AUTO_CAPITALIZATION and str(field.get("text", "x")).strip_edges() == "":
 		keyboard.shift = 1
 		keyboard._style_keys()
-	terminal = terminal or purpose == PURPOSE_TERMINAL
 	set_extras(terminal)
+	_place()
 	_refresh()
 
 
@@ -157,21 +181,26 @@ func _style() -> void:
 	theme = ThemeManager.godot_theme
 	UI.style_labels(self)
 	_toggle.add_theme_font_size_override("font_size", ThemeManager.font_size("caption"))
+	_hide.icon = Icons.texture("chevron_down", ThemeManager.px.icon)
 	_style_extras()
 	_place()
 	queue_redraw()
 
 
-## A bar (the field's text, the extra row's toggle on the app's side), the extra row, the keys.
+## A bar (the field's text; on the app's side the extra row's toggle, and the hide key outermost
+## while Enter replaces Done), the extra row, the keys.
 func _place() -> void:
 	var g: float = ThemeManager.px.gap
 	var h: float = ThemeManager.px.touch
 	var pad := g * 1.5
+	var hw := h * 1.5 + g if _hide.visible else 0.0
+	_hide.size = Vector2(h * 1.5, h - g)
+	_hide.position = Vector2(size.x - h * 1.5 - pad if _driver_left else pad, g * 0.5)
 	var tw := maxf(_toggle.get_combined_minimum_size().x, h * 2.0)
 	_toggle.size = Vector2(tw, h - g)
-	_toggle.position = Vector2(size.x - tw - pad if _driver_left else pad, g * 0.5)
-	_preview.size = Vector2(size.x - tw - pad * 3.0, h)
-	_preview.position = Vector2(pad if _driver_left else tw + pad * 2.0, 0)
+	_toggle.position = Vector2(size.x - tw - pad - hw if _driver_left else pad + hw, g * 0.5)
+	_preview.size = Vector2(size.x - tw - hw - pad * 3.0, h)
+	_preview.position = Vector2(pad if _driver_left else tw + hw + pad * 2.0, 0)
 	var top := h
 	if extras_on:
 		_extras.position = Vector2(0, top)

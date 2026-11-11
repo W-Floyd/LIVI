@@ -2,7 +2,8 @@ name: app-keyboard-terminal
 # A terminal's keyboard: a field with the terminal purpose (as VTE sends) gets the extra row of
 # Esc, Tab, Ctrl, Alt, Super, arrows and Fn. Ctrl is sticky: once for the next key, twice to
 # lock, and while it is down letters go as keys under it, not as commits. The bar's toggle hides
-# the row. A terminal without text input (by its app_id) gets the row through the keys button.
+# the row. Done is Enter, which keeps the keyboard; the bar's hide key dismisses it. A terminal
+# without text input (by its app_id) gets the row through the keys button.
 clock: 2026-11-09T08:30:00
 nav: true
 fixtures:
@@ -70,8 +71,29 @@ steps:
       var kb: AppKeyboard = shell.app_keyboard
       if kb.extras_on or kb.get_node("Extras").visible:
           return "the row stayed"
-  - tap: { node: AppKeyboard/Keyboard/Keys/Cancel }
+  # Enter for Done: Return, and the keyboard stays; the bar's hide key puts it away.
+  - tap: { node: AppKeyboard/Keyboard/Keys/Done }
   - wait: { frames: 30 }
+  - expect_client: { app_id: org.livi.test.term, lines: ["key 28 pressed", "key 28 released"] }
+  - expect_node: { path: AppKeyboard/Keyboard/Keys/Done, text: Enter }
+  - expect_node: { path: AppKeyboard/Hide, visible: true }
+  - tap: { node: AppKeyboard/Hide }
+  - wait: { frames: 30 }
+  - gdscript: |
+      if shell.app_keyboard != null:
+          return "the hide key left the keyboard"
+  # The return key by field: Enter (and the hide key) for terminals and multiline fields, the
+  # action a web address implies, else Done.
+  - gdscript: |
+      for row in [[{purpose = 13}, "Enter", true], [{hint = 0x200}, "Enter", true], [{purpose = 5}, "Go", false],
+              [{purpose = 6}, "Done", false], [{}, "Done", false]]:
+          var k := AppKeyboard.new()
+          runner.add_child(k)
+          k.configure(-1, row[0])
+          var got := [k.keyboard.key("done").text, k.get_node("Hide").visible]
+          k.free()
+          if got != row.slice(1):
+              return "%s: %s" % [row[0], got]
   # A terminal with no text input, known by its app_id: the keys button, then the row.
   - gdscript: |
       var e: String = runner._spawn({role = "app", app_id = "foot", pattern = "bars", size = "0x0", events = true})

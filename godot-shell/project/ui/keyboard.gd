@@ -65,6 +65,11 @@ var layer := "letters"
 var extras: Array = []
 ## No pop as a key goes down: nothing that shows a password's characters from across the car.
 var quiet := false
+## What the Done key says: the field's action ("Go"), or "Enter" where it is a key like any other.
+var done_label := "Done":
+	set(v):
+		done_label = v
+		_style_keys()
 ## Done dimmed while what is typed would not be taken.
 var done_ready := true:
 	set(v):
@@ -244,6 +249,8 @@ func _style_keys() -> void:
 
 
 func _label(id: String) -> String:
+	if id == "done":
+		return done_label
 	if LABELS.has(id):
 		return LABELS[id]
 	if _icon(id) != "":

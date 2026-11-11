@@ -338,6 +338,10 @@ Super are sticky (once for the next key, twice to lock, tinted and lit as shift 
 is down letters go as keys under it rather than as commits: VTE ignores a committed control
 character (`app-keyboard-console` checks Console's shell reads Ctrl+C as 0x03).
 
+Terminals and multiline fields (the `multiline` hint) get Enter in Done's place: it sends Return
+and the keyboard stays, and a hide key on the bar puts it away. A web address's field says Go;
+the rest say Done (text-input-v3 has no search purpose, so a search field cannot say Search).
+
 ## While driving
 
 `Drive` (an autoload) says whether the car is driven and what that locks, as PLAN.md's "What a

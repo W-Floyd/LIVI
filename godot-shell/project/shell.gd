@@ -875,6 +875,7 @@ func _keyboard_width() -> float:
 ## A hosted app showing on the app page wants text: the keyboard comes up for it. Never for the
 ## phone's picture, whose own keyboard is on the phone's UI.
 func _on_text_wanted(id: int) -> void:
+	print("keyboard: window %d (%s) wants text: %s" % [id, _app_ids.get(id, ""), Wayland.text_field(id)])
 	if _page_name != "app" or _projection.window.window_id != id or _is_projection(id):
 		return
 	open_keyboard(id, Wayland.text_field(id))
@@ -942,7 +943,9 @@ func _on_keys_button() -> void:
 	if id < 0:
 		return
 	_projection.window.focus_app()
-	open_keyboard(id, {})
+	print("keyboard: by the keys button for window %d (%s), text input %s" % [id, _app_ids.get(id, ""), "bound" if Wayland.has_text_input(id) else "not bound"])
+	# A client that bound text input since the button showed: its field, if enabled.
+	open_keyboard(id, Wayland.text_field(id))
 
 
 ## A terminal: its launcher entry says TerminalEmulator, or its app_id is a known one.

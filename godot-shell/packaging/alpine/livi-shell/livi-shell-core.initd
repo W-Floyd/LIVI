@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+# livi-core with no UI of its own; livi-gst-host draws into the shell's socket.
+description="LIVI core"
+command=/usr/bin/livi-core
+command_user=user:user
+command_background=true
+pidfile=/run/livi-shell-core.pid
+output_log=/var/log/livi-shell-core.log
+error_log=/var/log/livi-shell-core.log
+
+depend() {
+	need net
+	after bluetooth
+}
+
+start_pre() {
+	checkpath -d -o user:user -m 0755 /run/livi-shell
+	export XDG_RUNTIME_DIR=/run/livi-shell LIVI_NO_UI=1 WAYLAND_DISPLAY=livi-shell
+	export LIVI_CORE_SOCKET=/run/livi-shell/livi/core.sock
+	checkpath -f -o user:user /var/log/livi-shell-core.log
+}

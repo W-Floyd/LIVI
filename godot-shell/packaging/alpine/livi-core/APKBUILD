@@ -1,0 +1,135 @@
+# Maintainer: William Floyd <git@notmy.space>
+#
+# livi-core, the backend the Godot shell is a client of, with what it spawns: livi-gst-host
+# (video and audio, GStreamer) and livi-helperd (USB, Bluetooth, Wi-Fi, as root through sudo).
+# From this tree's native/; the shell (livi-shell) is the UI, with no livi-ui or livi-compositor.
+#
+# Cross-compiled with upstream Rust, as livi-headunit is (pmb:cross-native2): the tree pins a
+# beta toolchain (native/rust-toolchain.toml) that Alpine does not ship, and a qemu build of the
+# crates is out of reach. The native chroot compiles; the armv7 buildroot, with makedepends_host
+# in it, is the sysroot at $CBUILDROOT. See packaging/README.md for the same build on a Mac.
+#
+# Installs beside livi-headunit (not over it): everything is under /usr/lib/livi-core.
+#
+# The source is a tarball of a commit of this repository, made and pinned by
+# packaging/scripts/make-source.sh (git archive); the pin and checksums are filled in at build
+# time and not committed.
+pkgname=livi-core
+pkgver=0
+pkgrel=0
+pkgdesc="LIVI backend (Android Auto, CarPlay) for the Godot shell"
+url="https://github.com/W-Floyd/LIVI"
+arch="armv7"
+license="GPL-3.0-or-later"
+# What livi-core starts or loads at run time; tracedeps finds the linked libraries.
+depends="
+	avahi
+	avahi-tools
+	bluez
+	dnsmasq
+	gst-plugins-bad
+	gst-plugins-base
+	gst-plugins-good
+	hostapd
+	iw
+	pipewire-spa-bluez
+	pulseaudio-utils
+	util-linux-misc
+	"
+makedepends_build="rustup cmake clang-dev pkgconf perl linux-headers"
+makedepends_host="
+	eudev-dev
+	gst-plugins-base-dev
+	gstreamer-dev
+	libxkbcommon-dev
+	openssl-dev
+	wayland-dev
+	xz-dev
+	"
+# net: rustup and cargo fetch the toolchain and the crates
+options="net !check !strip pmb:cross-native2"
+
+_target=armv7-unknown-linux-musleabihf
+_host=aarch64-unknown-linux-musl
+
+# Set by make-source.sh.
+_livi_commit=
+
+source="livi-$_livi_commit.tar.gz"
+builddir="$srcdir/livi-$_livi_commit/native"
+
+build() {
+	# Toolchain, crates and compiled dependencies outlive the build chroot in pmbootstrap's
+	# sccache mount (RUSTC_WRAPPER is unset, sccache is not used).
+	_cache=/mnt/pmbootstrap/sccache/livi-core
+	mkdir -p "$_cache"
+	export RUSTUP_HOME="$_cache/rustup" CARGO_HOME="$_cache/cargo"
+	export CARGO_TARGET_DIR="$_cache/target"
+	export PATH="$CARGO_HOME/bin:$PATH"
+	unset RUSTC_WRAPPER
+	# abuild's flags would reach the host build scripts too, and changing them reruns every cc
+	# build script (aws-lc among them).
+	unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+
+	[ -x "$CARGO_HOME/bin/rustup" ] ||
+		rustup-init -y --no-modify-path --profile minimal \
+			--default-host $_host --default-toolchain none
+	# the channel comes from rust-toolchain.toml
+	rustup toolchain install --profile minimal
+	rustup target add $_target
+	# musl has no libdl; the crates that ask for it get an empty one.
+	_sc="$(rustc --print sysroot)/lib/rustlib/$_target/lib/self-contained"
+	[ ! -d "$_sc" ] || [ -f "$_sc/libdl.a" ] || ar rc "$_sc/libdl.a"
+
+	_x=armv7-alpine-linux-musleabihf
+	_t=armv7_unknown_linux_musleabihf
+	_s=$CBUILDROOT
+	export CC_$_t=$_x-gcc CXX_$_t=$_x-g++ AR_$_t=$_x-ar
+	export CFLAGS_$_t="--sysroot=$_s" CXXFLAGS_$_t="--sysroot=$_s"
+	export BINDGEN_EXTRA_CLANG_ARGS_$_t="--sysroot=$_s --target=$_x"
+	export PKG_CONFIG_ALLOW_CROSS=1
+	export PKG_CONFIG_SYSROOT_DIR_$_t=$_s
+	export PKG_CONFIG_LIBDIR_$_t=$_s/usr/lib/pkgconfig:$_s/usr/share/pkgconfig
+	export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER=$_x-gcc
+	# As RUSTFLAGS, not the per-target variable: abuild exports RUSTFLAGS, and one that is set
+	# outranks per-target rustflags. With --target it reaches only the target's crates.
+	export RUSTFLAGS="-C target-feature=-crt-static -C link-arg=--sysroot=$_s -C link-arg=-Wl,-rpath-link=$_s/usr/lib"
+
+	export LIVI_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+	export LIVI_BUILD=g5w LIVI_BUILD_DATE=$(date -u +%F) LIVI_BUILD_RUN=0
+	export LIVI_BUILD_SHA=$_livi_commit
+
+	cargo build --release --locked --target $_target \
+		-p livi-core -p livi-gst-host -p livi-helperd
+}
+
+package() {
+	# Upstream's AppImage layout: livi-core finds the rest from LIVI_RESOURCES.
+	_r="$CARGO_TARGET_DIR"/$_target/release
+	_d="$pkgdir"/usr/lib/livi-core
+	install -Dm755 "$_r"/livi-core "$_d"/resources/core/livi-core
+	install -Dm755 "$_r"/livi-helperd "$_d"/resources/driver/livi-helperd
+	install -Dm755 "$_r"/livi-gst-host "$_d"/resources/gst-host/livi-gst-host
+	install -Dm644 "$builddir"/../LICENSE "$builddir"/../NOTICE -t "$_d"/resources/
+	install -Dm644 "$builddir"/../assets/linux/99-LIVI.rules.template \
+		"$_d"/resources/99-LIVI.rules.template
+
+	# livi-core starts the helper with `sudo -n -E`; the helper's settings come in LIVI_*
+	# variables, and sudo-rs ignores -E: without env_keep the helper runs on its defaults.
+	install -Dm440 /dev/stdin "$pkgdir"/etc/sudoers.d/99-livi-core <<-'EOF'
+	Defaults env_keep += "LIVI_* DEBUG"
+	Cmnd_Alias LIVI_CORE_HELPER = /usr/lib/livi-core/resources/driver/livi-helperd
+	Cmnd_Alias LIVI_CORE_HELPER_STOP = /usr/bin/pkill -TERM -f driver/livi-helperd$, /usr/bin/pkill -KILL -f driver/livi-helperd$
+	%wheel ALL=(root) NOPASSWD: SETENV: LIVI_CORE_HELPER
+	%wheel ALL=(root) NOPASSWD: LIVI_CORE_HELPER_STOP
+	EOF
+
+	install -Dm755 /dev/stdin "$pkgdir"/usr/bin/livi-core <<-'EOF'
+	#!/bin/sh
+	[ "$1" = telemetry ] && exec /usr/lib/livi-core/resources/core/livi-core "$@"
+	export LIVI_RESOURCES=/usr/lib/livi-core/resources
+	exec /usr/lib/livi-core/resources/core/livi-core
+	EOF
+}
+
+sha512sums=""

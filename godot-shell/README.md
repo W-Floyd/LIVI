@@ -178,12 +178,17 @@ before that needs `echo "hostfwd_add tcp:127.0.0.1:8765-:8765" | nc -U vm/qemu-a
 ## The unit's build
 
 ```sh
-scripts/build-armv7.sh [--release]   # macOS or Linux -> project/bin/linux-arm32/
+scripts/build-armv7.sh [--release]       # the extension only: macOS or Linux -> project/bin/linux-arm32/
+packaging/scripts/build-armv7.sh         # ext, test client, livi-core + children -> packaging/out/armv7/
+packaging/scripts/import-project.sh      # docker: the imported project
+packaging/scripts/smoke-armv7.sh         # docker: the armv7 build under qemu-user
 ```
 
-A cross build against a sysroot of Alpine edge's armv7 musl, libgcc and libxkbcommon (fetched
-once), linked with clang and lld; needs rustup and `ld.lld`. No pmbootstrap. Packaging for the
-unit is milestone 7.
+A cross build against Alpine edge's armv7 musl packages, linked with clang and lld; needs rustup
+and `ld.lld`. No pmbootstrap. The unit's engine is Alpine's `godot` 4.7.2 for armv7, and the
+APKBUILDs for `livi-core` and `livi-shell` (launcher, systemd and OpenRC units, 1920x720 config)
+are in `packaging/alpine/`; see [packaging/README.md](packaging/README.md) for the commands,
+what runs where, and what is left for the unit.
 
 ## A car model
 

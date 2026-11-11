@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+# The shell in cage, on the DRM device, after livi-core (livi-shell-core).
+description="LIVI Godot shell"
+command=/usr/bin/livi-shell
+command_user=user:user
+command_background=true
+pidfile=/run/livi-shell.pid
+output_log=/var/log/livi-shell.log
+error_log=/var/log/livi-shell.log
+
+depend() {
+	need livi-shell-core seatd
+	after udev
+}
+
+start_pre() {
+	checkpath -d -o user:user -m 0755 /run/livi-shell
+	export XDG_RUNTIME_DIR=/run/livi-shell LIBSEAT_BACKEND=seatd XDG_SESSION_TYPE=wayland
+	export LIVI_CORE_SOCKET=/run/livi-shell/livi/core.sock
+	checkpath -f -o user:user /var/log/livi-shell.log
+}

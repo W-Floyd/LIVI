@@ -1,0 +1,135 @@
+# Maintainer: William Floyd <git@notmy.space>
+#
+# The LIVI Godot shell for the Mobis G5W head unit: the GDExtension (Rust, gdext, smithay), the
+# Godot project imported, a launcher, and the units that start livi-core and the shell.
+#
+# The engine is Alpine's godot (testing): 4.7.2 for armv7 musl with Wayland and OpenGL ES 3
+# compiled in. The editor build, not godot-templates: Alpine's templates are built without
+# path overrides, so they take no --path or --main-pack, only a .pck named after the executable
+# with the extension beside it (see packaging/README.md). The shell is a Wayland client of cage
+# and a compositor itself, for livi-gst-host's video. No Vulkan is needed (compatibility renderer).
+#
+# Cross-compiled with upstream Rust (pmb:cross-native2) for the reasons in livi-core's APKBUILD;
+# the project is imported in the native chroot with Alpine's aarch64 godot editor (the .godot/
+# cache is architecture-independent) because the template has no editor to do it on the unit.
+#
+# The source is a tarball of a commit of this repository, made and pinned by
+# packaging/scripts/make-source.sh (git archive); the pin and checksums are filled in at build
+# time and not committed.
+pkgname=livi-shell
+pkgver=0
+pkgrel=0
+pkgdesc="LIVI Godot shell: head unit UI and Wayland compositor"
+url="https://github.com/W-Floyd/LIVI"
+arch="armv7"
+license="GPL-3.0-or-later"
+depends="
+	cage
+	godot
+	livi-core
+	mesa-dri-gallium
+	mesa-egl
+	mesa-gles
+	pulseaudio-utils
+	seatd
+	xkeyboard-config
+	"
+makedepends_build="rustup clang-dev godot"
+makedepends_host="libxkbcommon-dev"
+subpackages="
+	$pkgname-openrc:openrc
+	$pkgname-systemd:systemd
+	"
+# net: rustup and cargo fetch the toolchain and the crates
+options="net !check !strip pmb:cross-native2"
+
+_target=armv7-unknown-linux-musleabihf
+_host=aarch64-unknown-linux-musl
+
+# Set by make-source.sh.
+_livi_commit=
+
+source="
+	livi-$_livi_commit.tar.gz
+	livi-shell.sh
+	livi-shell.conf
+	livi-shell.service
+	livi-shell-core.service
+	livi-shell.initd
+	livi-shell-core.initd
+	"
+builddir="$srcdir/livi-$_livi_commit/godot-shell"
+
+build() {
+	_cache=/mnt/pmbootstrap/sccache/livi-shell
+	mkdir -p "$_cache"
+	export RUSTUP_HOME="$_cache/rustup" CARGO_HOME="$_cache/cargo"
+	export CARGO_TARGET_DIR="$_cache/target"
+	export PATH="$CARGO_HOME/bin:$PATH"
+	unset RUSTC_WRAPPER CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+
+	[ -x "$CARGO_HOME/bin/rustup" ] ||
+		rustup-init -y --no-modify-path --profile minimal \
+			--default-host $_host --default-toolchain none
+
+	_x=armv7-alpine-linux-musleabihf
+	_t=armv7_unknown_linux_musleabihf
+	_s=$CBUILDROOT
+	export CC_$_t=$_x-gcc AR_$_t=$_x-ar
+	export CFLAGS_$_t="--sysroot=$_s"
+	export BINDGEN_EXTRA_CLANG_ARGS_$_t="--sysroot=$_s --target=$_x"
+	export PKG_CONFIG_ALLOW_CROSS=1
+	export PKG_CONFIG_SYSROOT_DIR_$_t=$_s
+	export PKG_CONFIG_LIBDIR_$_t=$_s/usr/lib/pkgconfig:$_s/usr/share/pkgconfig
+	export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER=$_x-gcc
+	export RUSTFLAGS="-C target-feature=-crt-static -C link-arg=--sysroot=$_s -C link-arg=-Wl,-rpath-link=$_s/usr/lib"
+
+	# ext/ is its own workspace, with path dependencies on ../native/crates; the channel comes
+	# from the repository's rust-toolchain.toml.
+	cd ext
+	rustup toolchain install --profile minimal
+	rustup target add $_target
+	cargo build --release --locked --target $_target
+
+	# The imported project. Scripts that name the extension's classes report parse errors here
+	# (the editor is aarch64, the extension armv7): the import still writes its cache.
+	cd ..
+	rm -rf "$srcdir"/project
+	mkdir "$srcdir"/project
+	tar -C project --exclude=./bin --exclude=./.godot -cf - . | tar -C "$srcdir"/project -xf -
+	godot --headless --path "$srcdir"/project --import >/dev/null 2>&1 || true
+	[ -d "$srcdir"/project/.godot/imported ] || die "godot --import wrote no cache"
+	rm -rf "$srcdir"/project/.godot/shader_cache "$srcdir"/project/.godot/editor
+}
+
+package() {
+	_r="$CARGO_TARGET_DIR"/$_target/release
+	_d="$pkgdir"/usr/lib/livi-shell
+	mkdir -p "$_d"
+	cp -r "$srcdir"/project "$_d"/project
+	# Where project/livi_shell.gdextension looks for linux.arm32
+	install -Dm755 "$_r"/liblivi_godot_shell.so "$_d"/project/bin/linux-arm32/liblivi_godot_shell.so
+	install -Dm755 "$_r"/livi-shell-test-client "$_d"/livi-shell-test-client
+	install -Dm755 "$srcdir"/livi-shell.sh "$pkgdir"/usr/bin/livi-shell
+	install -Dm644 "$srcdir"/livi-shell.conf "$pkgdir"/etc/livi-shell.conf
+	install -Dm644 "$builddir"/../LICENSE -t "$pkgdir"/usr/share/licenses/$pkgname/
+}
+
+openrc() {
+	install_if="$pkgname=$pkgver-r$pkgrel openrc"
+	depends="openrc"
+	install -Dm755 "$srcdir"/livi-shell.initd "$subpkgdir"/etc/init.d/livi-shell
+	install -Dm755 "$srcdir"/livi-shell-core.initd "$subpkgdir"/etc/init.d/livi-shell-core
+}
+
+systemd() {
+	install_if="$pkgname=$pkgver-r$pkgrel systemd"
+	install -Dm644 "$srcdir"/livi-shell.service \
+		"$subpkgdir"/usr/lib/systemd/system/livi-shell.service
+	install -Dm644 "$srcdir"/livi-shell-core.service \
+		"$subpkgdir"/usr/lib/systemd/system/livi-shell-core.service
+	# Not enabled by default: it takes the display from the desktop session, so
+	# `systemctl enable --now livi-shell` is the user's choice.
+}
+
+sha512sums=""

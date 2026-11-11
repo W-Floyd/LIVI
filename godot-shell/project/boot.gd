@@ -12,7 +12,8 @@ func _ready() -> void:
 	if args.has("--live"):
 		add_child(preload("res://live/live_server.gd").new())
 		return
-	var err: String = Wayland.listen("")
+	# livi-core's video host is pointed at this socket (packaging/), so a unit names it.
+	var err: String = Wayland.listen(OS.get_environment("LIVI_SHELL_SOCKET"))
 	if err != "":
 		push_error("compositor: %s" % err)
 	err = Core.connect_core("")

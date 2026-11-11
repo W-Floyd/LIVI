@@ -1,0 +1,25 @@
+[Unit]
+Description=LIVI Godot shell (kiosk)
+Requires=livi-shell-core.service seatd.service
+After=livi-shell-core.service seatd.service systemd-user-sessions.service
+# The kiosk owns the display: the desktop session and the console are off while it runs.
+Conflicts=getty@tty1.service gdm.service
+
+[Service]
+User=user
+SupplementaryGroups=seat video input render audio
+RuntimeDirectory=livi-shell
+RuntimeDirectoryPreserve=yes
+EnvironmentFile=-/etc/livi-shell.conf
+Environment=XDG_RUNTIME_DIR=/run/livi-shell LIBSEAT_BACKEND=seatd XDG_SESSION_TYPE=wayland
+Environment=LIVI_CORE_SOCKET=/run/livi-shell/livi/core.sock
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty-fail
+ExecStart=/usr/bin/livi-shell
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

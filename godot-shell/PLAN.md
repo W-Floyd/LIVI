@@ -741,7 +741,13 @@ Every milestone lands with its scenarios.
 
 ### 7. On the unit
 
-- [ ] armv7 package.
+- [x] armv7 cross build of the extension, `livi-core` and its children
+      (`packaging/scripts/build-armv7.sh`), and a smoke test of them with Alpine's armv7 `godot`
+      under qemu-user (`packaging/scripts/smoke-armv7.sh`): the extension loads, the shell
+      connects to the core.
+- [ ] armv7 package: `packaging/alpine/{livi-core,livi-shell}/APKBUILD` are written and their
+      `package()` checked with abuild; the pmbootstrap build from source (nura's container,
+      pmaports-kia-ev6) and installing on the unit are not done.
 - [ ] Measure Android Auto decode plus Godot compositing on the Mali-G51
       (frame rate and latency), idle CPU and GPU with low-processor mode,
       and memory.

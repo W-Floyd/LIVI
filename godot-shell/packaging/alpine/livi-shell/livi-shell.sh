@@ -1,0 +1,21 @@
+#!/bin/sh
+# Starts the Godot shell fullscreen. Under a Wayland session (WAYLAND_DISPLAY set) it is a
+# window of that compositor; with none it runs inside cage, a kiosk compositor, on the DRM
+# device. The shell opens its own Wayland socket ($LIVI_SHELL_SOCKET) for livi-core's
+# livi-gst-host, which livi-core.service points at it.
+set -eu
+[ ! -f /etc/livi-shell.conf ] || . /etc/livi-shell.conf
+: "${LIVI_SHELL_SOCKET:=livi-shell}"
+export LIVI_SHELL_SOCKET
+godot="${LIVI_SHELL_GODOT:-/usr/bin/godot}"
+# The compatibility renderer on GLES3 through Wayland's EGL; no Vulkan (Mali-G51 has no
+# usable driver); the arm32 feature tag selects the `unit` quality profile.
+set -- "$godot" --path /usr/lib/livi-shell/project --display-driver wayland \
+    --rendering-method gl_compatibility --rendering-driver opengl3 --fullscreen \
+    --resolution "${LIVI_SHELL_RESOLUTION:-1920x720}" --audio-driver "${LIVI_SHELL_AUDIO:-PulseAudio}" \
+    ${LIVI_SHELL_GODOT_ARGS:-}
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    exec "$@"
+fi
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/livi-shell}"
+exec cage -d -s -- "$@"

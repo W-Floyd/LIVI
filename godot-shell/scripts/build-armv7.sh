@@ -24,12 +24,16 @@ if [ ! -e "$SYS/.done" ]; then
 fi
 
 LLD=$(command -v ld.lld) || { echo "needs ld.lld (brew install lld, apk add lld)" >&2; exit 1; }
-# A wrapper, as cargo takes the linker as one program. -nostartfiles: a shared object needs
-# none of crt1/crti, and gcc's crtbeginS is not in the sysroot. -z defs: anything unresolved
-# fails here, not when the unit loads it.
+# A wrapper, as cargo takes the linker as one program. -nostartfiles: gcc's crtbeginS is not in
+# the sysroot, so executables get musl's crt1/crti/crtn by hand and a shared object none.
+# -z defs: anything unresolved fails here, not when the unit loads it.
 cat > target/armv7-cc <<EOS
 #!/bin/sh
-exec clang --target=$X --sysroot=$SYS -fuse-ld=$LLD -nostartfiles -Wl,-z,defs "\$@"
+case " \$* " in
+*" -shared "*) pre= post= ;;
+*) pre="$SYS/usr/lib/crt1.o $SYS/usr/lib/crti.o" post=$SYS/usr/lib/crtn.o ;;
+esac
+exec clang --target=$X --sysroot=$SYS -fuse-ld=$LLD -nostartfiles -Wl,-z,defs \$pre "\$@" \$post
 EOS
 chmod +x target/armv7-cc
 

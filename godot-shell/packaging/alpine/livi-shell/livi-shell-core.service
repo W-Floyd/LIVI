@@ -1,0 +1,20 @@
+[Unit]
+Description=LIVI core (backend for the Godot shell)
+After=network.target bluetooth.service
+
+[Service]
+User=user
+SupplementaryGroups=audio plugdev
+RuntimeDirectory=livi-shell
+RuntimeDirectoryPreserve=yes
+EnvironmentFile=-/etc/livi-shell.conf
+# No UI of its own: the shell is the UI. livi-gst-host inherits WAYLAND_DISPLAY and draws into
+# the shell's compositor socket.
+Environment=XDG_RUNTIME_DIR=/run/livi-shell LIVI_NO_UI=1 WAYLAND_DISPLAY=livi-shell
+Environment=LIVI_CORE_SOCKET=/run/livi-shell/livi/core.sock
+ExecStart=/usr/bin/livi-core
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

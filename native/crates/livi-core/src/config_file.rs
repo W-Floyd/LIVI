@@ -402,7 +402,8 @@ pub mod tests {
                 "wifiInterface": "wlan0", "carName": "Device", "bindings": { "home": "Home" },
                 "evRoadLoad": { "aN": 106.72, "bNPerMps": 2.2776, "cNPerMps2": 0.4655 },
                 "evChargeCurve": [[1, 205], [100, 12]],
-                "batteryPreconditioning": "off", "batteryPreconditioningManualMinutes": 45
+                "batteryPreconditioning": "off", "batteryPreconditioningManualMinutes": 45,
+                "batteryPreconditioningMinKw": 150
             })
             .to_string(),
         )
@@ -442,9 +443,10 @@ pub mod tests {
         assert_eq!(
             (
                 fresh.battery_preconditioning,
-                fresh.battery_preconditioning_manual_minutes
+                fresh.battery_preconditioning_manual_minutes,
+                fresh.battery_preconditioning_min_kw
             ),
-            (BatteryPreconditioning::Off, 45)
+            (BatteryPreconditioning::Off, 45, 150)
         );
 
         // The user's file wins over every preset.
@@ -468,6 +470,7 @@ pub mod tests {
         assert_eq!(live["carName"], "LIVI");
         assert_eq!(live["batteryPreconditioning"], "auto");
         assert_eq!(live["batteryPreconditioningManualMinutes"], 30);
+        assert_eq!(live["batteryPreconditioningMinKw"], 50);
         assert!(live.get("carplayIcon120").is_none());
     }
 

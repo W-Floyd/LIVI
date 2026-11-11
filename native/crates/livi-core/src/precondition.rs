@@ -43,6 +43,7 @@ pub fn api(config: &Config, until: Option<u64>) -> Value {
         "mode": config.battery_preconditioning,
         "manual": until.is_some(),
         "manualUntil": until,
+        "minKw": config.battery_preconditioning_min_kw,
     })
 }
 

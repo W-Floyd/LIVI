@@ -107,6 +107,9 @@ pub struct Config {
     pub battery_preconditioning: BatteryPreconditioning,
     /// How long a manual preconditioning request lasts.
     pub battery_preconditioning_manual_minutes: u32,
+    /// Automatic preconditioning only for a route's charger above this power: Android Auto
+    /// gives no DC or AC.
+    pub battery_preconditioning_min_kw: u32,
     pub max_speed_kph: u32,
     pub speed_scale_step: u32,
     pub max_rpm: u32,
@@ -640,6 +643,7 @@ pub fn defaults() -> Config {
         ev_charge_curve: None,
         battery_preconditioning: BatteryPreconditioning::Auto,
         battery_preconditioning_manual_minutes: 30,
+        battery_preconditioning_min_kw: 50,
         max_speed_kph: 200,
         speed_scale_step: 40,
         max_rpm: 5000,

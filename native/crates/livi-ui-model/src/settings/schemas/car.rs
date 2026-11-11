@@ -177,6 +177,10 @@ fn preconditioning() -> Node {
         "settings.batteryPreconditioningManualMinutes",
         "Manual Duration",
     );
+    let min_kw = Label::new(
+        "settings.batteryPreconditioningMinKw",
+        "Automatic: Chargers Above",
+    );
     Node::route(
         "preconditioning",
         title,
@@ -209,6 +213,12 @@ fn preconditioning() -> Node {
                 .display_value()
                 .shown(Shown::Suffix(" min"))
                 .page(minutes),
+            Node::number(min_kw, "batteryPreconditioningMinKw")
+                .icon("preconditionNow")
+                .range(Some(10.0), Some(350.0), Some(10.0))
+                .display_value()
+                .shown(Shown::Suffix(" kW"))
+                .page(min_kw),
         ],
     )
     .icon("batteryPreconditioning")

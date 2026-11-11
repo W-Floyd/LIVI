@@ -991,7 +991,7 @@ mod tests {
         assert_eq!(nav["chargingStop"], Value::Null);
         assert_eq!(
             nav["precondition"],
-            json!({ "mode": "auto", "manual": false, "manualUntil": null }),
+            json!({ "mode": "auto", "manual": false, "manualUntil": null, "minKw": 50 }),
             "present without a route"
         );
         tx.send_modify(|s| {
@@ -1025,15 +1025,16 @@ mod tests {
         );
         assert_eq!(
             nav["precondition"],
-            json!({ "mode": "auto", "manual": true, "manualUntil": 1_762_700_000 })
+            json!({ "mode": "auto", "manual": true, "manualUntil": 1_762_700_000, "minKw": 50 })
         );
         tx.send_modify(|s| {
             s.config.battery_preconditioning = livi_core_proto::config::BatteryPreconditioning::Off;
+            s.config.battery_preconditioning_min_kw = 150;
             s.precondition.manual_until = None;
         });
         assert_eq!(
             get().await["precondition"],
-            json!({ "mode": "off", "manual": false, "manualUntil": null })
+            json!({ "mode": "off", "manual": false, "manualUntil": null, "minKw": 150 })
         );
     }
 

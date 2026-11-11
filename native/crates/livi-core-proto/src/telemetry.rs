@@ -54,6 +54,7 @@
 //! | chargeLimit*, rangeAtChargeLimit*  | ✓    | ·            | ·               | ·             |
 //! | tripEnergyKwh, efficiencyAvg        | ✓    | ·            | ·               | ·             |
 //! | climatePowerW, batteryHeaterW       | ✓    | ·            | ·               | ·             |
+//! | preconditionState, preconditionWhy  | ✓    | ·            | ·               | ·             |
 //! | rangeMaxElectricKm                  | ✓    | ·            | ✓ (electric)    | ✓ (electric)  |
 //! | carType                             | ✓    | ✓            | ✓               | ✓             |
 //! | evConnectorTypes                    | ✓    | ✓            | ✓               | ✓             |
@@ -195,6 +196,12 @@ pub struct TelemetrySnapshot {
     pub climate_power_w: Option<f64>,
     /// What the battery's heater draws.
     pub battery_heater_w: Option<f64>,
+    /// What the car integration's battery preconditioning does with `precondition` at GET
+    /// /navigation: `running`, `armed` (waiting for a fast charger on the route, or a request) or
+    /// `off`. Absent when it doesn't precondition.
+    pub precondition_state: Option<String>,
+    /// Why preconditioning is not running, in words, such as "the charger is 11 kW, not above 50".
+    pub precondition_why: Option<String>,
     /// The range on a full battery.
     pub range_max_electric_km: Option<f64>,
     /// A `CarType` name such as `HybridDiesel`, written into the settings when it differs.
@@ -415,6 +422,8 @@ mod tests {
             range_at_charge_limit_ac_km: Some(410.0),
             climate_power_w: Some(1400.0),
             rear_right_seat_heating: Some(2),
+            precondition_state: Some("armed".into()),
+            precondition_why: Some("no route".into()),
             telltales: Some(Telltales {
                 passenger_airbag_off: Some(true),
                 ..Default::default()
@@ -445,6 +454,8 @@ mod tests {
             ("rangeAtChargeLimitAcKm", json!(410.0)),
             ("climatePowerW", json!(1400.0)),
             ("rearRightSeatHeating", json!(2)),
+            ("preconditionState", json!("armed")),
+            ("preconditionWhy", json!("no route")),
         ] {
             assert_eq!(named[name], want, "{name}");
         }

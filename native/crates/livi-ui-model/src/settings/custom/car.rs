@@ -23,7 +23,8 @@ pub fn now_s() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// The manual request's switch, and what the car reports of its own conditioning.
+/// The manual request's switch, what the car reports of its own conditioning, and what the
+/// automatic preconditioning does.
 pub fn precondition(state: &Value, t: &Strings, now: u64) -> Vec<Row> {
     let mode = serde_json::from_value(state["config"]["batteryPreconditioning"].clone())
         .unwrap_or(BatteryPreconditioning::Auto);
@@ -60,7 +61,32 @@ pub fn precondition(state: &Value, t: &Strings, now: u64) -> Vec<Row> {
             Some("batteryConditioning"),
             conditioning,
         ),
+        info(
+            t.t("settings.preconditionRoute", "On a Route to a Fast Charger"),
+            Some("batteryPreconditioning"),
+            route_precondition(&state["telemetry"], t),
+        ),
     ]
+}
+
+/// What the car integration's automatic preconditioning does, as it reports it. Its reasons are
+/// its own words, untranslated.
+fn route_precondition(tel: &Value, t: &Strings) -> String {
+    let why = tel["preconditionWhy"].as_str().filter(|w| !w.is_empty());
+    match tel["preconditionState"].as_str() {
+        None => t.t("settings.preconditionUnreported", "Not reported by the car"),
+        Some("running") => t.t("settings.preconditionRunning", "Running"),
+        Some("off") => t.t("settings.conditioningOff", "Off"),
+        Some(_) => match why {
+            Some(w) => {
+                let mut c = w.chars();
+                c.next()
+                    .map(|f| f.to_uppercase().chain(c).collect())
+                    .unwrap_or_default()
+            }
+            None => t.t("settings.preconditionArmed", "Armed"),
+        },
+    }
 }
 
 pub fn readings(state: &Value, t: &Strings) -> Vec<Row> {
@@ -196,22 +222,47 @@ mod tests {
 
     #[test]
     fn the_precondition_switch_shows_its_request_and_the_car() {
-        // (state, on, enabled, time left, conditioning)
-        for (s, on, enabled, left, car) in [
-            (json!({}), false, true, "", "Unknown"),
+        // (state, on, enabled, time left, conditioning, automatic on a route)
+        for (s, on, enabled, left, car, route) in [
             (
-                json!({ "precondition": { "manualUntil": 1601 }, "telemetry": { "batteryConditioning": true } }),
+                json!({}),
+                false,
+                true,
+                "",
+                "Unknown",
+                "Not reported by the car",
+            ),
+            (
+                json!({ "precondition": { "manualUntil": 1601 }, "telemetry": { "batteryConditioning": true, "preconditionState": "running", "preconditionWhy": "" } }),
                 true,
                 true,
                 "11 min left",
                 "On",
+                "Running",
             ),
             (
-                json!({ "config": { "batteryPreconditioning": "off" }, "telemetry": { "batteryConditioning": false } }),
+                json!({ "config": { "batteryPreconditioning": "off" }, "telemetry": { "batteryConditioning": false, "preconditionState": "off", "preconditionWhy": "off in LIVI's settings" } }),
                 false,
                 false,
                 "",
                 "Off",
+                "Off",
+            ),
+            (
+                json!({ "telemetry": { "preconditionState": "armed", "preconditionWhy": "the charger is 11 kW, not above 50" } }),
+                false,
+                true,
+                "",
+                "Unknown",
+                "The charger is 11 kW, not above 50",
+            ),
+            (
+                json!({ "telemetry": { "preconditionState": "armed" } }),
+                false,
+                true,
+                "",
+                "Unknown",
+                "Armed",
             ),
         ] {
             let rows = precondition(&s, &Strings::new("en"), 1000);
@@ -225,6 +276,7 @@ mod tests {
                 Some(Change::Act(Action::PreconditionBattery { on: !on }))
             );
             assert_eq!(rows[1].value, car, "{s}");
+            assert_eq!(rows[2].value, route, "{s}");
         }
     }
 }

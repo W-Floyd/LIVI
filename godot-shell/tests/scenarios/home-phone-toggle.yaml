@@ -46,9 +46,9 @@ steps:
   - expect_node: { path: Page/Body/Slot, visible: true }
   - screenshot: { name: home-phone-toggle-shown, tolerance: 8 }
   # Drags from each width: [from, to, snapped], in each home layout. The phone's widths are the
-  # snaps (s0 <= s1 <= s2, s1 the default, nearest a half) or none; a release between them takes
-  # the nearest, beyond them the last. The picture first: the cards never take more than a third
-  # of the body (side by side a half), nor less than their column.
+  # snaps (s0 <= s1 <= s2, s1 the default) or none; a release between them takes the nearest,
+  # beyond them the last. The picture first: the cards never take more than half the body nor less
+  # than their column, and by default no more than a third (side by side a half).
   # A tap, a drag inside the slop or up the handle changes nothing; a double tap goes back to the
   # default, hidden too. The phone is asked once per release that changes the slot, with its size,
   # and never mid-drag.
@@ -59,13 +59,15 @@ steps:
         await runner.frames(4)
         var snaps: Array = shell._snaps()
         var full: float = shell.get_node("Page/Body").size.x
-        var most: float = maxf(ThemeManager.px.side, roundf(full * (0.5 if layout == "split" else 1.0 / 3.0)))
+        var most: float = maxf(ThemeManager.px.side, roundf(full * 0.5))
         if snaps.is_empty() or snaps.any(func(w): return w < ThemeManager.px.side - 0.5 or full - w > most + 0.5 or full - w < ThemeManager.px.side - 0.5):
             return "%s: snaps %s of %s" % [layout, snaps, full]
-        var half: float = snaps[0]
+        var own: float = maxf(ThemeManager.px.side, roundf(full * (0.5 if layout == "split" else 1.0 / 3.0)))
+        var half: float = snaps.back()
         for w in snaps:
-            if absf(w - full / 2.0) < absf(half - full / 2.0):
+            if full - w <= own + 0.5:
                 half = w
+                break
         var v := {hidden = 0.0, s0 = snaps[0], s1 = half, s2 = snaps.back(), mid01 = (snaps[0] + half) / 2.0 - 10.0,
             past12 = half + 30.0, near0 = snaps[0] * 0.4, far0 = snaps[0] * 0.6, beyond = full + 200.0, under = -200.0}
         var areas := func():
@@ -228,24 +230,43 @@ steps:
       # Designated, it starts at once, quietly.
       if not shell.launcher.state("org.livi.test.grid") in ["launching", "running"] or shell._page_name != "home":
           return "designated: %s, page %s" % [shell.launcher.state("org.livi.test.grid"), shell._page_name]
+  # "<app> | <phone>" in the status bar in place of the phone's name, at every edge and hand; with
+  # the bar off, under the cards on the slot's side. Clear of the slot, the cards and the handle,
+  # each segment a touch target.
   - gdscript: &source |
       var t: Control = shell.get_node("Page/Source")
-      var r := t.get_global_rect()
-      var side: Rect2 = shell.get_node("Page/Body/Side").get_global_rect()
-      var slot: Rect2 = shell.get_node("Page/Body/Slot").get_global_rect()
-      var cards: Rect2 = shell.get_node("Page/Body/Side/Panel").get_global_rect()
-      if not t.is_visible_in_tree() or r.size.y < ThemeManager.px.touch - 0.5:
-          return "the toggle at %s, visible %s" % [r, t.is_visible_in_tree()]
-      if not side.encloses(r) or r.intersects(slot) or r.intersects(cards) or r.intersects(shell.get_node("Page/PhoneHandle/Pill").get_global_rect()):
-          return "the toggle %s, the side %s, the slot %s, the cards %s" % [r, side, slot, cards]
-      # On the slot's side of the column.
-      var m := float(roundi(ThemeManager.px.gap * 1.5))
-      var off := side.end.x - m - r.end.x if ThemeManager.side_left() else r.position.x - side.position.x - m
-      if absf(off) > 0.5:
-          return "the toggle %s off the slot's side of %s by %s" % [r, side, off]
-      for b in t.get_node("Box").get_children():
-          if b.size.y < ThemeManager.px.touch - 0.5 or b.size.x < ThemeManager.px.touch:
-              return "%s is %s" % [b.name, b.size]
+      var status: StatusBar = shell.get_node("Page/Status")
+      var bad := PackedStringArray()
+      var was := {status_position = ThemeManager.status_position, hand = ThemeManager.hand}
+      for pos in ["top", "bottom", "left", "right", "off"]:
+          for hand in ["lhd", "rhd"]:
+              ThemeManager.set_look({status_position = pos, hand = hand})
+              await runner.frames(4)
+              var at := "%s, %s: " % [pos, hand]
+              var r := t.get_global_rect()
+              var side: Rect2 = shell.get_node("Page/Body/Side").get_global_rect()
+              var slot: Rect2 = shell.get_node("Page/Body/Slot").get_global_rect()
+              var cards: Rect2 = shell.get_node("Page/Body/Side/Panel").get_global_rect()
+              if not t.is_visible_in_tree():
+                  bad.append(at + "no toggle")
+                  continue
+              if r.intersects(slot) or r.intersects(cards) or r.intersects(shell.get_node("Page/PhoneHandle/Pill").get_global_rect()):
+                  bad.append(at + "the toggle %s, the slot %s, the cards %s" % [r, slot, cards])
+              if pos == "off":
+                  # On the slot's side of the column.
+                  var m := float(roundi(ThemeManager.px.gap * 1.5))
+                  var off := side.end.x - m - r.end.x if ThemeManager.side_left() else r.position.x - side.position.x - m
+                  if not side.encloses(r) or absf(off) > 0.5:
+                      bad.append(at + "the toggle %s off the slot's side of %s" % [r, side])
+              elif not status.get_global_rect().grow(0.5).encloses(r) or status.source_slot.get_global_rect().position.distance_to(r.position) > 1.0:
+                  bad.append(at + "the toggle %s not over its slot %s in the bar %s" % [r, status.source_slot.get_global_rect(), status.get_global_rect()])
+              for b in t.get_node("Box").get_children():
+                  if b.size.y < ThemeManager.px.touch - 0.5 or b.size.x < ThemeManager.px.touch - 0.5:
+                      bad.append(at + "%s is %s" % [b.name, b.size])
+      ThemeManager.set_look(was)
+      await runner.frames(4)
+      if not bad.is_empty():
+          return "\n".join(bad)
   - screenshot: home-nav-toggle-phone
   # Picked: started without the app page, shown in the slot, configured to it at each snap; the
   # phone gives up video focus. A drag reconfigures it once, on the release.

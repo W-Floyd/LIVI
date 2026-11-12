@@ -134,6 +134,8 @@ func _init() -> void:
 	var status := StatusBar.new()
 	status.name = "Status"
 	status.minimum_size_changed.connect(_layout_status)
+	# The slot toggle lies over the bar's slot for it.
+	status.source_moved.connect(func(): _place_source.call_deferred())
 	page.add_child(status)
 	var body := HBoxContainer.new()
 	body.name = "Body"
@@ -314,6 +316,8 @@ func _style() -> void:
 	_place_keyboard.call_deferred()
 	if _status.edge != ThemeManager.status_position:
 		_move_status()
+		# The slot toggle follows the bar's new shape.
+		_update_source()
 	_layout_status()
 
 
@@ -393,6 +397,7 @@ func _layout_status() -> void:
 	if _page:
 		_fit_page(_page)
 	_place_next_frame()
+	_place_source.call_deferred()
 
 
 ## A new edge for the status bar (Look → Status bar): it fades in there, at once under reduced
@@ -478,6 +483,7 @@ func open_page(page: String) -> String:
 	$Page.visible = home or page == "apps" or page == "media" or (live and not own_bar)
 	_body.visible = home
 	_show_charge()
+	_update_source()
 	if home and _cards_due:
 		_bind_cards()
 		_update_player()
@@ -734,35 +740,44 @@ func _update_split() -> void:
 	_update_source()
 
 
-## The phone's widths home snaps to: about a third, a half and two thirds of the body, none
-## narrower than the cards' column nor leaving the cards less than it. Android Auto takes any
-## area (a phone that refuses one is letterboxed), so the cards set the limits. The picture comes
-## first: the cards take no more than SIDE_SHARE of the body (side by side SIDE_SHARE_SPLIT),
-## never less than their column, so the cards layout keeps to one column beside it.
+## The phone's widths home snaps to: about a half and two thirds of the body, none narrower
+## than the cards' column nor leaving the cards less than it. Android Auto takes any area (a phone
+## that refuses one is letterboxed), so the cards set the limits. The picture comes first: the
+## cards never take more than half the body (SIDE_MOST), and on their own (`_phone_width` with no
+## choice in the look) no more than SIDE_SHARE (side by side SIDE_SHARE_SPLIT).
 func _snaps() -> Array[float]:
 	var full := _rect_beside_status().size.x
 	var side: float = ThemeManager.px.side
-	var share := SIDE_SHARE_SPLIT if ThemeManager.home_layout == "split" else SIDE_SHARE
-	var lo := maxf(side, full - maxf(side, roundf(full * share)))
+	var lo := maxf(side, full - maxf(side, roundf(full * SIDE_MOST)))
 	var hi := maxf(lo, full - side)
 	var out: Array[float] = []
-	for f in [1.0 / 3.0, 0.5, 2.0 / 3.0]:
+	for f in [0.5, 2.0 / 3.0]:
 		var w := roundf(clampf(full * f, lo, hi))
 		if out.is_empty() or w - out.back() >= ThemeManager.px.touch:
 			out.append(w)
 	return out
 
 
-## The most of home's body the cards take beside the picture, in each layout.
+## The most of home's body the cards take beside the picture: at all, and by default in each
+## layout.
+const SIDE_MOST := 0.5
 const SIDE_SHARE := 1.0 / 3.0
 const SIDE_SHARE_SPLIT := 0.5
 
 
-## The phone's width while shown: the snap nearest the look's share, by default a half.
+## The phone's width while shown: the snap nearest the look's share; by default the narrowest that
+## leaves the cards no more than their layout's share.
 func _phone_width() -> float:
 	var snaps := _snaps()
-	var share: float = ThemeManager.home_split if ThemeManager.home_split > 0.0 else 0.5
-	var want: float = share * _rect_beside_status().size.x
+	var full := _rect_beside_status().size.x
+	if ThemeManager.home_split <= 0.0:
+		var share := SIDE_SHARE_SPLIT if ThemeManager.home_layout == "split" else SIDE_SHARE
+		var most := maxf(ThemeManager.px.side, roundf(full * share))
+		for s in snaps:
+			if full - s <= most + 0.5:
+				return s
+		return snaps.back()
+	var want: float = ThemeManager.home_split * full
 	var best: float = snaps[0]
 	for s in snaps:
 		if absf(s - want) < absf(best - want):
@@ -1006,28 +1021,45 @@ func _keep_nav(now := false) -> void:
 	launcher.open(id, false)
 
 
+## The slot toggle is in the status bar (`_update_source`).
+var _source_in_bar := false
+
+
 ## The toggle shows on home while the phone and the navigation app are both there and the slot
-## is open. Its band is the side's bottom margin, so the cards fit above it, the tall player too.
+## is open: in the status bar in place of the phone's name, or with the bar off in a band that is
+## the side's bottom margin, so the cards fit above it, the tall player too.
 func _update_source() -> void:
 	if _source == null:
 		return
 	var nav := nav_app()
-	var band := nav != "" and has_phone() and ThemeManager.home_phone
-	if band:
+	var shown := nav != "" and has_phone() and ThemeManager.home_phone
+	if shown:
 		_source.nav_name = str(launcher.app(nav).get("name", nav))
+		_source.phone_name = _status.phone
 		_source.source = slot_source()
+	_source.visible = shown and _page_name == "home"
+	_source_in_bar = _source.visible and ThemeManager.status_position != "off"
+	_source.vertical = _source_in_bar and _status.vertical()
+	_status.source_size = _source.get_combined_minimum_size() if _source_in_bar else Vector2.ZERO
+	var band := shown and ThemeManager.status_position == "off"
 	var m := roundi(ThemeManager.px.gap * 1.5)
 	var bottom := m + (roundi(_source.get_combined_minimum_size().y) + m if band else 0)
-	_source.visible = band and _page_name == "home"
 	if _side.get_theme_constant("margin_bottom") != bottom:
 		_side.add_theme_constant_override("margin_bottom", bottom)
 		_fit.call_deferred()
 	_place_source()
+	_place_source.call_deferred()
 
 
-## At the bottom of the cards' column, on the slot's side.
+## Over its slot in the status bar; with the bar off, at the bottom of the cards' column on the
+## slot's side.
 func _place_source() -> void:
 	if _source == null or not _source.visible:
+		return
+	if _source_in_bar:
+		if _status.source_slot:
+			_source.size = _source.get_combined_minimum_size()
+			_source.global_position = _status.source_slot.get_global_rect().position.round()
 		return
 	var side := _side.get_global_rect()
 	var m := float(roundi(ThemeManager.px.gap * 1.5))
@@ -1053,7 +1085,7 @@ func _place_source() -> void:
 ## What of the one-line Precondition the band under the cards holds beside the pill: "words",
 ## "icon" (and Auto), or "" (nothing).
 func _band_room() -> String:
-	if _source == null or not _source.visible:
+	if _source == null or not _source.visible or _source_in_bar:
 		return ""
 	var m := float(roundi(ThemeManager.px.gap * 1.5))
 	var free: float = _side.size.x - m * 2.0 - _source.get_combined_minimum_size().x - ThemeManager.px.gap
@@ -1118,7 +1150,7 @@ func _fit_side_by_side(panel: HomeCards, fits: Callable, inside: Callable) -> vo
 		_stat.compact = true
 		widen.call()
 	# Under the media column where it fits there, else across the foot as in the stack.
-	if _source.visible and _source.get_combined_minimum_size().x <= panel.side_column().y:
+	if _source.visible and not _source_in_bar and _source.get_combined_minimum_size().x <= panel.side_column().y:
 		panel.below = _side.get_theme_constant("margin_bottom") - roundf(ThemeManager.px.gap * 1.5)
 	if not fits.call():
 		_stat.compact = true

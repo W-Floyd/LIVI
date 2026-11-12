@@ -1,7 +1,8 @@
 class_name SourceToggle
 extends Card
-## What home's slot shows, "Phone | <navigation app>": a segmented pill under the cards on the
-## slot's side, while both are there. The chosen segment is filled with the accent.
+## What home's slot shows, "<navigation app> | <phone>": a segmented pill in the status bar in
+## place of the phone's name (with the bar off, under the cards on the slot's side), while both
+## are there. The chosen segment is filled with the accent.
 
 ## A segment tapped: "phone" or "nav".
 signal picked(source: String)
@@ -18,20 +19,41 @@ var nav_name := "":
 			nav_name = v
 			_restyle_segments()
 
+## The phone's name on its segment.
+var phone_name := "":
+	set(v):
+		if v != phone_name:
+			phone_name = v
+			_restyle_segments()
+## Stacked, icons only: in a status bar column.
+var vertical := false:
+	set(v):
+		if v != vertical:
+			vertical = v
+			if _box:
+				_box.vertical = v
+			_restyle_segments()
+
 var _phone: Button
 var _nav: Button
+var _box: BoxContainer
+## The phone's signal on its segment, after its name, in a row.
+var _bars: TextureRect
 
 
 func _build() -> void:
 	name = "Source"
-	var box := HBoxContainer.new()
-	box.name = "Box"
-	box.add_theme_constant_override("separation", 0)
+	_box = BoxContainer.new()
+	_box.name = "Box"
+	_box.add_theme_constant_override("separation", 0)
 	_phone = _segment("Phone", "phone")
+	_bars = UI.icon("bars", "icon")
+	_bars.name = "Bars"
+	_phone.add_child(_bars)
 	_nav = _segment("Nav", "nav")
-	box.add_child(_phone)
-	box.add_child(_nav)
-	add_child(box)
+	_box.add_child(_nav)
+	_box.add_child(_phone)
+	add_child(_box)
 
 
 func _segment(node_name: String, pick: String) -> Button:
@@ -64,10 +86,11 @@ func _restyle_segments() -> void:
 	var h: float = ThemeManager.px.touch
 	var font: Font = ThemeManager.fonts.strong
 	var fs := ThemeManager.font_size("caption")
-	for pair in [[_phone, "Phone", "phone"], [_nav, nav_name if nav_name != "" else "Maps", "pin"]]:
+	for pair in [[_phone, phone_name if phone_name != "" else "Phone", "phone"], [_nav, nav_name if nav_name != "" else "Maps", "pin"]]:
 		var b: Button = pair[0]
 		var on := (b == _phone) == (source == "phone")
-		b.text = pair[1]
+		b.text = "" if vertical else pair[1]
+		b.tooltip_text = pair[1]
 		b.icon = Icons.texture(pair[2], ThemeManager.px.icon)
 		var box := StyleBoxFlat.new()
 		box.bg_color = ThemeManager.c.accent if on else Color(0, 0, 0, 0)
@@ -87,5 +110,20 @@ func _restyle_segments() -> void:
 		b.add_theme_constant_override("h_separation", roundi(g * 0.5))
 		# As wide as its word, within a few touch targets: a long app name is cut short.
 		var w: float = font.get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + ThemeManager.px.icon + g * 2.7
-		b.custom_minimum_size = Vector2(clampf(ceilf(w), h * 1.6, h * 4.0), h)
+		b.custom_minimum_size = Vector2(h, h) if vertical else Vector2(clampf(ceilf(w), h * 1.6, h * 4.0), h)
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER if vertical else HORIZONTAL_ALIGNMENT_LEFT
+		if vertical:
+			box.content_margin_left = 0
+			box.content_margin_right = 0
+		elif b == _phone:
+			# Room for the signal after the name.
+			var bw: float = ThemeManager.px.icon + g * 0.5
+			box.content_margin_right += bw
+			b.custom_minimum_size.x += ceilf(bw)
+			_bars.visible = true
+			_bars.modulate = ink
+			_bars.size = Vector2(ThemeManager.px.icon, h)
+			_bars.position = Vector2(b.custom_minimum_size.x - g * 1.2 - ThemeManager.px.icon, 0.0)
+		if vertical:
+			_bars.visible = false
 	update_minimum_size()

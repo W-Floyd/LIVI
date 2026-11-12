@@ -264,37 +264,38 @@ is `huVolume`, as the hard keys. The core has no shuffle or repeat. Scenario `me
 
 Home's media card (`MiniPlayer`) leads home while something plays (`HomeCards.tall`): with the
 phone hidden it takes the large slot on the driver's side and the other cards stack beside it at
-their own heights, centred. Beside the phone the picture comes first: the cards take no more than a
-third of the body (`Shell.SIDE_SHARE`; side by side a half, `SIDE_SHARE_SPLIT`), never less than
-their column, so the divider's snaps (`Shell._snaps`) are only the widths that leave them that; a
-column with room for two (`TALL_SHARE`, `TALL_TOUCH`, `REST_TOUCH`; a larger panel) gives it a
-column of its own on the driver's side (the card most touched), the rest stacked from the top, as
-narrow as their widest card, else it fills what the stacked cards leave, never shorter than the
-tallest of them (a row the battery card carries aside). It is never left out: where the cards don't
-fit (`Shell._fit`), Precondition moves into the battery card as its bottom row (`HomeCards.foot`,
-`StatTile.foot`), then goes to one line there (`ToggleRow.compact`), then beside the Phone | <app>
-pill (its icon and Auto where its words don't fit), then the battery card compact
-(`StatTile.compact`), then the media card to one row without prev; only then do cards go,
-Precondition first; with nothing playing, the compact media card goes first. It lays itself out by
-that room (`HomeCards.child_rect`, shown or not): `wide` (cover the card's height beside title,
-artist, album, a position bar and larger controls, as the Media page), `tall` (cover over them),
-one row, or the controls in a row under the text when it would keep fewer than `MIN_CHARS` beside
-them. Nothing playing: a compact "Nothing playing / Open Media" card. The cover is drawn square at
-every size (`ArtView.square`); beside the text its top is the title's and the controls start at the
-text's edge, under it they are centred. Scenario `media-player`.
+their own heights, centred. Beside the phone the picture comes first: on their own the cards take
+no more than a third of the body (`Shell.SIDE_SHARE`; side by side a half, `SIDE_SHARE_SPLIT`),
+never less than their column, and a drag on the divider (`Shell._snaps`) gives them at most half
+(`SIDE_MOST`); a column with room for two (`TALL_SHARE`, `TALL_TOUCH`, `REST_TOUCH`; a larger
+panel) gives it a column of its own on the driver's side (the card most touched), the rest stacked
+from the top, as narrow as their widest card, else it fills what the stacked cards leave, never
+shorter than the tallest of them (a row the battery card carries aside). It is never left out:
+where the cards don't fit (`Shell._fit`), Precondition moves into the battery card as its bottom
+row (`HomeCards.foot`, `StatTile.foot`), then goes to one line there (`ToggleRow.compact`), then,
+with the status bar off, beside the <app> | <phone> toggle (its icon and Auto where its words don't
+fit), then the battery card compact (`StatTile.compact`), then the media card to one row without
+prev; only then do cards go, Precondition first; with nothing playing, the compact media card goes
+first. It lays itself out by that room (`HomeCards.child_rect`, shown or not): `wide` (cover the
+card's height beside title, artist, album, a position bar and larger controls, as the Media page),
+`tall` (cover over them), one row, or the controls in a row under the text when it would keep fewer
+than `MIN_CHARS` beside them. Nothing playing: a compact "Nothing playing / Open Media" card. The
+cover is drawn square at every size (`ArtView.square`); beside the text its top is the title's and
+the controls start at the text's edge, under it they are centred. Scenario `media-player`.
 
 Look's Home layout (`home_layout`) Side by side (`HomeCards.side_by_side`) puts the battery card in
 a narrow column the panel's height away from the driver: the charge over a bar that fills upward,
 the range under it (`StatTile.vertical`), Precondition one line in its foot (its icon and Auto
-where its words don't fit), reaching down beside the Phone | <app> pill, which sits under the media
-card from its edge (across the foot, the column ending above it, where the media card is narrower
-than the pill). The media card takes the rest of the width and the height on the driver's side, the
-charging stop over it: `wide` where its cover beside the text gets `WIDE_TOUCH` touch targets, else
-its cover the card's width, cropped (`ArtView.fill_rect`), over the title, artist, bar and controls
-(`cover`, prev going where three don't fit); with nothing playing, the placeholder so. The same
-with no picture; a right-hand drive mirrors it. Where the media card's controls want the width or
-the column the height, the battery's type goes smaller (`StatTile.compact`), then Precondition
-goes. Cards never overlap: the dashboard's stacked cards are at least as wide as the widest.
+where its words don't fit), reaching down, with the status bar off, beside the <app> | <phone>
+toggle, which then sits under the media card from its edge (across the foot, the column ending
+above it, where the media card is narrower than the toggle). The media card takes the rest of the
+width and the height on the driver's side, the charging stop over it: `wide` where its cover beside
+the text gets `WIDE_TOUCH` touch targets, else its cover the card's width, cropped
+(`ArtView.fill_rect`), over the title, artist, bar and controls (`cover`, prev going where three
+don't fit); with nothing playing, the placeholder so. The same with no picture; a right-hand drive
+mirrors it. Where the media card's controls want the width or the column the height, the battery's
+type goes smaller (`StatTile.compact`), then Precondition goes. Cards never overlap: the
+dashboard's stacked cards are at least as wide as the widest.
 
 ## App launcher
 
@@ -392,17 +393,18 @@ the rest say Done (text-input-v3 has no search purpose, so a search field cannot
 
 Settings → Look → "Navigation app" (or "Use for navigation" in an app's menu) makes a launcher app,
 godot-maps typically, home's other occupant of the phone's slot (`nav_app` in the look). While the
-phone and it are both there, a "Phone | <app>" pill under the cards, on the slot's side, picks which
-the slot shows (`home_source`, kept); the cards fit above it. With no phone the slot is the app's. Picked, the app
-starts without the app page if it is not running and stays running when the phone is picked again;
-the phone keeps video focus only while it is shown. Its window is configured to the slot
-(`Wayland.set_window_area`, a window's own area over the app area) whenever the split settles, as
-the phone is asked for its area; opened from Apps, the same window moves to the app page at the app
-area, and back to the slot on home. Its keyboard covers the cards. It counts as DriveSafe. It is kept
-running while designated, whatever page shows: started when the shell starts (once the launcher
-lists it), and after an exit again in 2 s, doubling to 60 s (reset after a minute up), unless the
-driver closed it from the switcher.
-Scenario `home-phone-toggle`.
+phone and it are both there, an "<app> | <phone>" toggle (`SourceToggle`) in the status bar, in
+place of the phone's name (its segments icons only in a column; with the bar off, under the cards
+on the slot's side, the cards above it), picks which the slot shows (`home_source`, kept). With no
+phone the slot is the app's. Picked, the app starts without the app page if it is not running and
+stays running when the phone is picked again; the phone keeps video focus only while it is shown.
+Its window is configured to the slot (`Wayland.set_window_area`, a window's own area over the app
+area) whenever the split settles, as the phone is asked for its area; opened from Apps, the same
+window moves to the app page at the app area, and back to the slot on home. Its keyboard covers the
+cards. It counts as DriveSafe. It is kept running while designated, whatever page shows: started
+when the shell starts (once the launcher lists it), and after an exit again in 2 s, doubling to 60
+s (reset after a minute up), unless the driver closed it from the switcher. Scenario
+`home-phone-toggle`.
 
 ## While driving
 
@@ -457,7 +459,9 @@ as they open, so their rows ask for a second tap.
 (`status_position`) runs along the top (stock), the bottom, as a column of stacked items down the
 left or right, or is Off. Every page with the bar lays out in the rest (`Shell.content_rect`); on
 the driver's side a docked rail stays at the edge and the column sits beside it as one band. Its
-charge shows wherever home's battery card does not (`StatusBar.charge_shown`).
+charge shows wherever home's battery card does not (`StatusBar.charge_shown`); on home, while the
+phone and the navigation app share the slot, the slot's toggle takes the phone's name's place
+(`StatusBar.source_slot`).
 
 The docked rail's order is the look's too (`rail_order`, item ids top first; unknown ids are
 dropped and missing ones follow in the default order). On the rail, a press held still for 400 ms

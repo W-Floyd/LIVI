@@ -1,7 +1,7 @@
 class_name StatusBar
 extends PanelContainer
-## Clock, outside temperature, phone and charge. Information only: nothing here is a small
-## tap target. A row along the top or bottom edge, or a column along the left or right one
+## Clock, outside temperature, phone and charge. Information only, but for home's slot toggle
+## (SourceToggle), which the shell lays over `source_slot` in place of the phone's name. A row along the top or bottom edge, or a column along the left or right one
 ## (`edge`), the items stacked.
 
 var clock := "--:--":
@@ -16,6 +16,17 @@ var phone := "":
 	set(v):
 		phone = v
 		if _phone: _phone.text = v
+## The room the slot toggle takes in place of the phone's name; zero: the name.
+var source_size := Vector2.ZERO:
+	set(v):
+		if v == source_size:
+			return
+		source_size = v
+		_show_source()
+## Where the shell lays the slot toggle.
+var source_slot: Control
+## The slot moved or resized.
+signal source_moved
 var charge := "":
 	set(v):
 		charge = v
@@ -52,6 +63,9 @@ var edge := "top":
 var _clock: Label
 var _outside: Label
 var _phone: Label
+var _phone_item: Control
+## The phone's signal: on the slot toggle's phone side while it shows in a row.
+var _bars: Control
 var _charge: Label
 var _charge_icon: TextureRect
 
@@ -80,20 +94,24 @@ func _arrange() -> void:
 	var temp := UI.icon("temp", "icon", "dim")
 	var phone_icon := UI.icon("phone", "icon", "dim")
 	var bars := UI.icon("bars", "icon", "dim")
+	_bars = bars
 	if not vertical():
 		for l in [_clock, _outside, _phone, _charge]:
 			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		_phone.clip_text = false
 		_phone.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+		_phone_item = UI.hbox([phone_icon, _phone], 0.3)
 		add_child(UI.hbox([
 			_clock,
 			UI.hbox([temp, _outside], 0.3),
 			UI.spacer(),
-			UI.hbox([phone_icon, _phone], 0.3),
+			_phone_item,
+			_slot(),
 			bars,
 			UI.hbox([_charge_icon, _charge], 0.3),
 		], 1.5))
 		_charge.get_parent().visible = charge_shown
+		_show_source()
 		return
 	for l in [_clock, _outside, _phone, _charge]:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -107,11 +125,38 @@ func _arrange() -> void:
 		_clock,
 		UI.vbox([temp, _outside], 0.2),
 		gap,
-		UI.vbox([phone_icon, _phone], 0.2),
+		_phone_vbox(phone_icon),
+		_slot(),
 		bars,
 		UI.vbox([_charge_icon, _charge], 0.2),
 	], 1.2))
 	_charge.get_parent().visible = charge_shown
+	_show_source()
+
+
+func _phone_vbox(icon: Control) -> Control:
+	_phone_item = UI.vbox([icon, _phone], 0.2)
+	return _phone_item
+
+
+func _slot() -> Control:
+	source_slot = Control.new()
+	source_slot.name = "SourceSlot"
+	source_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	source_slot.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	source_slot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	source_slot.item_rect_changed.connect(func(): source_moved.emit())
+	return source_slot
+
+
+func _show_source() -> void:
+	if source_slot == null:
+		return
+	var on := source_size != Vector2.ZERO
+	source_slot.visible = on
+	source_slot.custom_minimum_size = source_size
+	_phone_item.visible = not on
+	_bars.visible = not on or vertical()
 
 
 func _ready() -> void:

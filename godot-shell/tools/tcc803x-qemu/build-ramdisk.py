@@ -1,8 +1,10 @@
 #!/usr/bin/env python3 -I
 """Stock ramdisk.gz -> ramdisk.emu.gz: root console, ro.secure=0, init.emu.rc imported, fstab without discard.
 Kia-derived output stays next to the input.
-usage: build-ramdisk.py ramdisk.gz ramdisk.emu.gz overlay/init.emu.rc [qfb.ko]"""
-import gzip, re, sys
+usage: build-ramdisk.py [--egl DIR] ramdisk.gz ramdisk.emu.gz overlay/init.emu.rc [qfb.ko]
+--egl: DIR's files (gles/build.sh's out/egl) go to /emu-egl and init.emu-egl.rc (next to init.emu.rc) is imported:
+the GLES 2 driver for the processes in debug.emu.gles2 (default the navigation), see README "OpenGL ES 2"."""
+import gzip, os, re, sys
 
 def parse(d):
     o, ents = 0, []
@@ -31,8 +33,12 @@ def emit(ents):
     one(dict(ino=0, mode=0, uid=0, gid=0, nl=1, mt=0, rmaj=0, rmin=0, name="TRAILER!!!", data=b""))
     return bytes(out)
 
-src, dst, rc = sys.argv[1:4]
-ko = sys.argv[4] if len(sys.argv) > 4 else None
+args = sys.argv[1:]
+egl = None
+if args[:1] == ["--egl"]:
+    egl, args = args[1], args[2:]
+src, dst, rc = args[:3]
+ko = args[3] if len(args) > 3 else None
 ents = parse(gzip.open(src).read())
 by = {e["name"]: e for e in ents}
 t = by["init.rc"]["data"].decode()
@@ -42,13 +48,28 @@ by["init.rc"]["data"] = t.encode()
 p = by["default.prop"]
 p["data"] = p["data"].replace(b"ro.secure=1", b"ro.secure=0")
 nxt = max(e["ino"] for e in ents) + 1
-ents.append(dict(ino=nxt, mode=0o100644, uid=0, gid=0, nl=1, mt=0, rmaj=0, rmin=0, name="init.emu.rc", data=open(rc, "rb").read()))
+rcdata = open(rc, "rb").read()
+if egl:
+    rcdata += b"\nimport /init.emu-egl.rc\n"
+ents.append(dict(ino=nxt, mode=0o100644, uid=0, gid=0, nl=1, mt=0, rmaj=0, rmin=0, name="init.emu.rc", data=rcdata))
 if ko:
     ents.append(dict(ino=nxt + 1, mode=0o100644, uid=0, gid=0, nl=1, mt=0, rmaj=0, rmin=0, name="qfb.ko", data=open(ko, "rb").read()))
+if egl:
+    add = [("init.emu-egl.rc", 0o100644, open(os.path.join(os.path.dirname(rc), "init.emu-egl.rc"), "rb").read()),
+           ("emu-egl", 0o40755, b"")]
+    for f in sorted(os.listdir(egl)):
+        x = os.access(os.path.join(egl, f), os.X_OK)
+        add.append(("emu-egl/" + f, 0o100755 if x else 0o100644, open(os.path.join(egl, f), "rb").read()))
+    for i, (name, mode, data) in enumerate(add):
+        ents.append(dict(ino=nxt + 2 + i, mode=mode, uid=0, gid=0, nl=2 if mode & 0o40000 else 1, mt=0, rmaj=0, rmin=0,
+                         name=name, data=data))
 # The model's eMMC has no erase group size: ext4 `discard` makes mmc_erase divide by zero ("Division by
 # zero in kernel") and stalls everything on the filesystem.
 for e in ents:
     if e["name"].startswith("fstab."):
         e["data"] = e["data"].replace(b",discard", b"")
 p["data"] += b"ro.kernel.qemu=1\nro.kernel.qemu.gles=0\n"
+if egl:
+    # zygote must not load EGL before it knows which app it forks: libGLES_emu chooses by process name.
+    p["data"] += b"ro.zygote.disable_gl_preload=1\ndebug.emu.gles2=com.mnsoft.navi\n"
 open(dst, "wb").write(gzip.compress(emit(ents), 6))

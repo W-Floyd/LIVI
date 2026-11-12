@@ -1,0 +1,8 @@
+# Imported from init.emu.rc by build-ramdisk.py --egl: the GLES 2 driver in /emu-egl (gles/). The loader takes
+# /system/lib/egl/libGLES_android.so whatever is installed (ro.kernel.qemu.gles=0, which also keeps hwui off), so
+# libGLES_emu goes over it, and the stock one is copied to the vendor EGL tmpfs (init.emu.rc) as libagl.so for it
+# (a bind would share the next mount; bionic 4.4 tells libraries apart by basename).
+on post-fs
+    copy /system/lib/egl/libGLES_android.so /system/vendor/lib/egl/libagl.so
+    chmod 0644 /system/vendor/lib/egl/libagl.so
+    mount none /emu-egl/libGLES_emu.so /system/lib/egl/libGLES_android.so bind

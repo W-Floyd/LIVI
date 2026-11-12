@@ -18,6 +18,7 @@ Nothing Kia-derived is committed. The scripts read the firmware from local paths
 | `run.sh` | run the machine; serial console on stdout (docker, or native with `QEMU=`) |
 | `bench.py` | cold-boot timing: wall to `sys.boot_completed`, guest/wall clock, `input tap` latency |
 | `stock-ui.yaml` | the stock UI as a graph of screens and transitions, for `drive.py --flow` |
+| `gles/` | a GLES 2/3 driver for the guest (SwiftShader, fetched and built by `gles/build.sh`), see "OpenGL ES 2" |
 
 ## Run
 
@@ -283,3 +284,37 @@ QEMU=$TCC_QEMU EMMC=$TCC_EMMC LOADVM=ui BOOT_DIR=$TCC_BOOT_DIR RAMDISK=ramdisk.e
 
 The capture's boot record has the driving regulation set (byte 2): first-run setup and other pages then show their
 driving lockout instead. The `parked` state of these files clears it (boot record, 0x8103 and 0x819a 0, 0x8129 1).
+
+## OpenGL ES 2
+
+The guest's only renderer is Android 4.4's `libGLES_android` (GLES 1.x): `ro.kernel.qemu=1` with `ro.kernel.qemu.gles=0`
+makes the EGL loader take it whatever is installed (and keeps hwui off: `GLES20Canvas.isAvailable` reads the same
+property), and the Mali EGL is hidden. The navigation's engine wants GLES 2 (`eglCreateContext` threw
+`IllegalArgumentException`: no GLES 2 config). `gles/` adds one, for chosen processes only:
+
+- `gles/build.sh` fetches the macOS NDK r25c (sha256-pinned; elsewhere `NDK=`), SwiftShader at the last commit with its legacy
+  GLES (2021-12, Subzero JIT, GLES 3.0) and six AOSP 4.4 headers, applies `swiftshader-android44.patch` (API 19: the window's
+  own dequeue/queue and gralloc 0.x instead of vndk/libsync, HAL visual ids, no LLVM) and builds into `$OUT/egl`. ~20 s
+  warm, 0.5 GB in `WORK` plus the 1.3 GB dmg.
+- `libGLES_emu.so` (`gles_emu.c`) goes over `/system/lib/egl/libGLES_android.so` and picks per process: SwiftShader for the
+  names in `debug.emu.gles2` (comma-separated or `*`; default `com.mnsoft.navi`, `setprop` applies to processes started
+  after), the stock renderer (copied to the vendor EGL tmpfs) for the rest. SurfaceFlinger and the other apps are unchanged;
+  zygote's GL preload is off so the choice is per app.
+- `build-ramdisk.py --egl $OUT/egl ...` puts it in the ramdisk (`/emu-egl`, `overlay/init.emu-egl.rc`). Without `--egl` the
+  ramdisk is byte-identical to before. A cold boot (snapshots carry the old ramdisk).
+
+```sh
+WORK=$W/gles OUT=$W/gles/out gles/build.sh
+./build-ramdisk.py --egl $W/gles/out/egl $BOOT_DIR/ramdisk.gz $BOOT_DIR/ramdisk.gles.gz overlay/init.emu.rc qfb.ko
+RAMDISK=ramdisk.gles.gz QEMU=... EMMC=... BOOT_DIR=... ./run.sh
+# on the console: setprop debug.emu.gles2 /emu-egl/gles2-test; /emu-egl/gles2-test 1920 720 30 [window]
+```
+
+`gles2-test` (pbuffer, or `window`: a top-most SurfaceFlinger layer through libgui by symbol) prints the renderer
+(`OpenGL ES 3.0 SwiftShader 4.6.6.6`), reads back a shaded pixel and times a full-screen shaded draw: 1920x720 at 5.6-8.4 fps
+into a pbuffer, 3.2 fps on screen (swap and SurfaceFlinger's composition included), 4 vCPUs on an M-series Mac.
+
+Navigation with it (no map data): its GL thread now creates both contexts and the 1920x720 window surface; it then waits
+15 s for `/storage/navi/navi/HKMC_Navi.apk`, reports the missing map to micomd and finishes the activity (home again).
+The map data is the remaining blocker.
+

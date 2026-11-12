@@ -83,16 +83,16 @@ What it takes, given the 9 tars:
    `NAVI_MIB` the same way), or the `navi` partition pointed at a second image.
 3. Nothing to decrypt by hand (the app does it), no licence (eMMC model).
 
-**Blocker: OpenGL ES 2.** `libExSLNavi.so` links `libGLESv2.so` and compiles shaders; the emulator hides the Mali
-EGL and falls back to Android 4.4's software `libGLES_android`, which is GLES 1.x only. Expect the app to start
-(search, routing, guidance) but no map drawn ("makeGLThread failed" or a blank surface). Drawing needs a GLES 2
-software renderer built for Android 4.4 armv7 (SwiftShader or Mesa softpipe as an EGL/GLES driver), which is
-its own project.
+**OpenGL ES 2.** `libExSLNavi.so` links `libGLESv2.so` and compiles shaders; Android 4.4's software `libGLES_android`
+(the emulator hides the Mali EGL) is GLES 1.x only, and the app's `eglCreateContext` threw. Solved by
+`tools/tcc803x-qemu/gles/` (SwiftShader GLES 3.0 for the nav process, README "OpenGL ES 2"): on the empty
+partition the GL thread now creates its contexts and window surface, then waits 15 s for
+`/storage/navi/navi/HKMC_Navi.apk` and finishes the activity. The map data is what is left. Speed: a full-screen
+shaded draw runs at 3-8 fps under TCG, so expect a slow but drawn map.
 
 **Effort.** Steps 1-3: a day, mostly copying 33 GB, worth it for the engine's non-drawing behaviour (routing,
-guidance, cluster turn-by-turn frames over the micom link, which micom-fake can record). A drawn map: unknown,
-gated on GLES 2. Check the GLES 2 question first, before downloading: start the app on the empty partition and
-read logcat for the EGL/GLES error.
+guidance, cluster turn-by-turn frames over the micom link, which micom-fake can record). A drawn map: GLES 2 is
+there (above); untested with data.
 
 ## Fake positions: proposal
 

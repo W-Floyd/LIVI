@@ -1,0 +1,352 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 1a0c3125..0c030f84 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -31,7 +31,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+     set(LINUX TRUE)
+ elseif(CMAKE_SYSTEM_NAME MATCHES "Android")
+     set(ANDROID TRUE)
+-    set(CMAKE_CXX_FLAGS "-DANDROID_NDK_BUILD")
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DANDROID_NDK_BUILD")
+ elseif(WIN32)
+ elseif(APPLE)
+ elseif(FUCHSIA)
+@@ -178,7 +178,7 @@ option_if_not_defined(SWIFTSHADER_LESS_DEBUG_INFO "Generate less debug info to r
+ option_if_not_defined(SWIFTSHADER_ENABLE_VULKAN_DEBUGGER "Enable Vulkan debugger support" FALSE)
+ option_if_not_defined(SWIFTSHADER_ENABLE_ASTC "Enable ASTC compressed textures support" TRUE)  # TODO(b/150130101)
+ 
+-set(BUILD_MARL ${SWIFTSHADER_BUILD_VULKAN})
++set(BUILD_MARL TRUE)  # also the Subzero reactor's coroutines
+ 
+ if(${SWIFTSHADER_BUILD_VULKAN} AND ${SWIFTSHADER_ENABLE_VULKAN_DEBUGGER})
+     set_if_not_defined(SWIFTSHADER_BUILD_CPPDAP TRUE)
+@@ -657,8 +657,10 @@ endif()
+ ###########################################################
+ # LLVM
+ ###########################################################
+-add_subdirectory(${THIRD_PARTY_DIR}/llvm-${SWIFTSHADER_LLVM_VERSION} EXCLUDE_FROM_ALL)
+-set_target_properties(llvm PROPERTIES FOLDER "third_party")
++if(${REACTOR_BACKEND} STREQUAL "LLVM")
++    add_subdirectory(${THIRD_PARTY_DIR}/llvm-${SWIFTSHADER_LLVM_VERSION} EXCLUDE_FROM_ALL)
++    set_target_properties(llvm PROPERTIES FOLDER "third_party")
++endif()
+ 
+ ###########################################################
+ # Subzero
+diff --git a/src/Main/FrameBufferAndroid.cpp b/src/Main/FrameBufferAndroid.cpp
+index 5ff1b414..aaee1914 100644
+--- a/src/Main/FrameBufferAndroid.cpp
++++ b/src/Main/FrameBufferAndroid.cpp
+@@ -20,7 +20,15 @@
+ #include <system/graphics.h>
+ #include <vndk/window.h>
+ #else
+-#include <android/native_window.h>
++// NDK build for Android 4.4 (API 19): the platform's own window hooks and gralloc 0.x, from the
++// AOSP 4.4 headers; no vndk/libsync, and ANativeWindow_lock would need the window's CPU API, which
++// the EGL wrapper has already connected as EGL.
++#include <dlfcn.h>
++#include <sys/ioctl.h>
++#include <unistd.h>
++#include <hardware/gralloc.h>
++#include <system/graphics.h>
++#include <system/window.h>
+ #endif
+ 
+ namespace sw
+@@ -40,12 +48,35 @@ namespace sw
+ 	{
+ 		return ANativeWindow_queueBuffer(window, buffer, fenceFd);
+ 	}
++#else
++	static const gralloc_module_t *gralloc()
++	{
++		static const gralloc_module_t *module = []() -> const gralloc_module_t* {
++			typedef int (*GetModule)(const char *, const hw_module_t **);
++			void *lib = dlopen("libhardware.so", RTLD_NOW);
++			GetModule get = lib ? (GetModule)dlsym(lib, "hw_get_module") : nullptr;
++			const hw_module_t *m = nullptr;
++			return get && get(GRALLOC_HARDWARE_MODULE_ID, &m) == 0 ? (const gralloc_module_t*)m : nullptr;
++		}();
++		return module;
++	}
+ 
+-	inline int cancelBuffer(ANativeWindow* window, ANativeWindowBuffer* buffer, int fenceFd)
++	inline int dequeueBuffer(ANativeWindow* window, ANativeWindowBuffer** buffer)
+ 	{
+-		return ANativeWindow_cancelBuffer(window, buffer, fenceFd);
++		int fenceFd = -1;
++		int ret = window->dequeueBuffer(window, buffer, &fenceFd);
++		if (ret || fenceFd < 0) return ret;
++		int timeout = -1;
++		ioctl(fenceFd, _IOW('>', 0, int), &timeout);   // SYNC_IOC_WAIT of the 3.x sync framework
++		close(fenceFd);
++		return ret;
+ 	}
+-#endif // !defined(ANDROID_NDK_BUILD)
++
++	inline int queueBuffer(ANativeWindow* window, ANativeWindowBuffer* buffer, int fenceFd)
++	{
++		return window->queueBuffer(window, buffer, fenceFd);
++	}
++#endif
+ 
+ 	FrameBufferAndroid::FrameBufferAndroid(ANativeWindow* window, int width, int height)
+ 		: FrameBuffer(width, height, false, false),
+@@ -54,6 +85,9 @@ namespace sw
+ #ifndef ANDROID_NDK_BUILD
+ 		ANativeWindow_acquire(nativeWindow);
+ 		ANativeWindow_setUsage(nativeWindow, GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN);
++#else
++		nativeWindow->common.incRef(&nativeWindow->common);
++		native_window_set_usage(nativeWindow, GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN);
+ #endif
+ 	}
+ 
+@@ -61,6 +95,12 @@ namespace sw
+ 	{
+ #ifndef ANDROID_NDK_BUILD
+ 		ANativeWindow_release(nativeWindow);
++#else
++		if(buffer)
++		{
++			nativeWindow->cancelBuffer(nativeWindow, buffer, -1);
++		}
++		nativeWindow->common.decRef(&nativeWindow->common);
+ #endif
+ 	}
+ 
+@@ -76,46 +116,30 @@ namespace sw
+ 				unlock();
+ 			}
+ 
+-#ifndef ANDROID_NDK_BUILD
+ 			queueBuffer(nativeWindow, buffer, -1);
++#ifdef ANDROID_NDK_BUILD
++			buffer = nullptr;
+ #endif
+ 		}
+ 	}
+ 
+ 	void *FrameBufferAndroid::lock()
+ 	{
+-
+ #if defined(ANDROID_NDK_BUILD)
+-		ANativeWindow_Buffer surfaceBuffer;
+-		if (ANativeWindow_lock(nativeWindow, &surfaceBuffer, nullptr) != 0) {
+-			TRACE("%s failed to lock buffer %p", __FUNCTION__, buffer);
+-			return nullptr;
+-		}
+-		framebuffer = surfaceBuffer.bits;
+-
+-		if((surfaceBuffer.width < width) || (surfaceBuffer.height < height))
++		if(!buffer && dequeueBuffer(nativeWindow, &buffer) != 0)
+ 		{
+-			TRACE("lock failed: buffer of %dx%d too small for window of %dx%d",
+-						surfaceBuffer.width, surfaceBuffer.height, width, height);
++			buffer = nullptr;
+ 			return nullptr;
+ 		}
+-
+-		switch(surfaceBuffer.format)
++		const gralloc_module_t *module = gralloc();
++		if(!module || module->lock(module, buffer->handle,
++		                           GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
++		                           0, 0, buffer->width, buffer->height, &framebuffer) != 0)
+ 		{
+-		case AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM:     format = FORMAT_A8B8G8R8; break;
+-		case AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM:     format = FORMAT_X8B8G8R8; break;
+-		case AHARDWAREBUFFER_FORMAT_R8G8B8_UNORM:
+-			// Frame buffers are expected to have 16-bit or 32-bit colors, not 24-bit.
+-			TRACE("Unsupported frame buffer format R8G8B8"); ASSERT(false);
+-			format = FORMAT_R8G8B8;   // Wrong component order.
+-			break;
+-		case AHARDWAREBUFFER_FORMAT_R5G6B5_UNORM:       format = FORMAT_R5G6B5; break;
+-		default:
+-			TRACE("Unsupported frame buffer format %d", surfaceBuffer.format); ASSERT(false);
+-			format = FORMAT_NULL;
+-			break;
++			TRACE("%s failed to lock buffer %p", __FUNCTION__, buffer);
++			framebuffer = nullptr;
++			return nullptr;
+ 		}
+-		stride = surfaceBuffer.stride * Surface::bytes(format);
+ #else // !defined(ANDROID_NDK_BUILD)
+ 		if(dequeueBuffer(nativeWindow, &buffer) != 0)
+ 		{
+@@ -133,6 +157,7 @@ namespace sw
+ 			TRACE("%s failed to lock buffer %p", __FUNCTION__, buffer);
+ 			return nullptr;
+ 		}
++#endif // !defined(ANDROID_NDK_BUILD)
+ 
+ 		if((buffer->width < width) || (buffer->height < height))
+ 		{
+@@ -145,7 +170,7 @@ namespace sw
+ 		{
+ 		case HAL_PIXEL_FORMAT_RGB_565:   format = FORMAT_R5G6B5; break;
+ 		case HAL_PIXEL_FORMAT_RGBA_8888: format = FORMAT_A8B8G8R8; break;
+-#if ANDROID_PLATFORM_SDK_VERSION > 16
++#if defined(ANDROID_NDK_BUILD) || ANDROID_PLATFORM_SDK_VERSION > 16
+ 		case HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED: format = FORMAT_X8B8G8R8; break;
+ #endif
+ 		case HAL_PIXEL_FORMAT_RGBX_8888: format = FORMAT_X8B8G8R8; break;
+@@ -161,7 +186,6 @@ namespace sw
+ 			break;
+ 		}
+ 		stride = buffer->stride * Surface::bytes(format);
+-#endif // !defined(ANDROID_NDK_BUILD)
+ 
+ 		return framebuffer;
+ 	}
+@@ -177,7 +201,11 @@ namespace sw
+ 		framebuffer = nullptr;
+ 
+ #ifdef ANDROID_NDK_BUILD
+-		ANativeWindow_unlockAndPost(nativeWindow);
++		const gralloc_module_t *module = gralloc();
++		if(module && module->unlock(module, buffer->handle) != 0)
++		{
++			TRACE("%s: badness unlock failed", __FUNCTION__);
++		}
+ #else
+ 		if(GrallocModule::getInstance()->unlock(bufferImportedHandle) != 0)
+ 		{
+diff --git a/src/Main/FrameBufferAndroid.hpp b/src/Main/FrameBufferAndroid.hpp
+index 1b76d2d0..4a690378 100644
+--- a/src/Main/FrameBufferAndroid.hpp
++++ b/src/Main/FrameBufferAndroid.hpp
+@@ -16,6 +16,9 @@
+ #define sw_FrameBufferAndroid_hpp
+ 
+ #include <cutils/native_handle.h>
++#ifdef ANDROID_NDK_BUILD
++#include <system/window.h>
++#endif
+ 
+ #include "Main/FrameBuffer.hpp"
+ #include "Common/Debug.hpp"
+diff --git a/src/OpenGL/libEGL/CMakeLists.txt b/src/OpenGL/libEGL/CMakeLists.txt
+index 4e8e967e..55434d79 100644
+--- a/src/OpenGL/libEGL/CMakeLists.txt
++++ b/src/OpenGL/libEGL/CMakeLists.txt
+@@ -103,7 +103,7 @@ if(LINUX)
+ endif()
+ 
+ if (ANDROID)
+-    set_target_properties(libEGL_deprecated PROPERTIES SUFFIX "_swiftshader.so")
++    set_target_properties(libEGL_deprecated PROPERTIES OUTPUT_NAME libEGL SUFFIX "_swiftshader.so")
+ endif ()
+ 
+ set_shared_library_export_map(libEGL_deprecated ${CMAKE_CURRENT_SOURCE_DIR})
+diff --git a/src/OpenGL/libEGL/Config.cpp b/src/OpenGL/libEGL/Config.cpp
+index 17d219c5..4ade9db4 100644
+--- a/src/OpenGL/libEGL/Config.cpp
++++ b/src/OpenGL/libEGL/Config.cpp
+@@ -22,7 +22,7 @@
+ #include "common/debug.h"
+ 
+ #include <EGL/eglext.h>
+-#if defined(__ANDROID__) && !defined(ANDROID_NDK_BUILD)
++#if defined(__ANDROID__)
+ #include <system/graphics.h>
+ #endif
+ 
+@@ -66,7 +66,7 @@ Config::Config(sw::Format displayFormat, EGLint minInterval, EGLint maxInterval,
+ 		mBlueSize = 8;
+ 		mAlphaSize = 8;
+ 		mBindToTextureRGBA = EGL_TRUE;
+-		#if defined(__ANDROID__) && !defined(ANDROID_NDK_BUILD)
++		#if defined(__ANDROID__)
+ 			mNativeVisualID = HAL_PIXEL_FORMAT_BGRA_8888;
+ 		#else
+ 			mNativeVisualID = 2;   // Arbitrary; prefer over ABGR
+@@ -78,7 +78,7 @@ Config::Config(sw::Format displayFormat, EGLint minInterval, EGLint maxInterval,
+ 		mBlueSize = 8;
+ 		mAlphaSize = 8;
+ 		mBindToTextureRGBA = EGL_TRUE;
+-		#if defined(__ANDROID__) && !defined(ANDROID_NDK_BUILD)
++		#if defined(__ANDROID__)
+ 			mNativeVisualID = HAL_PIXEL_FORMAT_RGBA_8888;
+ 		#endif
+ 		break;
+@@ -87,7 +87,7 @@ Config::Config(sw::Format displayFormat, EGLint minInterval, EGLint maxInterval,
+ 		mGreenSize = 6;
+ 		mBlueSize = 5;
+ 		mAlphaSize = 0;
+-		#if defined(__ANDROID__) && !defined(ANDROID_NDK_BUILD)
++		#if defined(__ANDROID__)
+ 			mNativeVisualID = HAL_PIXEL_FORMAT_RGB_565;
+ 		#endif
+ 		break;
+@@ -97,7 +97,7 @@ Config::Config(sw::Format displayFormat, EGLint minInterval, EGLint maxInterval,
+ 		mBlueSize = 8;
+ 		mAlphaSize = 0;
+ 		mBindToTextureRGB = EGL_TRUE;
+-		#if defined(__ANDROID__) && !defined(ANDROID_NDK_BUILD)
++		#if defined(__ANDROID__)
+ 			mNativeVisualID = 0x1FF;   // HAL_PIXEL_FORMAT_BGRX_8888
+ 		#else
+ 			mNativeVisualID = 1;   // Arbitrary; prefer over XBGR
+@@ -109,7 +109,7 @@ Config::Config(sw::Format displayFormat, EGLint minInterval, EGLint maxInterval,
+ 		mBlueSize = 8;
+ 		mAlphaSize = 0;
+ 		mBindToTextureRGB = EGL_TRUE;
+-		#if defined(__ANDROID__) && !defined(ANDROID_NDK_BUILD)
++		#if defined(__ANDROID__)
+ 			mNativeVisualID = HAL_PIXEL_FORMAT_RGBX_8888;
+ 		#endif
+ 		break;
+diff --git a/src/OpenGL/libEGL/Display.cpp b/src/OpenGL/libEGL/Display.cpp
+index 0410efcc..c159de97 100644
+--- a/src/OpenGL/libEGL/Display.cpp
++++ b/src/OpenGL/libEGL/Display.cpp
+@@ -162,7 +162,9 @@ bool Display::initialize()
+ 		sw::FORMAT_A8B8G8R8,
+ 		sw::FORMAT_R5G6B5,
+ 	//  sw::FORMAT_X1R5G5B5,      // Has no compatible OpenGL ES renderbuffer format
++	#if !defined(__ANDROID__)   // its visual, BGRX_8888, is not a gralloc format before O
+ 		sw::FORMAT_X8R8G8B8,
++	#endif
+ 		sw::FORMAT_X8B8G8R8
+ 	};
+ 
+diff --git a/src/OpenGL/libGLESv2/CMakeLists.txt b/src/OpenGL/libGLESv2/CMakeLists.txt
+index 8f7e4e17..7dce26f2 100644
+--- a/src/OpenGL/libGLESv2/CMakeLists.txt
++++ b/src/OpenGL/libGLESv2/CMakeLists.txt
+@@ -121,7 +121,7 @@ target_link_libraries(libGLESv2_deprecated
+ )
+ 
+ if (ANDROID)
+-    set_target_properties(libGLESv2_deprecated PROPERTIES SUFFIX "_swiftshader.so")
++    set_target_properties(libGLESv2_deprecated PROPERTIES OUTPUT_NAME libGLESv2 SUFFIX "_swiftshader.so")
+ endif ()
+ 
+ set_shared_library_export_map(libGLESv2_deprecated ${CMAKE_CURRENT_SOURCE_DIR})
+diff --git a/third_party/llvm-subzero/CMakeLists.txt b/third_party/llvm-subzero/CMakeLists.txt
+index d8be547b..6fc532f3 100644
+--- a/third_party/llvm-subzero/CMakeLists.txt
++++ b/third_party/llvm-subzero/CMakeLists.txt
+@@ -203,6 +203,8 @@ set(LLVM_SUBZERO_SRC_FILES
+ 
+ if(WIN32)
+     set(LLVM_SUBZERO_PLATFORM_INCLUDE_DIR "build/Windows/include")
++elseif(ANDROID)
++    set(LLVM_SUBZERO_PLATFORM_INCLUDE_DIR "build/Android/include")
+ elseif(LINUX)
+     set(LLVM_SUBZERO_PLATFORM_INCLUDE_DIR "build/Linux/include")
+ elseif(APPLE)
+diff --git a/third_party/llvm-subzero/lib/Support/Unix/Path.inc b/third_party/llvm-subzero/lib/Support/Unix/Path.inc
+index e0b11aaf..38e8e49b 100644
+--- a/third_party/llvm-subzero/lib/Support/Unix/Path.inc
++++ b/third_party/llvm-subzero/lib/Support/Unix/Path.inc
+@@ -339,7 +339,7 @@ std::error_code rename(const Twine &from, const Twine &to) {
+ }
+ 
+ std::error_code resize_file(int FD, uint64_t Size) {
+-#if defined(HAVE_POSIX_FALLOCATE)
++#if defined(HAVE_POSIX_FALLOCATE) && !(defined(__ANDROID__) && __ANDROID_API__ < 21)
+   // If we have posix_fallocate use it. Unlike ftruncate it always allocates
+   // space, so we get an error if the disk is full.
+   if (int Err = ::posix_fallocate(FD, 0, Size))

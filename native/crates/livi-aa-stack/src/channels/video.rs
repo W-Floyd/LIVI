@@ -77,16 +77,7 @@ impl VideoChannel {
                     self.label(),
                     mode.as_str_name()
                 );
-                let projected = VideoFocusNotification {
-                    mode: Some(VideoFocusMode::Projected as i32),
-                    unsolicited: None,
-                };
-                let answer = Frame::new(
-                    self.channel,
-                    frame_flags::ENC_SIGNAL,
-                    media_msg::VIDEO_FOCUS_NOTIFICATION,
-                    encode(&projected),
-                );
+                let answer = self.indication(VideoFocusMode::Projected, false);
                 let event = match mode {
                     VideoFocusMode::Native | VideoFocusMode::NativeTransient => {
                         VideoChannelEvent::HostUiRequested
@@ -102,6 +93,20 @@ impl VideoChannel {
                 (None, None)
             }
         }
+    }
+
+    /// The car's video focus; `unsolicited` when it changed on its own rather than
+    /// answering the phone's request.
+    pub fn indication(&self, mode: VideoFocusMode, unsolicited: bool) -> Frame {
+        Frame::new(
+            self.channel,
+            frame_flags::ENC_SIGNAL,
+            media_msg::VIDEO_FOCUS_NOTIFICATION,
+            encode(&VideoFocusNotification {
+                mode: Some(mode as i32),
+                unsolicited: unsolicited.then_some(true),
+            }),
+        )
     }
 }
 
@@ -152,5 +157,29 @@ mod tests {
         );
         assert_eq!(c.handle_message(0x1234, &[]), (None, None));
         assert_eq!(c.channel_id(), ch::CLUSTER_VIDEO);
+    }
+
+    #[test]
+    fn indications_carry_the_mode_and_whether_the_car_chose_it() {
+        let v = VideoChannel::new(ch::VIDEO);
+        // (mode, unsolicited, payload)
+        let cases: [(VideoFocusMode, bool, &[u8]); 4] = [
+            (VideoFocusMode::Projected, false, &[8, 1]),
+            (VideoFocusMode::Native, false, &[8, 2]),
+            (VideoFocusMode::Native, true, &[8, 2, 16, 1]),
+            (VideoFocusMode::Projected, true, &[8, 1, 16, 1]),
+        ];
+        for (mode, unsolicited, payload) in cases {
+            assert_eq!(
+                v.indication(mode, unsolicited),
+                Frame::new(
+                    ch::VIDEO,
+                    frame_flags::ENC_SIGNAL,
+                    media_msg::VIDEO_FOCUS_NOTIFICATION,
+                    payload
+                ),
+                "{mode:?} unsolicited={unsolicited}"
+            );
+        }
     }
 }

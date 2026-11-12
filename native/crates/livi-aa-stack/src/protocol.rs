@@ -44,6 +44,8 @@ const KEYFRAME_FOLLOW_UP: Duration = Duration::from_millis(60);
 const SHUTDOWN_ACK: Duration = Duration::from_secs(1);
 // The phone answers an UpdateUiConfigRequest at once when it takes it.
 const UI_AREA_REPLY: Duration = Duration::from_millis(1500);
+// Quick page flips keep the phone's encoder running: it restarts on a keyframe.
+const HIDDEN_GRACE: Duration = Duration::from_millis(1500);
 
 pub const BYEBYE_USER_SELECTION: u8 = 1;
 pub const BYEBYE_POWER_DOWN: u8 = 7;
@@ -74,6 +76,7 @@ pub enum Timer {
     ClusterKeyframe,
     ShutdownTimeout,
     UiAreaReply(u32),
+    VideoHidden(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,6 +288,16 @@ pub struct Session {
     // answers with it.
     night_mode: Option<bool>,
     ui_area: UiArea,
+    video_focus: VideoFocus,
+}
+
+/// The main picture shown or not, and the focus the phone has from us: NATIVE stops its
+/// encoder while nothing shows the picture.
+#[derive(Debug)]
+struct VideoFocus {
+    shown: bool,
+    native: bool,
+    seq: u32,
 }
 
 impl Session {
@@ -327,6 +340,11 @@ impl Session {
             shutdowns_waiting: 0,
             night_mode: None,
             ui_area: UiArea::default(),
+            video_focus: VideoFocus {
+                shown: true,
+                native: false,
+                seq: 0,
+            },
         };
         (session, vec![Out::After(WATCHDOG, Timer::Watchdog)])
     }
@@ -697,6 +715,10 @@ impl Session {
         let (answer, event) = channel.handle_message(msg_id, payload);
         if let Some(frame) = answer {
             self.send(out, frame);
+            if !cluster {
+                self.video_focus.native = false;
+                self.arm_hidden(out);
+            }
         }
         match (event, cluster) {
             (Some(VideoChannelEvent::HostUiRequested), false) => {
@@ -900,7 +922,7 @@ impl Session {
                 out.extend(self.close("pre-RUNNING watchdog"));
             }
             Timer::MainKeyframe => {
-                if self.state == State::Running {
+                if self.state == State::Running && !self.video_focus.native {
                     self.send_to(
                         &mut out,
                         ch::VIDEO,
@@ -925,6 +947,21 @@ impl Session {
                 if self.shutdowns_waiting > 0 {
                     self.shutdowns_waiting -= 1;
                     self.finish_shutdown(&mut out, "fallback timeout (no ByeByeResponse)");
+                }
+            }
+            Timer::VideoHidden(seq) => {
+                if seq != self.video_focus.seq || self.video_focus.shown {
+                    return out;
+                }
+                if self.state != State::Running {
+                    self.arm_hidden(&mut out);
+                    return out;
+                }
+                if !self.video_focus.native {
+                    self.video_focus.native = true;
+                    println!("[AaSession] video focus -> native (not shown)");
+                    let frame = self.video.indication(VideoFocusMode::Native, true);
+                    self.send(&mut out, frame);
                 }
             }
             Timer::UiAreaReply(seq) => {
@@ -1148,6 +1185,8 @@ impl Session {
                 focus(VideoFocusMode::Projected),
             );
             self.transition(out, State::Running, "");
+            self.video_focus.native = false;
+            self.arm_hidden(out);
             self.event(out, SessionEvent::Connected);
             self.send_ui_area(out);
         } else if c == ch::CLUSTER_VIDEO {
@@ -1345,9 +1384,41 @@ impl Session {
         out
     }
 
+    /// Whether anything shows the main picture: hidden for `HIDDEN_GRACE`, the phone gets
+    /// NATIVE and stops encoding; shown, PROJECTED at once, and it resumes on a keyframe.
+    pub fn set_video_shown(&mut self, shown: bool) -> Vec<Out> {
+        let mut out = Vec::new();
+        if self.video_focus.shown == shown {
+            return out;
+        }
+        self.video_focus.shown = shown;
+        self.video_focus.seq = self.video_focus.seq.wrapping_add(1);
+        if !shown {
+            self.arm_hidden(&mut out);
+        } else if self.video_focus.native {
+            self.video_focus.native = false;
+            println!("[AaSession] video focus -> projected (shown)");
+            let frame = self.video.indication(VideoFocusMode::Projected, true);
+            self.send(&mut out, frame);
+        }
+        out
+    }
+
+    /// The latest arming wins: the grace runs from the last PROJECTED the phone got.
+    fn arm_hidden(&mut self, out: &mut Vec<Out>) {
+        if !self.video_focus.shown && self.state < State::Closed {
+            self.video_focus.seq = self.video_focus.seq.wrapping_add(1);
+            out.push(Out::After(
+                HIDDEN_GRACE,
+                Timer::VideoHidden(self.video_focus.seq),
+            ));
+        }
+    }
+
     pub fn request_main_keyframe(&mut self) -> Vec<Out> {
         let mut out = Vec::new();
-        if self.state != State::Running {
+        // Under NATIVE the phone sends nothing; PROJECTED on showing brings the keyframe.
+        if self.state != State::Running || self.video_focus.native {
             return out;
         }
         self.send_to(
@@ -1869,6 +1940,140 @@ pub(crate) mod tests {
         );
         tx.send_modify(|c| c.video_width = Some(1920));
         assert_eq!(s.geometry().tier_width, 1280);
+    }
+
+    #[test]
+    fn the_phone_encodes_only_while_its_picture_shows() {
+        #[derive(Debug, Clone, Copy)]
+        enum Step {
+            Shown(bool),
+            /// The grace ends: every armed hide timer fires.
+            Grace,
+            Asks(u8),
+            Keyframe,
+            Run,
+        }
+        use Step::*;
+        const NATIVE: &[u8] = &[8, 2, 16, 1];
+        const PROJECTED: &[u8] = &[8, 1, 16, 1];
+        const ANSWER: &[u8] = &[8, 1];
+        const KEYFRAME: &[u8] = &[8, 2];
+        // (name, starts running, steps with the focus each sends on the main channel)
+        type Case = (&'static str, bool, Vec<(Step, Vec<&'static [u8]>)>);
+        let cases: Vec<Case> = vec![
+            (
+                "hidden past the grace, shown again",
+                true,
+                vec![
+                    (Shown(false), vec![]),
+                    (Grace, vec![NATIVE]),
+                    (Grace, vec![]),
+                    (Shown(true), vec![PROJECTED]),
+                    (Shown(true), vec![]),
+                ],
+            ),
+            (
+                "a quick flip keeps the encoder",
+                true,
+                vec![
+                    (Shown(false), vec![]),
+                    (Shown(true), vec![]),
+                    (Grace, vec![]),
+                ],
+            ),
+            (
+                "no keyframe trick under native: showing brings one",
+                true,
+                vec![
+                    (Keyframe, vec![KEYFRAME]),
+                    (Shown(false), vec![]),
+                    (Grace, vec![NATIVE]),
+                    (Keyframe, vec![]),
+                    (Shown(true), vec![PROJECTED]),
+                ],
+            ),
+            (
+                "the phone asks for the car's UI, then LIVI hides it",
+                true,
+                vec![
+                    (Asks(2), vec![ANSWER]),
+                    (Grace, vec![]),
+                    (Shown(false), vec![]),
+                    (Grace, vec![NATIVE]),
+                ],
+            ),
+            (
+                "the phone takes focus back while hidden: native again after the grace",
+                true,
+                vec![
+                    (Shown(false), vec![]),
+                    (Grace, vec![NATIVE]),
+                    (Asks(1), vec![ANSWER]),
+                    (Grace, vec![NATIVE]),
+                    (Shown(true), vec![PROJECTED]),
+                ],
+            ),
+            (
+                "hidden from the start: setup sends projected, native after the grace",
+                false,
+                vec![
+                    (Shown(false), vec![]),
+                    (Grace, vec![]),
+                    (Run, vec![ANSWER]),
+                    (Grace, vec![NATIVE]),
+                ],
+            ),
+            (
+                "always shown (the setting off): never native",
+                true,
+                vec![
+                    (Asks(1), vec![ANSWER]),
+                    (Grace, vec![]),
+                    (Keyframe, vec![KEYFRAME]),
+                ],
+            ),
+        ];
+        for (name, started, steps) in cases {
+            let (mut s, _tx) = if started {
+                running(AaConfig::default())
+            } else {
+                session(AaConfig::default())
+            };
+            let mut armed = Vec::new();
+            for (i, (step, want)) in steps.into_iter().enumerate() {
+                let out = match step {
+                    Shown(shown) => s.set_video_shown(shown),
+                    Grace => std::mem::take(&mut armed)
+                        .into_iter()
+                        .flat_map(|t| s.on_timer(t))
+                        .collect(),
+                    Asks(mode) => {
+                        s.on_message(ch::VIDEO, media_msg::VIDEO_FOCUS_REQUEST, &[0x10, mode])
+                    }
+                    Keyframe => s.request_main_keyframe(),
+                    Run => {
+                        s.on_link_control(&serde_json::json!({ "type": "ready" }));
+                        s.on_message(ch::CONTROL, ctrl_msg::SERVICE_DISCOVERY_REQUEST, &[]);
+                        s.on_message(ch::VIDEO, media_msg::SETUP, &[0x08, 0x03])
+                    }
+                };
+                armed.extend(out.iter().filter_map(|o| match o {
+                    Out::After(d, t @ Timer::VideoHidden(_)) => {
+                        assert_eq!(*d, HIDDEN_GRACE);
+                        Some(*t)
+                    }
+                    _ => None,
+                }));
+                let sent: Vec<Vec<u8>> = frames(&out)
+                    .into_iter()
+                    .filter(|f| {
+                        f.ch == ch::VIDEO && f.msg_id == media_msg::VIDEO_FOCUS_NOTIFICATION
+                    })
+                    .map(|f| f.payload)
+                    .collect();
+                assert_eq!(sent, want, "{name}: step {i} {step:?}");
+            }
+        }
     }
 
     #[test]

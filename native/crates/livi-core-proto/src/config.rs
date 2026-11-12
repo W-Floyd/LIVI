@@ -63,6 +63,8 @@ pub struct Config {
     pub projection_safe_area_left: u32,
     pub projection_safe_area_right: u32,
     pub projection_safe_area_draw_outside: bool,
+    /// The phone stops encoding while nothing shows its picture (Android Auto).
+    pub pause_hidden_video: bool,
 
     pub cluster_width: u32,
     pub cluster_height: u32,
@@ -626,6 +628,7 @@ pub fn defaults() -> Config {
         projection_safe_area_left: 0,
         projection_safe_area_right: 0,
         projection_safe_area_draw_outside: true,
+        pause_hidden_video: true,
         cluster_width: 1280,
         cluster_height: 720,
         cluster_fps: 60,

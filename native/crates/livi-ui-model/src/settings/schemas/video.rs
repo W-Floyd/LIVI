@@ -171,6 +171,11 @@ pub fn schema() -> Node {
                         )
                         .icon("drawOutside"),
                     ]),
+                    Node::checkbox(
+                        Label::new("settings.pauseHiddenVideo", "Pause Phone Video When Hidden"),
+                        "pauseHiddenVideo",
+                    )
+                    .icon("pauseHiddenVideo"),
                 ],
             )
             .icon("mainVideo"),

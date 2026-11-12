@@ -41,6 +41,7 @@ const SETTINGS: &[(&str, &str)] = &[
     ("viewArea", "CropOutlined"),
     ("safeArea", "CropFreeOutlined"),
     ("drawOutside", "BorderStyleOutlined"),
+    ("pauseHiddenVideo", "PauseCircleOutlined"),
     ("edgeTop", "VerticalAlignTopOutlined"),
     ("edgeBottom", "VerticalAlignBottomOutlined"),
     ("edgeLeft", "WestOutlined"),

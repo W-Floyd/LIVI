@@ -108,6 +108,7 @@ enum Do {
         ramp_ms: u32,
     },
     VideoActive(bool),
+    VideoShown(bool),
     ScreenOff,
     Close,
     PowerDown,
@@ -170,6 +171,8 @@ struct Entry {
     navigation: Navigation,
     /// The area the phone took, its UI laid out there.
     area: Option<Area>,
+    /// Last told the phone: anything shows its picture. It starts projected.
+    shown: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -796,6 +799,7 @@ impl Projection {
                     self.cp.stack(id, StackCmd::AudioActive(on));
                 }
                 Do::ScreenOff => self.cp.stack(id, StackCmd::VideoActive(false)),
+                Do::VideoShown(_) => {}
                 Do::Close | Do::PowerDown => self.cp.send(CpCmd::Close { id }),
             },
             Link::Aa(id) => match what {
@@ -820,6 +824,7 @@ impl Projection {
                     );
                 }
                 Do::VideoActive(on) => self.aa.session(id, SessionCmd::VideoActive(on)),
+                Do::VideoShown(on) => self.aa.session(id, SessionCmd::VideoShown(on)),
                 Do::ScreenOff => self.aa.session(id, SessionCmd::VideoActive(false)),
                 Do::Close => self.aa.send(AaCmd::Close { id }),
                 Do::PowerDown => self.aa.session(id, SessionCmd::PowerDown),
@@ -835,6 +840,7 @@ impl Projection {
                 | Do::Home
                 | Do::Volume { .. }
                 | Do::VideoActive(_)
+                | Do::VideoShown(_)
                 | Do::ScreenOff => {}
             },
         }

@@ -67,8 +67,9 @@ impl Projection {
                 self.follow_theme(&cfg);
             }
             let arranged = self.cluster.arrange(&cfg.dashboard_layouts);
+            let pause = cfg.pause_hidden_video != self.config_seen.pause_hidden_video;
             self.config_seen = cfg;
-            if language || theme || arranged {
+            if language || theme || arranged || pause {
                 self.publish();
             }
             self.apply_when_idle();

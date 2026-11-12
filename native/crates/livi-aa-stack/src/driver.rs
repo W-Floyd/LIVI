@@ -40,6 +40,8 @@ pub enum SessionCmd {
     Keyframe,
     ClusterActive(bool),
     VideoActive(bool),
+    /// Whether anything on LIVI's screens shows the main picture.
+    VideoShown(bool),
     StreamVolume {
         kind: AudioKind,
         level: f64,
@@ -352,6 +354,7 @@ impl<M: AaMedia> Phone<M> {
                 self.media.set_active(self.id, active);
                 Vec::new()
             }
+            SessionCmd::VideoShown(shown) => self.session.set_video_shown(shown),
             SessionCmd::StreamVolume {
                 kind,
                 level,

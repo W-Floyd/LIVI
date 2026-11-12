@@ -22,6 +22,7 @@ impl Projection {
                 if s.link != link && transport == Transport::Usb && s.transport != Transport::Usb {
                     superseded = Some(s.link);
                     s.link = link;
+                    s.shown = true;
                 }
                 s.transport = transport;
                 s.device.merge(device);
@@ -43,6 +44,7 @@ impl Projection {
                     video_playback: None,
                     navigation: Navigation::default(),
                     area: None,
+                    shown: true,
                 };
                 entry.device.merge(device);
                 self.sessions.push(entry);
@@ -382,5 +384,26 @@ impl Projection {
             s.devices = list;
             s.cluster = self.cluster.clone();
         });
+        self.tell_shown(main);
+    }
+
+    /// Android Auto keeps encoding only while its picture is on the main screen, unless the
+    /// setting says the phone always encodes.
+    fn tell_shown(&mut self, main: Front) {
+        let always = !self.config_seen.pause_hidden_video;
+        let mut changed = Vec::new();
+        for s in &mut self.sessions {
+            if !matches!(s.link, Link::Aa(_)) {
+                continue;
+            }
+            let shown = always || (s.active && main == Front::Projection);
+            if s.shown != shown {
+                s.shown = shown;
+                changed.push((s.link, shown));
+            }
+        }
+        for (link, shown) in changed {
+            self.tell(link, Do::VideoShown(shown));
+        }
     }
 }

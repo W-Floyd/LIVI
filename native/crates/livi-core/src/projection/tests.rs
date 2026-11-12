@@ -1433,7 +1433,11 @@ async fn android_auto_takes_the_screen_like_carplay() {
     rig.want(Front::Projection);
     assert_eq!(
         rig.aa_drain(),
-        [command(5, Command::Home), aa(5, SessionCmd::Keyframe)]
+        [
+            command(5, Command::Home),
+            aa(5, SessionCmd::Keyframe),
+            aa(5, SessionCmd::VideoShown(true))
+        ]
     );
     rig.p.on_aa(AaEvent::Duck {
         id: 5,
@@ -1482,6 +1486,107 @@ async fn android_auto_takes_the_screen_like_carplay() {
     assert_eq!(rig.sessions(), (None, 0, 0));
     rig.p.on_aa(AaEvent::Connected { id: 9 });
     assert_eq!(rig.p.sessions[0].transport, Transport::Wifi);
+}
+
+#[tokio::test]
+async fn android_auto_hears_whether_its_picture_shows() {
+    type Row = (&'static str, fn(&mut Rig), &'static [(AaId, bool)]);
+    // (what happens, the VideoShown each phone hears)
+    let steps: [Row; 15] = [
+        (
+            "connects behind LIVI",
+            |r| r.aa_connect(5, true),
+            &[(5, false)],
+        ),
+        (
+            "projection page",
+            |r| r.want(Front::Projection),
+            &[(5, true)],
+        ),
+        ("same again", |r| r.want(Front::Projection), &[]),
+        (
+            "the phone asks for the car's UI",
+            |r| r.p.on_aa(AaEvent::HostUiRequested { id: 5 }),
+            &[(5, false)],
+        ),
+        (
+            "home's Phone slot",
+            |r| r.want(Front::Projection),
+            &[(5, true)],
+        ),
+        (
+            "reversing camera over it",
+            |r| {
+                let mut cfg = r.p.config_seen.clone();
+                cfg.camera_id = "camera-1".into();
+                cfg.camera.main = true;
+                r.p.camera_found(true);
+                let car = json!({ "gear": "R" }).as_object().cloned().unwrap();
+                r.p.on_state(cfg, car);
+            },
+            &[(5, false)],
+        ),
+        (
+            "out of reverse",
+            |r| {
+                let cfg = r.p.config_seen.clone();
+                let car = json!({ "gear": "D" }).as_object().cloned().unwrap();
+                r.p.on_state(cfg, car);
+            },
+            &[(5, true)],
+        ),
+        (
+            "a second phone behind",
+            |r| r.aa_connect(6, false),
+            &[(6, false)],
+        ),
+        (
+            "the second in front",
+            |r| r.p.activate_next(),
+            &[(5, false)],
+        ),
+        ("its first frame", |r| r.p.main_video_shown(), &[(6, true)]),
+        ("another page", |r| r.want(Front::Livi), &[(6, false)]),
+        (
+            "the setting off: every phone encodes",
+            |r| r.settings(|c| c.pause_hidden_video = false),
+            &[(5, true), (6, true)],
+        ),
+        (
+            "pages change nothing then",
+            |r| r.want(Front::Projection),
+            &[],
+        ),
+        (
+            "the setting on again",
+            |r| {
+                r.want(Front::Livi);
+                r.settings(|c| c.pause_hidden_video = true);
+            },
+            &[(5, false), (6, false)],
+        ),
+        (
+            "a phone that goes is not told",
+            |r| r.p.on_aa(AaEvent::Disconnected { id: 6 }),
+            &[],
+        ),
+    ];
+    let mut rig = Rig::new();
+    for (name, step, want) in steps {
+        step(&mut rig);
+        let heard: Vec<(AaId, bool)> = rig
+            .aa_drain()
+            .into_iter()
+            .filter_map(|c| match c {
+                AaCmd::Session {
+                    id,
+                    cmd: SessionCmd::VideoShown(shown),
+                } => Some((id, shown)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(heard, want, "{name}");
+    }
 }
 
 #[tokio::test]

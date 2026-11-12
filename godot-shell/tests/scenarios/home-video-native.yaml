@@ -101,3 +101,36 @@ steps:
                   return "slot tap at 0.25, 0.75 reached the core as %s, %s" % [p.x, p.y]
               return ""
       return "no input sent from the slot"
+  # Look → Swipe home, over the phone's picture (window-input has the rest): a swipe in from the
+  # edge goes home and the phone gets none of it; a tap in the edge zone reaches it. Last: the
+  # view goes by touch alone once it has seen one.
+  - gdscript: |
+      var vp: SubViewport = runner._vp
+      var send := func(at: Vector2, kind: String) -> void:
+          var t
+          if kind == "move":
+              t = InputEventScreenDrag.new()
+          else:
+              t = InputEventScreenTouch.new()
+              t.pressed = kind == "down"
+          t.position = at
+          vp.push_input(t)
+      ThemeManager.set_look({home_swipe = "left"})
+      for row in [["swipe", true], ["tap", false]]:
+          shell.open_page("projection")
+          await runner.frames(2)
+          Core.fake_clear()
+          var at := Vector2(5, 360)
+          send.call(at, "down")
+          await runner.frames(1)
+          if row[0] == "swipe":
+              for i in 4:
+                  at.x += 60
+                  send.call(at, "move")
+                  await runner.frames(1)
+          send.call(at, "up")
+          await runner.frames(3)
+          var phases: Array = Core.fake_sent().filter(func(m): return m.get("type") == "input").map(func(m): return m.input.points[0].phase)
+          if (shell._page_name == "home") != row[1] or phases != ([] if row[1] else ["down", "up"]):
+              return "%s: page %s, the phone got %s" % [row, shell._page_name, phases]
+      ThemeManager.set_look({home_swipe = "off"})

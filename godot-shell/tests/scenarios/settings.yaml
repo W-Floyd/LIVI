@@ -110,6 +110,20 @@ steps:
           return "hand %s" % ThemeManager.hand
   - wait: { frames: 3 }
   - screenshot: settings-look-night
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("Settings/Rows")
+      rows.reveal(rows.list.get_node("Swipe home"))
+  - wait: { frames: 2 }
+  # Five options: a page of its own.
+  - tap: { node: Settings/Rows/List/Swipe home }
+  - tap: { node: Settings/Rows/List/Bottom }
+  - gdscript: |
+      if ThemeManager.home_swipe != "bottom":
+          return "swipe home %s" % ThemeManager.home_swipe
+      ThemeManager.set_look({home_swipe = "off"})
+      var rows: DragScroll = shell.get_node("Settings/Rows")
+      rows.reveal(rows.list.get_node("Day or night"))
+  - wait: { frames: 2 }
   - tap: { node: Settings/Rows/List/Day or night/Box/Choice/Auto }
   - gdscript: |
       if ThemeManager.appearance != "day":

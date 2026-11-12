@@ -60,6 +60,8 @@ var _settings_from := "home"
 var _following_front := false
 ## The core's `/front/main` last seen: the phone's video focus.
 var _front := ""
+## Home by a swipe in from a panel edge, as the look sets it.
+var _edge: EdgeSwipe
 ## Lists and starts apps, and knows which hosted window is whose (the "apps" page).
 var launcher: Launcher
 ## What plays, for home's player and the media page.
@@ -185,6 +187,9 @@ func _init() -> void:
 	_keys_button.pressed.connect(_on_keys_button)
 	add_child(_keys_button)
 	add_child(DriveBadge.new())
+	_edge = EdgeSwipe.new()
+	_edge.name = "EdgeSwipe"
+	_edge.home.connect(func(): print("edge swipe: home from %s" % _page_name); open_page.call_deferred("home"))
 
 
 func _ready() -> void:
@@ -196,6 +201,10 @@ func _ready() -> void:
 	Core.welcome.connect(func(_v): _refresh(); _tell_front(); _ask_area(true))
 	Core.changed.connect(_on_core_changed)
 	Core.open_page.connect(_on_core_page)
+	# _input runs last node first: after the shell and the rail, which joins right after the shell
+	# (NavRail.attach), so it sees a press before the pages, the rail or any window view.
+	get_parent().add_child.call_deferred(_edge)
+	tree_exited.connect(_edge.queue_free)
 	# Compact: the media card leads home.
 	_stat.hero = false
 	_projection.visible = false
@@ -446,6 +455,7 @@ func open_page(page: String) -> String:
 	if page == "settings" and _page_name != "settings":
 		_settings_from = _page_name
 	_page_name = page
+	_edge.armed = page != "home"
 	_projection_page = page == "projection"
 	_app_page = page == "app" or _projection_page
 	if rail_width > 0.0:

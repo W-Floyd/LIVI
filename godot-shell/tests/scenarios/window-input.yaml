@@ -27,3 +27,86 @@ steps:
   - expect_client:
       app_id: org.livi.test.input
       lines: ["pointer leave"]
+  # Look → Swipe home: a finger in from the set edge goes home over the window, and the window
+  # gets none of it; anything else from the zone reaches it as it came, the rest at once. The
+  # picture spans the panel's height: (960, y) is the surface's (320, y / 2). Rows: edge, gesture,
+  # whether it goes home. A finger arrives as the emulated mouse, then the touch; `mouse` is the
+  # mouse alone.
+  - gdscript: |
+      var vp: SubViewport = runner._vp
+      var events: String = runner._client_events("org.livi.test.input")
+      var send := func(at: Vector2, kind: String, touch: bool) -> void:
+          var m
+          var t
+          if kind == "move":
+              m = InputEventMouseMotion.new()
+              m.button_mask = MOUSE_BUTTON_MASK_LEFT
+              t = InputEventScreenDrag.new()
+          else:
+              m = InputEventMouseButton.new()
+              m.button_index = MOUSE_BUTTON_LEFT
+              m.pressed = kind == "down"
+              m.button_mask = MOUSE_BUTTON_MASK_LEFT if kind == "down" else 0
+              t = InputEventScreenTouch.new()
+              t.pressed = kind == "down"
+          m.position = at
+          m.global_position = at
+          t.position = at
+          if touch:
+              m.device = InputEvent.DEVICE_ID_EMULATION
+          vp.push_input(m)
+          if touch:
+              vp.push_input(t)
+      var lines := func() -> PackedStringArray:
+          return FileAccess.get_file_as_string(events).strip_edges().split("\n", false)
+      for row in [["bottom", "swipe", true], ["top", "swipe", true], ["bottom", "mouse", true], ["bottom", "slant", true],
+              ["bottom", "tap", false], ["bottom", "hold", false], ["bottom", "along", false], ["bottom", "near", false],
+              ["top", "swipe-bottom", false], ["off", "swipe", false]]:
+          ThemeManager.set_look({home_swipe = row[0]})
+          shell.open_page("app")
+          await runner.frames(2)
+          var n: int = lines.call().size()
+          var bottom: bool = row[0] != "top" and row[1] != "swipe-bottom"
+          var edge := 715.0 if bottom else 5.0
+          var into := -1.0 if bottom else 1.0
+          if row[0] == "top" and row[1] == "swipe-bottom":
+              edge = 715.0
+              into = -1.0
+          var from := Vector2(960, edge)
+          var path := []
+          match row[1]:
+              "swipe", "mouse":
+                  path = [from + Vector2(0, 40 * into), from + Vector2(0, 120 * into), from + Vector2(0, 200 * into)]
+              "slant":
+                  path = [from + Vector2(30, 60 * into), from + Vector2(90, 150 * into)]
+              "along":
+                  path = [from + Vector2(40, 0), from + Vector2(160, -4 * into)]
+              "near":
+                  from = Vector2(960, edge + 40 * into)
+                  path = [from + Vector2(0, 80 * into), from + Vector2(0, 200 * into)]
+          var touch: bool = row[1] != "mouse"
+          send.call(from, "down", touch)
+          await runner.frames(1)
+          if row[1] == "hold":
+              await runner.frames(20)
+              if lines.call().size() == n:
+                  return "%s: a finger held in the zone did not reach the window before its release" % [row]
+          for p in path:
+              send.call(p, "move", touch)
+              await runner.frames(1)
+          send.call(path[-1] if not path.is_empty() else from, "up", touch)
+          await runner.frames(3)
+          var home: bool = shell._page_name == "home"
+          if home != row[2]:
+              return "%s: page %s" % [row, shell._page_name]
+          # The client logs as events arrive.
+          await runner.frames(20)
+          # Focus and enter/leave follow the page, not the finger.
+          var got: Array = Array(lines.call().slice(n)).filter(func(l): return l.begins_with("touch") or l.begins_with("pointer button") or l.begins_with("pointer motion"))
+          if row[2] and not got.is_empty():
+              return "%s: the window got %s" % [row, got]
+          var down := "pointer button 272 pressed" if not touch else "touch down 0 %.1f %.1f" % [(from.x - 320.0) / 2.0, from.y / 2.0]
+          var up := "pointer button 272 released" if not touch else "touch up 0"
+          if not row[2] and (got.find(down) < 0 or got.find(up) < got.find(down) or got.size() < 2 + path.size()):
+              return "%s: the window got %s" % [row, got]
+      ThemeManager.set_look({home_swipe = "off"})

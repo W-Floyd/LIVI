@@ -33,9 +33,10 @@ var app_window_modes := {}     # app id -> maximized | fullscreen, over apps.yam
 var rail_order := []           # the rail's item ids, top first, as saved (NavRail.ordered reads it); []: its default
 var nav_app := ""              # the launcher app home's slot shows beside the phone (Shell.nav_app); "": none
 var home_source := "phone"     # phone | nav: what home's slot shows while both are there
+var home_swipe := "off"        # off | left | right | top | bottom: the panel edge a swipe in from goes home (EdgeSwipe)
 
 ## The driver's choices that `save_look` keeps; `look_file` is where ("" keeps nothing: tests).
-const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "home_phone", "home_split", "status_position", "app_scale", "app_scales", "app_window_modes", "rail_order", "nav_app", "home_source"]
+const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "home_phone", "home_split", "status_position", "app_scale", "app_scales", "app_window_modes", "rail_order", "nav_app", "home_source", "home_swipe"]
 var look_file := ""
 ## The resolved look for apps the shell hosts, rewritten on every change (`write_tokens`); "" writes
 ## none. Beside `look_file`.

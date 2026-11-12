@@ -1042,6 +1042,8 @@ func _look_rows() -> Array:
 		{key = "home_phone", kind = "switch", label = "Phone on home", detail = "Android Auto, CarPlay or the navigation app beside the cards", checked = ThemeManager.home_phone, enabled = true},
 		_look_choice("nav_app", "Navigation app", _nav_apps(), "On home beside the phone, and usable while driving"),
 		_look_choice("status_position", "Status bar", [["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"], ["off", "Off"]]),
+		_look_choice("home_swipe", "Swipe home", [["off", "Off"], ["left", "Left"], ["right", "Right"], ["top", "Top"], ["bottom", "Bottom"]],
+			"In from that edge, over any app"),
 	]
 	if _rail():
 		rows.append({key = RAIL, kind = "value", label = "Navigation rail", detail = "The order of its items; or hold one on the rail and drag it", opens = true, enabled = true})

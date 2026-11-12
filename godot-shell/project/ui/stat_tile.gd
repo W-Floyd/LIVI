@@ -49,6 +49,16 @@ var compact := false:
 		compact = v
 		if _bar: _restyle()
 
+## Room kept along the card's foot for a row placed over it (home's Precondition, `HomeCards.foot`).
+var foot := 0.0:
+	set(v):
+		if v == foot:
+			return
+		foot = v
+		if _foot:
+			_foot.custom_minimum_size.y = v
+			_foot.visible = v > 0.0
+
 var _icon: TextureRect
 var _value: Label
 var _unit: Label
@@ -56,6 +66,7 @@ var _sub_label: Label
 var _sub_value: Label
 var _bar: Control
 var _fill: Control
+var _foot: Control
 ## The hero's type over the tile's.
 const HERO_SCALE := 1.8
 
@@ -82,7 +93,10 @@ func _build() -> void:
 	_fill = Control.new()
 	_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(UI.vbox([UI.hbox([number, UI.spacer(), sub]), _fill, _bar], 0.6))
+	_foot = Control.new()
+	_foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_foot.visible = false
+	add_child(UI.vbox([UI.hbox([number, UI.spacer(), sub]), _fill, _bar, _foot], 0.6))
 
 
 func _style() -> void:

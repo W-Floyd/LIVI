@@ -30,6 +30,28 @@ const TALL_TOUCH := 5.5
 const REST_TOUCH := 10.0
 ## The media card; it leads while it has content (`has_content()`).
 var tall: Control
+## A card carried inside `host` as its bottom row, over the room the host keeps (`StatTile.foot`),
+## rather than stacked on its own.
+var foot: Control:
+	set(v):
+		if foot == v:
+			return
+		if foot:
+			foot.minimum_size_changed.disconnect(sync_foot)
+			foot.visibility_changed.disconnect(sync_foot)
+		foot = v
+		if v:
+			v.minimum_size_changed.connect(sync_foot)
+			v.visibility_changed.connect(sync_foot)
+		sync_foot()
+var host: Control
+
+
+## The host's room for `foot`, at once: the fit measures with it before anything sorts.
+func sync_foot() -> void:
+	if host:
+		host.foot = foot.get_combined_minimum_size().y if _carried() else 0.0
+	queue_sort()
 
 
 func _get_minimum_size() -> Vector2:
@@ -57,6 +79,12 @@ func _notification(what: int) -> void:
 	var b := _dashboard_rects(shown)
 	for i in shown.size():
 		fit_child_in_rect(shown[i], Rect2(a[i].position.lerp(b[i].position, wide), a[i].size.lerp(b[i].size, wide)))
+	if _carried() and host in shown:
+		var r := host.get_rect()
+		var box: StyleBox = host.get_theme_stylebox("panel")
+		var h := foot.get_combined_minimum_size().y
+		var l := box.get_margin(SIDE_LEFT)
+		fit_child_in_rect(foot, Rect2(r.position.x + l, r.end.y - box.get_margin(SIDE_BOTTOM) - h, r.size.x - l - box.get_margin(SIDE_RIGHT), h))
 
 
 ## The rect `c` gets at the panel's present size, shown or not: for a card that arranges itself
@@ -103,11 +131,11 @@ func _lead_min(lead: Control) -> float:
 	return lead.compact_height() if lead.has_method("compact_height") else lead.get_combined_minimum_size().y
 
 
-## The media card in a stack is never shorter than the tallest other card.
+## The media card in a stack is never shorter than the tallest other card, a carried row aside.
 func _lead_floor(lead: Control, rest: Array) -> float:
 	var h: float = _lead_min(lead)
 	for c in rest:
-		h = maxf(h, c.get_combined_minimum_size().y)
+		h = maxf(h, c.get_combined_minimum_size().y - (c.foot if c == host and _carried() else 0.0))
 	return h
 
 
@@ -117,7 +145,7 @@ func _with(c: Control) -> Array[Control]:
 		# Where it would be among its siblings.
 		shown.clear()
 		for ch in get_children():
-			if ch is Control and (ch == c or (ch.visible and not ch.top_level)):
+			if ch is Control and (ch == c or (ch.visible and not ch.top_level and not (ch == foot and _carried()))):
 				shown.append(ch)
 	return shown
 
@@ -184,6 +212,10 @@ func _stack(cards: Array, x: float, w: float, y := 0.0) -> Array[Rect2]:
 func _shown() -> Array[Control]:
 	var out: Array[Control] = []
 	for c in get_children():
-		if c is Control and c.visible and not c.top_level:
+		if c is Control and c.visible and not c.top_level and not (c == foot and _carried()):
 			out.append(c)
 	return out
+
+
+func _carried() -> bool:
+	return foot != null and host != null and foot.visible and host.visible and not foot.top_level

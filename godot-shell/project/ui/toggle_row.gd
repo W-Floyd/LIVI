@@ -40,6 +40,14 @@ var icon_only := false:
 			if _label:
 				_style()
 
+## Inside another card: a quieter fill of its own, no card surface.
+var inset := false:
+	set(v):
+		if v != inset:
+			inset = v
+			if _label:
+				_style()
+
 var _icon: TextureRect
 var _label: Label
 var _detail: Label
@@ -72,10 +80,19 @@ func _ready() -> void:
 
 func _style() -> void:
 	# Off, over the map, it's a frosted or glass surface; on, it's the solid accent.
-	var surface: ShaderMaterial = null if button_pressed else ThemeManager.surface_material(size)
+	var surface: ShaderMaterial = null if button_pressed or inset else ThemeManager.surface_material(size)
 	material = surface
+	# A pack's own button image stays.
+	var flat := inset and not button_pressed and not ThemeManager.is_scene() \
+		and not ThemeManager.godot_theme.get_stylebox("normal", "Button") is StyleBoxTexture
 	for s in ["normal", "hover", "focus", "disabled"]:
-		if surface:
+		if flat:
+			var b := StyleBoxFlat.new()
+			b.bg_color = ThemeManager.c.surface2
+			b.set_corner_radius_all(roundi(ThemeManager.px.radius))
+			b.anti_aliasing = true
+			add_theme_stylebox_override(s, b)
+		elif surface:
 			var b: StyleBox = ThemeManager.card_box()
 			b.content_margin_top = 0
 			b.content_margin_bottom = 0

@@ -266,11 +266,12 @@ Home's media card (`MiniPlayer`) leads home while something plays (`HomeCards.ta
 phone hidden it takes the large slot and the other cards stack beside it at their own heights,
 centred; beside the phone, a column with room for two (`TALL_SHARE`, `TALL_TOUCH`, `REST_TOUCH`;
 the 680 px snap) gives it a column of its own, else it fills what the stacked cards leave, never
-shorter than the tallest of them. It is never left out: where the cards don't fit (`Shell._fit`),
-Precondition goes to one line (`ToggleRow.compact`), then beside the Phone | <app> pill (its
-icon and Auto where its words don't fit), then the battery card compact (`StatTile.compact`),
-then the media card to one row without prev; only then do cards go, Precondition first; with
-nothing playing, the compact media card goes first. It lays itself
+shorter than the tallest of them (a row the battery card carries aside). It is never left out:
+where the cards don't fit (`Shell._fit`), Precondition moves into the battery card as its bottom
+row (`HomeCards.foot`, `StatTile.foot`), then goes to one line there (`ToggleRow.compact`), then
+beside the Phone | <app> pill (its icon and Auto where its words don't fit), then the battery card
+compact (`StatTile.compact`), then the media card to one row without prev; only then do cards go,
+Precondition first; with nothing playing, the compact media card goes first. It lays itself
 out by that room (`HomeCards.child_rect`, shown or not): `wide` (cover the card's height beside
 title, artist, album, a position bar and larger controls), `tall` (cover over them), one row, or
 the controls in a row under the text when it would keep fewer than `MIN_CHARS` beside them.

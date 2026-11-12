@@ -223,6 +223,7 @@ func _ready() -> void:
 	_player.opened.connect(func(): open_page.call_deferred("media"))
 	_player.now_playing = now_playing
 	(_side.get_node("Panel") as HomeCards).tall = _player
+	(_side.get_node("Panel") as HomeCards).host = _stat
 	# Which cards fit depends on the panel's width too (the media card's layout, a split column).
 	_side.get_node("Panel").resized.connect(func(): _fit.call_deferred())
 	now_playing.changed.connect(_update_player)
@@ -1102,13 +1103,18 @@ func _fit() -> void:
 	for n in PRIORITY:
 		panel.get_node(n).visible = wanted[n]
 	left_out.clear()
-	# Before any card goes: Precondition one line, then beside the Phone | <app> pill (an icon
-	# where its words don't fit), then the battery card compact, then the media card one row
-	# without prev.
+	# Before any card goes: Precondition inside the battery card, then one line, then beside the
+	# Phone | <app> pill (an icon where its words don't fit), then the battery card compact, then
+	# the media card one row without prev.
 	var fits := func() -> bool: return panel.needed(dashboard) <= room + 1.0
+	var inside := func(on: bool) -> void:
+		_precondition.inset = on
+		panel.foot = _precondition if on else null
+		panel.sync_foot()
 	_precondition.compact = false
 	_precondition.top_level = false
 	_precondition.icon_only = false
+	inside.call(false)
 	_stat.compact = false
 	_player.allow_two_rows = true
 	# Nothing playing, the media card is the first to go.
@@ -1116,8 +1122,12 @@ func _fit() -> void:
 		_player.visible = false
 		left_out.append("Player")
 	if not fits.call() and _precondition.visible:
+		inside.call(true)
+	if not fits.call() and _precondition.visible:
 		_precondition.compact = true
+		panel.sync_foot()
 	if not fits.call() and _precondition.visible and _band_room() != "":
+		inside.call(false)
 		_precondition.icon_only = _band_room() == "icon"
 		_precondition.top_level = true
 	if not fits.call():
@@ -1137,9 +1147,11 @@ func _fit() -> void:
 			continue
 		if item.visible:
 			item.visible = false
+			panel.sync_foot()
 			# The hero beside a too-tall stack: leaving it out would not make the stack fit.
 			if panel.needed(dashboard) >= need:
 				item.visible = true
+				panel.sync_foot()
 				continue
 			left_out.append(n)
 	# Trying a card's larger look grows it to that look's minimum at once; a fit that ends where

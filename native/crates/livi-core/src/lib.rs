@@ -29,6 +29,7 @@ mod cp_radio;
 mod cp_telemetry;
 mod devices;
 mod dongle;
+mod ev_schedule;
 mod fonts;
 mod gnss;
 mod gvfs_guard;
@@ -149,6 +150,7 @@ pub async fn run(
         telemetry: Default::default(),
         navigation: Default::default(),
         precondition: Default::default(),
+        ev_schedule: Default::default(),
         system: livi_core_proto::state::System {
             start_page: start,
             ..Default::default()
@@ -181,6 +183,7 @@ pub async fn run(
     tokio::spawn(dongle::run(core.hub.clone(), dongle_asks));
     tokio::spawn(wifi_options::follow(core.clone()));
     tokio::spawn(precondition::follow(core.clone()));
+    tokio::spawn(ev_schedule::follow(core.clone()));
     let (inside, inside_rx) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(telemetry::run(core.clone(), inside_rx, saved));
     tokio::spawn(gnss::run(core.clone(), inside.clone()));

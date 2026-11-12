@@ -19,9 +19,11 @@ Sources:
 |---|---|---|
 | Charge limit AC/DC (`charge_limit_ac/dc`) | ✓ `chargeLimitAc/DcPct` (micom-livi, items 0x21/0x22), never yet seen on the wire | none: row read-only |
 | AC charging current (`ac_current`) | none | none |
-| Departure 1/2 (`departure_1/2`) | none (go-micomd decodes 0x8C55 hour/minute bits only; micom-livi does not forward) | none |
-| Scheduled charging, off-peak window and mode | none | none |
-| Climate at departure, temperature, defog | none | none |
+| Departure 1/2 (`departure_1/2`) | ✓ `departure1/2` (micom-livi, 0x8C55 + 0x8C53 [0]) | ✓ `setEvSchedule` → micom-livi `ev-departures` (0x0C06), **only with `-ev-schedule-writes`**, parked |
+| Off-peak window, off-peak mode (`off_peak`, `off_peak_mode`) | ✓ `offPeak`, `scheduledChargingMode` (0x8C53) | ✓ as above, `ev-off-peak` (0x0C05); mode code 1 never |
+| Scheduled charging (`scheduled_charging`) | none (0x8C4A [3] not decoded) | none |
+| Climate at departure, defog | ✓ `scheduledClimate`, `scheduledClimateDefrost` (0x8C53 [7], 0x8C54 [0]) | ✓ as departures |
+| Climate temperature (`climate_temp`) | ✓ `scheduledClimateTempCode`, the raw code only | none: encoding unknown; sent back as read |
 | Battery conditioning (`battery_conditioning`) | ✓ `batteryConditioningMode`, `batteryConditioning`, `batteryConditioningError` | ✓ LIVI's `preconditionBattery` action; micom-livi holds batt-cond-mode (0x0C62) on while it lasts, **only with `-precondition`** |
 | Before a fast charger (LIVI's own) | ✓ `preconditionState/Why` | ✓ `batteryPreconditioning` config |
 | Winter mode | none | none |
@@ -58,17 +60,34 @@ message, a micom-livi opt-in path, a core action, and `write = "core"` with a ca
   answered to the 0x0C50 startup read (not in **C**).
 - Risk: changing it mid-charge may stop the charge.
 
+### Schedule edits (departures, off-peak, climate)
+- Path: the page's `setEvSchedule` action (only the changed fields) → core `evSchedule.request` → GET
+  /navigation `evScheduleRequest` → micom-livi rebuilds `ev-departures` / `ev-off-peak` from the car's readback
+  with only those fields changed (the variant's `reflects:`), sends via micomd's `-input`, and reports
+  `evScheduleWrite` confirmed once the readback matches, failed after 10 s. The core ends the request on that
+  word, or after 30 s; the page shows the edit while it stands, then the car's values.
+- Gates, all needed: micomd `-allow-dangerous` (both messages are `dangerous`), micom-livi `-input` and
+  `-ev-schedule-writes` (off by default; LIVI shows the schedule read-only without it), parked (micom-livi:
+  driving regulation known off and gear P or unknown; core: `drivingRegulation` not true and gear P or
+  absent; the page: `Drive.moving`).
+- Refused, never guessed: any reflected field not yet received (0x8C53 and 0x8C54 arrive only on change or a
+  startup read, and micomd sends no startup read for them: on the car on 2026-11-12 only 0x8C55 was held, so
+  every edit fails "nothing received yet" until they arrive), a 2-bit day reading 2 or 3, an hour of 31 (stock's
+  none), mode code 1.
+- The climate temperature (6-bit code, °F - 56 at unit 1 fits two stock points only) is never edited; each
+  0x0C06 sends set 1's code back as read, and set 2's temperature and unit copied from it (stock does the same).
+
 ### Departures (1, 2) and climate at departure
-- Write 0x0C06, 7 B, 28 packed slots: per set hour, minute, 7 days, enable, precondition, temperature, unit,
-  defrost; gen ≥ 2 MSB-first packing "as listed in code". **S**. Exact bit order not yet extracted.
+- Write 0x0C06, 7 B: layout from stock under QEMU (go-micomd `ev-departures`); MSB-first; set 2's climate has
+  no readback.
 - Read 0x8C55: [3] set 1 hour b4:0 / minute b7:5, [4] set 2, [5] set 1 Mon-Thu (2 bits each), [6] set 1
   enable/Fri-Sun, [7] set 2 Mon-Thu; [0..2] vary per frame, unread. Seen 56814 times, [3], [4] = 0c (12:00,
   nothing set). **S, C**. 0x8C53 [0] set 2 enable/Fri-Sun; [7] b1:0 scheduled climate enable, b7:2 temperature;
   0x8C54 [0] b1:0 defrost, [3] b7:6 temperature unit. **S**
-- 3-bit minute: tens of minutes (inferred).
+- 3-bit minute: tens of minutes (stock's 7:30 PM packed as minute bits 3).
 - Climate is per departure in 0x0C06 but one enable/temperature in 0x8C53. **S**
-- Unknown: 0x0C06 bit layout; temperature encoding (0x8C53 [7] = 0x50 → 20 at default: raw >> 2 °C? half
-  degrees?); temperature range (17-27 °C assumed); how "once" (no day) is expressed; 2-bit day values.
+- Unknown: temperature encoding (0x8C53 [7] = 0x50 → code 20 at default); how "once" (no day) is expressed;
+  2-bit day values other than 0/1; whether the car applies a write it then reports.
 - Risks: the car's scheduler acts on the HU clock 0x0C09 (micom-livi `-clock`; the variant templates weekday
   and hour, verify against a stock strace): a wrong clock charges or heats at the wrong time; climate runs only
   plugged in (**A**); two writers (LIVI, Kia Connect).
@@ -81,8 +100,9 @@ message, a micom-livi opt-in path, a core action, and `write = "core"` with a ca
   the car computed (7/31/63 = none). **S**. 0x8C53 seen 8 times: `00 14 10 02 00 40 00 50` = 20:00-16:00,
   mode 0, climate off. **C**
 - Modes: off-peak prioritised (may run past the window) / off-peak only (may not reach 100 %). **M**
-- Unknown: charge-control-mode values (off / scheduled / prioritised / only?); whether LIVI's single window must be
-  sent as both weekday and weekend; how "scheduled charging off" is encoded.
+- Mode (0x8C53 [5], 0x0C05 [4] b7:6): 0 off, 2 prioritise off-peak, 3 off-peak only (stock under QEMU); 1
+  unknown. Stock's EV app sends one window; the weekend bytes go 0 (only their low bits fit).
+- Unknown: mode 1; how "scheduled charging off" (0x8C4A [3]) relates to mode 0.
 - Risks: as departures (clock, Kia Connect); the 0x8C53 default seen may be the car's, not an empty schedule.
 
 ### Battery conditioning mode
@@ -135,8 +155,19 @@ Writes (one at a time; read back via the items above and the cluster):
 - [ ] 0x0C18 [5] alone; then [4] = 0x64 (50 %) below SoC while AC charging: does the charge stop as **M** says?
 - [ ] 0x0C18 out of range (0x5a = 45 %, 0xc9): refused or clamped?
 - [ ] 0x0C5B 2 then 1, AC plugged, not charging; then while charging: readback, does charging continue?
-- [ ] 0x0C05 / 0x0C06: only after the bit layout is extracted from S; one departure, readback 0x8C55; check the
-      car's computed window 0x8C54 [4..7]; leave the car plugged overnight to see it start on time.
+- [ ] Schedule edits, first write (user's OK first). Before: micom-livi with the new build but without
+      `-ev-schedule-writes`; the Schedule page shows the car's values read-only. Check
+      `micomd -query /run/micomd.ctl snapshot` holds 0x8C53 and 0x8C54 (without them every edit fails "nothing
+      received yet"; set something from the stock HU or Kia Connect, or add a startup read, first). Note the
+      three payloads. Then micomd `-allow-dangerous` and micom-livi `-ev-schedule-writes`, parked, IGN on:
+      1. Departure 1: toggle Fri only. Expect one `ev-departures` line in micom-livi's log, 0x8C55 [6] b3:2
+         → 1, every other byte of 0x8C53/54/55 unchanged, the page "confirmed" (no failure row).
+      2. Toggle it back; same checks.
+      3. Off-peak start +1 h. Expect one `ev-off-peak` line, 0x8C53 [1] changed, [0], [5], [7] unchanged.
+      4. Off-peak mode Off ↔ the car's mode, if not code 1.
+      5. Climate at departure on, then off: 0x8C53 [7] b1:0; [7] b7:2 (temperature) unchanged.
+      6. IGN off/on: values kept? Stock HU / Kia Connect show the same?
+      Stop at the first unexpected byte; the frames are in micomd's `-record`.
 - [ ] 0x0C09 clock: compare the variant's template with a stock strace (weekday bit, hour << 3) before any
       schedule test; without it, what time does the car use?
 - [ ] 0x0C5A V2L limit with the V2L adapter: raw vs / 0.5.
@@ -145,7 +176,7 @@ Writes (one at a time; read back via the items above and the cluster):
 
 ## Open questions
 
-1. 0x0C06 and 0x0C05 bit layouts (gen ≥ 2) from the smali, before any schedule write.
+1. A startup read of 0x8C53/0x8C54 (stock's 0x0C53/0x0C54), so edits work after a boot with nothing changed.
 2. Does the car need the HU clock (0x0C09) for schedules, or does it hold its own?
 3. Ownership: LIVI vs Kia Connect vs the car's own scheduler; LIVI shows readback only, never the tap.
 4. Which settings stock gates on IGN ("Vehicle power must be On", **A**) or on P.

@@ -407,6 +407,10 @@ fn navigation_api(s: &State) -> Value {
         "precondition".into(),
         crate::precondition::api(&s.config, s.precondition.manual_until),
     );
+    nav.insert(
+        "evScheduleRequest".into(),
+        serde_json::to_value(&s.ev_schedule.request).unwrap_or(Value::Null),
+    );
     Value::Object(nav)
 }
 
@@ -525,6 +529,7 @@ mod tests {
             telemetry,
             navigation: Default::default(),
             precondition: Default::default(),
+            ev_schedule: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),
@@ -989,6 +994,7 @@ mod tests {
         let nav = get().await;
         assert_eq!(nav["active"], Value::Null);
         assert_eq!(nav["chargingStop"], Value::Null);
+        assert_eq!(nav["evScheduleRequest"], Value::Null);
         assert_eq!(
             nav["precondition"],
             json!({ "mode": "auto", "manual": false, "manualUntil": null, "minKw": 50 }),
@@ -996,6 +1002,14 @@ mod tests {
         );
         tx.send_modify(|s| {
             s.precondition.manual_until = Some(1_762_700_000);
+            s.ev_schedule.request = Some(livi_core_proto::state::EvScheduleRequest {
+                id: 3,
+                at: 1_762_700_000,
+                set: livi_core_proto::state::EvScheduleEdit {
+                    climate: Some(true),
+                    ..Default::default()
+                },
+            });
             s.navigation.active = Some(true);
             s.navigation.maneuver_type = Some(2);
             s.navigation.remain_distance = Some(300.0);
@@ -1012,6 +1026,11 @@ mod tests {
         assert_eq!(nav["active"], json!(true));
         assert_eq!(nav["maneuverType"], json!(2));
         assert_eq!(nav["remainDistance"], json!(300.0));
+        // micom-livi's scheduleRequest (go-micomd cmd/micom-livi).
+        assert_eq!(
+            nav["evScheduleRequest"],
+            json!({ "id": 3, "at": 1_762_700_000, "set": { "climate": true } })
+        );
         assert_eq!(
             nav["chargingStop"],
             json!({

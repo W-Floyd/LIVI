@@ -1,0 +1,98 @@
+name: ev-settings-schedule
+# The EV settings' schedule as the car reports it (micom-livi's telemetry), null parts shown as
+# unknown. Read only until the car link sets schedules (micom-livi -ev-schedule-writes) and while
+# driving; then each change goes as SetEvSchedule with only what it changes, shows as asked while
+# the core's edit stands, and on failure says why and shows the car's own again.
+fixtures:
+  core: fixtures/ev6-main.json
+theme: { theme_name: calm, appearance: day }
+steps:
+  - page: ev_live
+  - set: { core: { telemetry: { departure1: {}, departure2: {}, offPeak: {} } } }
+  - set: { core: { telemetry: { scheduledChargingMode: off_peak_only, scheduledClimate: false, scheduledClimateDefrost: false,
+      scheduledClimateTempCode: 20,
+      departure1: { "on": true, hour: 7, minute: 30, days: [true, false, true, false, false, false, false] },
+      departure2: { "on": null, hour: 12, minute: 0, days: [false, false, false, false, null, null, null] },
+      offPeak: { startHour: 22, startMinute: 0, endHour: null, endMinute: null } } } }
+  - tap: { node: EvLive/scheduled }
+  - expect_node: { path: EvLive/EvSettings, visible: "true", section: schedule }
+  # Read only: the car link does not set schedules.
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Text/Detail, text: "Read only: the car link does not set schedules (micom-livi -ev-schedule-writes)" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Switch, button_pressed: true, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Time/Hour/Value, text: "07" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Time/Minute/Value, text: "30" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Days/Wed, button_pressed: true, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/Start/Hour/Value, text: "22" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/End/Hour/Value, text: "––" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Choice/off_peak_only, button_pressed: true, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/climate_temp/Lines/Line/Value, text: "code 20" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/climate_temp/Lines/Line/Text/Detail, text: "Read only: the car's code, not yet known in degrees" }
+  - screenshot: { name: ev-settings-schedule-read, compare: false }
+  # The car link sets them: what the car has not said still takes no change.
+  - set: { core: { telemetry: { evScheduleWrites: true } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Text/Detail, text: "07:30, Mon, Wed" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Switch, disabled: false }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_2/Lines/Line/Text/Detail, text: "12:00, on or off not reported" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_2/Lines/Line/Switch, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_2/Lines/Days/Mon, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_2/Lines/Line/Time/Hour/Plus, disabled: false }
+  - tap: { node: EvLive/EvSettings/Rows/List/departure_1/Lines/Days/Fri }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Days/Fri, button_pressed: false }
+  - gdscript: |
+      var acts: Array = Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "setEvSchedule")
+      var want := {kind = "setEvSchedule", set = {departure1 = {days = [true, false, true, false, true, false, false]}}}
+      if acts.size() != 1 or JSON.stringify(acts[0].action) != JSON.stringify(want):
+          return "sent %s" % [acts]
+      Core.fake_clear()
+  # The core's edit stands (as the core states it): shown as asked, the rest locked. Whole
+  # objects, as the core patches them.
+  - gdscript: |
+      Core.fake_set("evSchedule/request", {id = 1, at = 1794213000, set = {departure1 = {days = [true, false, true, false, true, false, false]}}})
+      await runner.frames(2)
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Days/Fri, button_pressed: true, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Text/Detail, text: "Sending to the car…" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/Start/Hour/Plus, disabled: true }
+  # The car reported it back.
+  - set: { core: { telemetry: { departure1: { days: [true, false, true, false, true, false, false] } } } }
+  - gdscript: |
+      Core.fake_set("evSchedule", {request = null, last = {id = 1, ok = true, why = ""}})
+      await runner.frames(2)
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Text/Detail, text: "07:30, Mon, Wed, Fri" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Days/Fri, button_pressed: true, disabled: false }
+  # The rows below drag up into view.
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("EvLive/EvSettings/Rows")
+      rows.offset = rows.list.get_node("off_peak").position.y
+      await runner.frames(2)
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/End/Hour/Plus, disabled: true }
+  - tap: { node: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/Start/Hour/Plus }
+  - expect_action: { SetEvSchedule: { set: { offPeak: { startHour: 23, startMinute: 0 } } } }
+  - gdscript: |
+      Core.fake_set("evSchedule/request", {id = 2, at = 1794213010, set = {offPeak = {startHour = 23, startMinute = 0}}})
+      await runner.frames(2)
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/Start/Hour/Value, text: "23" }
+  # It was not reported back: the car's own again, and why.
+  - gdscript: |
+      Core.fake_set("evSchedule", {request = null, last = {id = 2, ok = false, why = "the car did not report it back within 10s (Off-peak start hour)"}})
+      await runner.frames(2)
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/Start/Hour/Value, text: "22" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/schedule_failed/Lines/Line/Text/Detail, text: "The car did not report it back within 10s (Off-peak start hour). Shown as the car has it." }
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("EvLive/EvSettings/Rows")
+      rows.offset = rows.list.get_node("off_peak_mode").position.y
+      await runner.frames(2)
+  - tap: { node: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Choice/off, with: touch }
+  - expect_action: { SetEvSchedule: { set: { chargingMode: "off" } } }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Choice/off, button_pressed: false }
+  - screenshot: { name: ev-settings-schedule-failed, compare: false }
+  # A mode LIVI does not know is shown, never sent.
+  - set: { core: { telemetry: { scheduledChargingMode: "code 1" } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Choice/off, button_pressed: false, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Text/Detail, text: "The car reports code 1, not known to LIVI; read only" }
+  # Driving locks them.
+  - set: { core: { telemetry: { drivingRegulation: true, gear: D } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/scheduled_climate/Lines/Line/Text/Detail, text: "Read only while driving" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/scheduled_climate/Lines/Line/Switch, disabled: true }

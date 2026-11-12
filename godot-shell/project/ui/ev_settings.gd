@@ -11,16 +11,16 @@ signal closed
 const SECTIONS := [["charging", "Charging", "bolt"], ["schedule", "Schedule", "clock"],
 	["battery", "Battery", "therm"], ["power", "Electricity use", "v2l"]]
 const DAYS := ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-## Stock's steps: limits by 10 % (owner's manual). The V2L and climate ranges are stock's
-## pickers' as remembered, not yet read off the car.
+## Stock's steps: limits by 10 % (owner's manual). The V2L range is stock's picker's as
+## remembered, not yet read off the car.
 const LIMIT := {min = 50.0, max = 100.0, step = 10.0}
 const V2L_LIMIT := {min = 20.0, max = 80.0, step = 10.0}
-const CLIMATE_C := {min = 17.0, max = 27.0, step = 0.5}
 ## The schedules' minute fields are 3 bits (0x8C0F, 0x8C55): tens of minutes.
 const MINUTE_STEP := 10
-const READS := ["telemetry", "config", "precondition"]
+const READS := ["telemetry", "config", "precondition", "evSchedule"]
 ## Telemetry the rows show beyond the settings' own fields.
-const ALSO := ["batteryConditioning", "batteryConditioningError", "preconditionState", "preconditionWhy"]
+const ALSO := ["batteryConditioning", "batteryConditioningError", "preconditionState", "preconditionWhy",
+	"evScheduleWrites"]
 
 var section := "charging"
 
@@ -132,9 +132,8 @@ func _refresh(force := false) -> void:
 	for k in ALSO:
 		if all.has(k):
 			_t[k] = all[k]
-	var key := JSON.stringify([_t, section, EvSettingsLink.fake, _requesting(),
-		Core.get_value("/config/batteryPreconditioning"), Core.get_value("/config/batteryPreconditioningManualMinutes"),
-		Core.get_value("/config/temperatureUnit")])
+	var key := JSON.stringify([_t, section, EvSettingsLink.fake, _requesting(), Core.get_value("/evSchedule"), Drive.moving,
+		Core.get_value("/config/batteryPreconditioning"), Core.get_value("/config/batteryPreconditioningManualMinutes")])
 	if key == _shown and not force:
 		return
 	_shown = key
@@ -180,16 +179,20 @@ func _build() -> void:
 			add.call(_choice_row("ac_current", "Charging current", EvSettingsLink.AC_CURRENT, ["Maximum", "Reduced", "Minimum"],
 				"Lower it if a charger stops."))
 		"schedule":
+			var failed := EvSettingsLink.failed()
+			if failed != "":
+				add.call(_row("schedule_failed", "The car did not take the last change",
+					"%s%s. Shown as the car has it." % [failed.substr(0, 1).to_upper(), failed.substr(1)], null))
 			add.call(_group("Next departure"))
 			add.call(_departure_row("departure_1", "Departure 1"))
 			add.call(_departure_row("departure_2", "Departure 2"))
 			add.call(_group("Charging"))
 			add.call(_switch_row("scheduled_charging", "Scheduled charging", "Full by the departure."))
 			add.call(_off_peak_row())
-			add.call(_choice_row("off_peak_mode", "Off-peak charging", EvSettingsLink.OFF_PEAK_MODES, ["Prioritise", "Only"]))
+			add.call(_mode_row())
 			add.call(_group("Climate"))
 			add.call(_switch_row("scheduled_climate", "Climate at departure", "While plugged in."))
-			add.call(_number_row("climate_temp", "Temperature", CLIMATE_C, _temp))
+			add.call(_climate_temp_row())
 			add.call(_switch_row("climate_defog", "Front defog"))
 		"battery":
 			add.call(_conditioning_row())
@@ -209,7 +212,8 @@ func _why(id: String, detail := "") -> String:
 		"unavailable":
 			return "Not available: LIVI cannot read or set this yet"
 		"read_only":
-			return "Read only: LIVI cannot set this on the car yet"
+			var b := EvSettingsLink.blocked(id, _t)
+			return b if b != "" else "Read only: LIVI cannot set this on the car yet"
 		"unreported":
 			return "Not reported by the car yet" if EvSettingsLink.writable(id) \
 				else "Not reported by the car; read only"
@@ -281,12 +285,12 @@ func _number_row(id: String, label: String, r: Dictionary, fmt: Callable, detail
 	return _row(id, label, _why(id, detail), box)
 
 
-func _choice_row(id: String, label: String, values: Array, labels: Array, detail := "") -> Control:
-	var v = EvSettingsLink.value(id, _t)
+func _choice_row(id: String, label: String, values: Array, labels: Array, detail := "", can := true) -> Control:
+	var v = _with_pending(id)
 	var box := HBoxContainer.new()
 	box.name = "Choice"
 	box.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.4))
-	var on := _live(id)
+	var on := _live(id) and can
 	for i in values.size():
 		var b := _toggle(values[i], labels[i], v == values[i], on)
 		var want: String = values[i]
@@ -299,89 +303,126 @@ func _choice_row(id: String, label: String, values: Array, labels: Array, detail
 
 
 func _switch_row(id: String, label: String, detail := "") -> Control:
-	var v = EvSettingsLink.value(id, _t)
+	var v = _with_pending(id)
 	return _row(id, label, _why(id, detail), _switch(v == true, _live(id), func(): _send(id, not (v == true))))
 
 
-## Times and days of one departure; each change sends the whole of it, as stock's 0x0C06 does.
+## Times and days of one departure. A change sends only what it changes; the car link keeps the
+## rest as the car has it. A part the car has not reported takes no change.
 func _departure_row(id: String, label: String) -> Control:
-	var v = EvSettingsLink.value(id, _t)
+	var v = _with_pending(id)
 	var d := _departure(v)
 	var on := _live(id) and v is Dictionary
-	var send := func(patch: Dictionary):
-		var n := d.duplicate(true)
-		n.merge(patch, true)
-		_send(id, n)
 	var detail := _why(id, _departure_text(d))
-	var sw := _switch(d.get("on") == true, on, func(): send.call({on = not (d.get("on") == true)}))
-	var time := _time("Time", int(d.get("hour", 0)), int(d.get("minute", 0)), on and v != null,
-		func(h, m): send.call({hour = h, minute = m}))
+	var is_on = d.get("on")
+	var sw := _switch(is_on == true, on and is_on != null, func(): _send(id, {on = not (is_on == true)}))
+	var h = d.get("hour")
+	var m = d.get("minute")
+	var time := _time("Time", h, m, on and h != null and m != null, func(nh, nm): _send(id, {hour = nh, minute = nm}))
 	var days := HBoxContainer.new()
 	days.name = "Days"
 	days.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.3))
-	var set_days: Array = d.get("days", [false, false, false, false, false, false, false])
+	var set_days: Array = d.get("days", [null, null, null, null, null, null, null])
+	var all_known := not set_days.has(null)
 	for i in DAYS.size():
-		var b := _toggle(DAYS[i], DAYS[i].substr(0, 2), bool(set_days[i]), on)
+		var b := _toggle(DAYS[i], DAYS[i].substr(0, 2), set_days[i] == true, on and all_known)
 		b.custom_minimum_size.x = ThemeManager.px.touch * 1.1
 		b.pressed.connect(func():
-			_keep(b, bool(set_days[i]))
+			_keep(b, set_days[i] == true)
 			if not _rows.dragged:
 				var n := set_days.duplicate()
-				n[i] = not bool(n[i])
-				send.call({days = n}))
+				n[i] = not (n[i] == true)
+				_send(id, {days = n}))
 		days.add_child(b)
 	return _row(id, label, detail, sw, days, time)
 
 
-## A departure as the page sends it: on, hour, minute, days (Monday first); empty for none.
+## A departure as the car reports it: on, hour, minute, days (Monday first), each null where the
+## car has not said; empty for none.
 static func _departure(v: Variant) -> Dictionary:
 	if not v is Dictionary:
 		return {}
 	var days := []
 	var got: Array = v.get("days", []) if v.get("days") is Array else []
 	for i in DAYS.size():
-		days.append(i < got.size() and got[i] == true)
-	return {on = v.get("on") == true, hour = int(v.get("hour", 0)), minute = int(v.get("minute", 0)), days = days}
+		days.append(got[i] if i < got.size() and got[i] is bool else null)
+	return {on = v.get("on") if v.get("on") is bool else null, hour = _int_or_null(v.get("hour")),
+		minute = _int_or_null(v.get("minute")), days = days}
 
 
 static func _off_peak(v: Variant) -> Dictionary:
 	if not v is Dictionary:
 		return {}
-	return {start_hour = int(v.get("start_hour", 0)), start_minute = int(v.get("start_minute", 0)),
-		end_hour = int(v.get("end_hour", 0)), end_minute = int(v.get("end_minute", 0))}
+	return {startHour = _int_or_null(v.get("startHour")), startMinute = _int_or_null(v.get("startMinute")),
+		endHour = _int_or_null(v.get("endHour")), endMinute = _int_or_null(v.get("endMinute"))}
+
+
+static func _int_or_null(v: Variant) -> Variant:
+	return int(v) if v is int or v is float else null
+
+
+static func _clock(h: Variant, m: Variant) -> String:
+	return "%s:%s" % ["%02d" % h if h != null else "––", "%02d" % m if m != null else "––"]
 
 
 func _departure_text(d: Dictionary) -> String:
 	if d.is_empty():
 		return ""
+	if d.get("on") == null:
+		return "%s, on or off not reported" % _clock(d.get("hour"), d.get("minute"))
 	if d.get("on") != true:
 		return "Off"
 	var days: Array = d.get("days", [])
+	if days.has(null):
+		return "%s, days not reported" % _clock(d.get("hour"), d.get("minute"))
 	var names := []
 	for i in mini(days.size(), DAYS.size()):
 		if days[i]:
 			names.append(DAYS[i])
 	var when := "every day" if names.size() == 7 else ", ".join(names) if not names.is_empty() else "once"
-	return "%02d:%02d, %s" % [int(d.get("hour", 0)), int(d.get("minute", 0)), when]
+	return "%s, %s" % [_clock(d.get("hour"), d.get("minute")), when]
 
 
 func _off_peak_row() -> Control:
 	var id := "off_peak"
-	var v = EvSettingsLink.value(id, _t)
+	var v = _with_pending(id)
 	var d := _off_peak(v)
 	var on := _live(id) and v is Dictionary
-	var send := func(patch: Dictionary):
-		var n := d.duplicate(true)
-		n.merge(patch, true)
-		_send(id, n)
-	var start := _time("Start", int(d.get("start_hour", 0)), int(d.get("start_minute", 0)), on,
-		func(h, m): send.call({start_hour = h, start_minute = m}))
-	var end := _time("End", int(d.get("end_hour", 0)), int(d.get("end_minute", 0)), on,
-		func(h, m): send.call({end_hour = h, end_minute = m}))
+	var sh = d.get("startHour")
+	var sm = d.get("startMinute")
+	var eh = d.get("endHour")
+	var em = d.get("endMinute")
+	var start := _time("Start", sh, sm, on and sh != null and sm != null,
+		func(h, m): _send(id, {startHour = h, startMinute = m}))
+	var end := _time("End", eh, em, on and eh != null and em != null,
+		func(h, m): _send(id, {endHour = h, endMinute = m}))
 	var to := UI.label("to", "body", "body", "dim")
 	var below := UI.hbox([start, to, end], 1.0)
 	below.name = "Below"
 	return _row(id, "Off-peak hours", _why(id, "Cheapest hours to charge."), null, below)
+
+
+## The car's off-peak charging mode. A mode LIVI does not know (the car's code 1) is shown and
+## never sent: the car link would echo it back with any off-peak change, so it refuses those too.
+func _mode_row() -> Control:
+	var id := "off_peak_mode"
+	var v = _with_pending(id)
+	var known: bool = v in EvSettingsLink.OFF_PEAK_MODES
+	var detail := ""
+	if v is String and not known:
+		detail = "The car reports %s, not known to LIVI; read only" % v
+	return _choice_row(id, "Off-peak charging", EvSettingsLink.OFF_PEAK_MODES, ["Off", "Prioritise", "Only"], detail, known)
+
+
+## The car's code for the climate's temperature: its encoding is not known, so it is shown as
+## the code and never set.
+func _climate_temp_row() -> Control:
+	var id := "climate_temp"
+	var v = EvSettingsLink.value(id, _t)
+	var value := UI.label("code %d" % int(v) if v != null else "–", "strong", "body")
+	value.name = "Value"
+	var detail := "Read only: the car's code, not yet known in degrees" if v != null else _why(id)
+	return _row(id, "Temperature", detail, value)
 
 
 ## LIVI's request, which micom-livi turns into the car's conditioning mode while it lasts; the
@@ -460,11 +501,15 @@ func _stepper(text: String, can_down: bool, can_up: bool, down: Callable, up: Ca
 	return box
 
 
-## Hours and tens of minutes, each wrapping.
-func _time(box_name: String, h: int, m: int, on: bool, change: Callable) -> HBoxContainer:
-	var hours := _stepper("%02d" % h, on, on, func(): change.call(posmod(h - 1, 24), m), func(): change.call(posmod(h + 1, 24), m))
+## Hours and tens of minutes, each wrapping; null shows as unknown and takes no change.
+func _time(box_name: String, hv: Variant, mv: Variant, on: bool, change: Callable) -> HBoxContainer:
+	on = on and hv != null and mv != null
+	var h := int(hv) if hv != null else 0
+	var m := int(mv) if mv != null else 0
+	var hours := _stepper("%02d" % h if hv != null else "––", on, on,
+		func(): change.call(posmod(h - 1, 24), m), func(): change.call(posmod(h + 1, 24), m))
 	hours.name = "Hour"
-	var mins := _stepper("%02d" % m, on, on,
+	var mins := _stepper("%02d" % m if mv != null else "––", on, on,
 		func(): change.call(h, posmod(m - MINUTE_STEP, 60)), func(): change.call(h, posmod(m + MINUTE_STEP, 60)))
 	mins.name = "Minute"
 	for s in [hours, mins]:
@@ -525,11 +570,18 @@ func _pct(v: Variant) -> String:
 	return "%d %%" % roundi(float(v))
 
 
-func _temp(v: Variant) -> String:
-	var c := float(v)
-	if Units.fahrenheit():
-		return "%d °F" % roundi(c * 9.0 / 5.0 + 32.0)
-	return "%s °C" % String.num(c, 1)
+## A setting as shown: the car's value, with the edit on its way to the car over it.
+func _with_pending(id: String) -> Variant:
+	var v = EvSettingsLink.value(id, _t)
+	var p = EvSettingsLink.pending()
+	var key: String = EvSettingsLink.SCHEDULE_KEYS.get(id, "")
+	if not (p is Dictionary and key != "" and p.has(key)):
+		return v
+	if v is Dictionary and p[key] is Dictionary:
+		var n: Dictionary = v.duplicate(true)
+		n.merge(p[key], true)
+		return n
+	return p[key]
 
 
 func _requesting() -> bool:

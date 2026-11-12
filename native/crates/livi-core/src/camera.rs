@@ -142,6 +142,7 @@ mod tests {
             telemetry: Default::default(),
             navigation: Default::default(),
             precondition: Default::default(),
+            ev_schedule: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),

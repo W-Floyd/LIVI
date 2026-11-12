@@ -56,6 +56,9 @@
 //! | climatePowerW, batteryHeaterW       | ✓    | ·            | ·               | ·             |
 //! | preconditionState, preconditionWhy  | ✓    | ·            | ·               | ·             |
 //! | batteryConditioning*                | ✓    | ·            | ·               | ·             |
+//! | departure1, departure2, offPeak     | ✓    | ·            | ·               | ·             |
+//! | scheduledChargingMode, scheduled*   | ✓    | ·            | ·               | ·             |
+//! | evScheduleWrites, evScheduleWrite   | ✓    | ·            | ·               | ·             |
 //! | rangeMaxElectricKm                  | ✓    | ·            | ✓ (electric)    | ✓ (electric)  |
 //! | carType                             | ✓    | ✓            | ✓               | ✓             |
 //! | evConnectorTypes                    | ✓    | ✓            | ✓               | ✓             |
@@ -210,6 +213,24 @@ pub struct TelemetrySnapshot {
     /// Why the car would not condition its battery: 1 the driving range is too short, 2 the
     /// battery is already at its best temperature, 3 a heat-management error; null for none.
     pub battery_conditioning_error: Option<u8>,
+    /// The car's departure timers, as it reports them.
+    pub departure1: Option<Departure>,
+    pub departure2: Option<Departure>,
+    /// The car's off-peak charging window.
+    pub off_peak: Option<OffPeak>,
+    /// `off`, `prioritize_off_peak`, `off_peak_only`, or `code N` for a mode not known.
+    pub scheduled_charging_mode: Option<String>,
+    /// Climate at departure, while plugged in.
+    pub scheduled_climate: Option<bool>,
+    pub scheduled_climate_defrost: Option<bool>,
+    /// The car's raw code for the climate's temperature at departure; how it maps to degrees is
+    /// not known.
+    pub scheduled_climate_temp_code: Option<u8>,
+    /// The car integration sends `SetEvSchedule` edits (go-micomd's micom-livi
+    /// `-ev-schedule-writes`); else the schedules are read only.
+    pub ev_schedule_writes: Option<bool>,
+    /// How the car integration's last edit went.
+    pub ev_schedule_write: Option<EvScheduleWrite>,
     /// The range on a full battery.
     pub range_max_electric_km: Option<f64>,
     /// A `CarType` name such as `HybridDiesel`, written into the settings when it differs.
@@ -287,6 +308,37 @@ pub struct TelemetrySnapshot {
     /// The dashboard's climate key is held.
     pub climate_key: Option<bool>,
     pub notification: Option<Notification>,
+}
+
+/// Null where the car has not said, or says it has none.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Departure {
+    pub on: Option<bool>,
+    pub hour: Option<u8>,
+    /// Whole tens.
+    pub minute: Option<u8>,
+    /// Monday first.
+    pub days: Vec<Option<bool>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OffPeak {
+    pub start_hour: Option<u8>,
+    pub start_minute: Option<u8>,
+    pub end_hour: Option<u8>,
+    pub end_minute: Option<u8>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvScheduleWrite {
+    /// The `evSchedule` request's id.
+    pub id: u64,
+    /// `sending`, then `confirmed` (the car reported it back) or `failed`.
+    pub state: String,
+    pub why: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -435,6 +487,24 @@ mod tests {
             battery_conditioning: Some(true),
             battery_conditioning_mode: Some("on".into()),
             battery_conditioning_error: Some(2),
+            departure1: Some(Departure {
+                on: Some(true),
+                hour: Some(7),
+                minute: Some(30),
+                days: vec![Some(true), None],
+            }),
+            off_peak: Some(OffPeak {
+                start_hour: Some(22),
+                ..Default::default()
+            }),
+            scheduled_charging_mode: Some("off_peak_only".into()),
+            scheduled_climate_temp_code: Some(20),
+            ev_schedule_writes: Some(true),
+            ev_schedule_write: Some(EvScheduleWrite {
+                id: 3,
+                state: "confirmed".into(),
+                why: None,
+            }),
             telltales: Some(Telltales {
                 passenger_airbag_off: Some(true),
                 ..Default::default()
@@ -470,6 +540,21 @@ mod tests {
             ("batteryConditioning", json!(true)),
             ("batteryConditioningMode", json!("on")),
             ("batteryConditioningError", json!(2)),
+            (
+                "departure1",
+                json!({ "on": true, "hour": 7, "minute": 30, "days": [true, null] }),
+            ),
+            (
+                "offPeak",
+                json!({ "startHour": 22, "startMinute": null, "endHour": null, "endMinute": null }),
+            ),
+            ("scheduledChargingMode", json!("off_peak_only")),
+            ("scheduledClimateTempCode", json!(20)),
+            ("evScheduleWrites", json!(true)),
+            (
+                "evScheduleWrite",
+                json!({ "id": 3, "state": "confirmed", "why": null }),
+            ),
         ] {
             assert_eq!(named[name], want, "{name}");
         }

@@ -346,6 +346,7 @@ mod tests {
             video_playback: None,
             navigation: Default::default(),
             precondition: Default::default(),
+            ev_schedule: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             telemetry: Default::default(),

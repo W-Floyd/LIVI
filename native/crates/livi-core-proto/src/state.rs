@@ -21,6 +21,8 @@ pub struct State {
     pub navigation: Navigation,
     #[serde(default)]
     pub precondition: Precondition,
+    #[serde(default)]
+    pub ev_schedule: EvSchedule,
     pub system: System,
     pub devices: Vec<DeviceView>,
     pub cameras: Vec<CameraView>,
@@ -46,6 +48,7 @@ impl State {
             "videoPlayback" => self.video_playback = read(value)?,
             "navigation" => self.navigation = read(value)?,
             "precondition" => self.precondition = read(value)?,
+            "evSchedule" => self.ev_schedule = read(value)?,
             "system" => self.system = read(value)?,
             "devices" => self.devices = read(value)?,
             "cameras" => self.cameras = read(value)?,
@@ -361,6 +364,125 @@ pub struct ChargingStop {
 pub struct Precondition {
     /// Unix seconds; none while no request stands.
     pub manual_until: Option<u64>,
+}
+
+/// The user's edit of the car's EV schedules on its way to the car, and how the last one went.
+/// A car integration reads `request` at GET /navigation as `evScheduleRequest`, sends it, and
+/// reports telemetry `evScheduleWrite`. Runtime only.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvSchedule {
+    pub request: Option<EvScheduleRequest>,
+    pub last: Option<EvScheduleOutcome>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvScheduleRequest {
+    pub id: u64,
+    /// Unix seconds: a car integration started later does not act on an old edit.
+    pub at: u64,
+    pub set: EvScheduleEdit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvScheduleOutcome {
+    pub id: u64,
+    /// The car reported the edit back.
+    pub ok: bool,
+    #[serde(default)]
+    pub why: String,
+}
+
+/// What to change of the car's schedules; the rest is kept as the car has it. Minutes are whole
+/// tens. The climate's temperature is not settable: its encoding on the car is not known.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EvScheduleEdit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub departure1: Option<DepartureEdit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub departure2: Option<DepartureEdit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off_peak: Option<OffPeakEdit>,
+    /// `off`, `prioritize_off_peak` or `off_peak_only`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charging_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub climate: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub climate_defrost: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DepartureEdit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hour: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minute: Option<u8>,
+    /// Monday first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub days: Option<[bool; 7]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OffPeakEdit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_hour: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_minute: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_hour: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_minute: Option<u8>,
+}
+
+pub const EV_CHARGING_MODES: [&str; 3] = ["off", "prioritize_off_peak", "off_peak_only"];
+
+impl EvScheduleEdit {
+    /// Why the car could not take it, if so.
+    pub fn check(&self) -> Result<(), String> {
+        let mut bad = Vec::new();
+        let hour = |h: Option<u8>, bad: &mut Vec<String>| {
+            if let Some(h) = h.filter(|h| *h > 23) {
+                bad.push(format!("hour {h}"));
+            }
+        };
+        let minute = |m: Option<u8>, bad: &mut Vec<String>| {
+            if let Some(m) = m.filter(|m| *m >= 60 || m % 10 != 0) {
+                bad.push(format!("minute {m}: the car takes tens"));
+            }
+        };
+        for d in [&self.departure1, &self.departure2].into_iter().flatten() {
+            hour(d.hour, &mut bad);
+            minute(d.minute, &mut bad);
+        }
+        if let Some(o) = &self.off_peak {
+            hour(o.start_hour, &mut bad);
+            minute(o.start_minute, &mut bad);
+            hour(o.end_hour, &mut bad);
+            minute(o.end_minute, &mut bad);
+        }
+        if let Some(m) = self
+            .charging_mode
+            .as_deref()
+            .filter(|m| !EV_CHARGING_MODES.contains(m))
+        {
+            bad.push(format!("charging mode {m}"));
+        }
+        if *self == EvScheduleEdit::default() {
+            bad.push("nothing to change".into());
+        }
+        match bad.is_empty() {
+            true => Ok(()),
+            false => Err(bad.join("; ")),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

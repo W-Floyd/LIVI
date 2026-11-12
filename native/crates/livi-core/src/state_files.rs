@@ -372,6 +372,7 @@ mod tests {
             telemetry: telemetry.as_object().cloned().unwrap_or_default(),
             navigation: Default::default(),
             precondition: Default::default(),
+            ev_schedule: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),

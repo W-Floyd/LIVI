@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::input::Input;
 use crate::patch::PatchOp;
-use crate::state::{Area, Front, Screen, State};
+use crate::state::{Area, EvScheduleEdit, Front, Screen, State};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -172,6 +172,11 @@ pub enum Action {
     },
     PreconditionBattery {
         on: bool,
+    },
+    /// Changes the car's EV schedules through its car integration, only where it says it can
+    /// (telemetry `evScheduleWrites`) and while parked.
+    SetEvSchedule {
+        set: EvScheduleEdit,
     },
     Quit,
     Restart,

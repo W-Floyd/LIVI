@@ -349,6 +349,25 @@ impl Core {
                 self.hub.update(|s| s.precondition.manual_until = until);
                 Ok(())
             }
+            Action::SetEvSchedule { set } => {
+                let req = {
+                    let state = self.hub.watch();
+                    let s = state.borrow();
+                    crate::ev_schedule::request(
+                        &s.ev_schedule,
+                        &s.telemetry,
+                        set,
+                        crate::precondition::now_s(),
+                    )?
+                };
+                println!(
+                    "[core] ev schedule edit {}: {}",
+                    req.id,
+                    serde_json::to_string(&req.set).unwrap_or_default()
+                );
+                self.hub.update(|s| s.ev_schedule.request = Some(req));
+                Ok(())
+            }
         }
     }
 }
@@ -566,6 +585,7 @@ mod tests {
             telemetry: Default::default(),
             navigation: Default::default(),
             precondition: Default::default(),
+            ev_schedule: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),

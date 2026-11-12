@@ -2,8 +2,8 @@ name: home-fill
 # Home without the phone's picture: the cards over the whole width; with nothing playing they
 # stack at their own heights, centred, the media card compact (the media card leads only while
 # something plays: scenario media-player). Android Auto's video joining moves the cards aside (about 350 ms) and opens
-# the slot, the picture following the slot every frame and the phone asked for the slot once,
-# settled; its going does the reverse, asking nothing. At once under reduced motion. The rail
+# the slot, the picture following the slot every frame and the phone asked once, as it starts,
+# for where the slot settles; its going does the reverse, asking nothing. At once under reduced motion. The rail
 # offers the phone's page only while there is a picture, and that page falls back when it goes.
 clock: 2026-11-09T08:30:00
 fixtures:
@@ -45,7 +45,7 @@ steps:
       if rail._buttons.projection.visible:
           return "the rail offers the phone's page with no phone"
       runner.set_meta("stat", shell.get_node("Page/Body/Side/Panel/Stat").get_instance_id())
-  # Android Auto's video comes: the slot opens over frames, the phone asked once it settled.
+  # Android Auto's video comes: the slot opens over frames, the phone asked once for where it settles.
   - gdscript: &join |
       Core.fake_clear()
       return runner._spawn({role = "app", app_id = "livi-video-main", pattern = "grid", size = "1920x1080", buffer = "nv12", video = true})
@@ -68,8 +68,6 @@ steps:
           last = slot.size.x
           if slot.size.x > 0.5 and slot.size.x < full - 0.5:
               between += 1
-              if not areas.call().is_empty():
-                  return "frame %d: asked %s before the slot settled" % [i, areas.call()]
           await runner.frames(1)
       if absf(slot.size.x - full) > 0.5:
           return "the slot settled at %s, not %s" % [slot.size.x, full]

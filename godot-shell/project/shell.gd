@@ -80,6 +80,8 @@ var _split_to := 1.0
 var _side_w := 0.0
 var _side_to := -1.0
 var _split_tween: Tween
+## Slides started (`_start_slide`): a later one supersedes one not yet started.
+var _slides := 0
 ## The handle is being dragged, from the cards at `_drag_w0`.
 var _dragging := false
 var _drag_w0 := 0.0
@@ -807,18 +809,37 @@ func _slide(want: float, to: float) -> void:
 		return
 	_split_to = want
 	_side_to = to
-	_fit.call_deferred()
+	_slides += 1
 	if _split_tween:
 		_split_tween.kill()
 		_split_tween = null
 	if ThemeManager.reduced_motion or _page_name != "home" or not is_visible_in_tree():
+		_fit.call_deferred()
 		_set_side(to)
 		_split_settled()
 		return
+	_start_slide.call_deferred(_slides, _side_w, to)
+
+
+## Once this frame's changes are in (the toggle's band under the cards too): the cards fitted
+## once, laid out at the width they go to, and the slide only moves them; the phone or the
+## navigation app asked for that width now, its new picture on its way meanwhile.
+func _start_slide(n: int, from: float, to: float) -> void:
+	if n != _slides:
+		return
+	_set_side(to)
+	# Twice: the first fit's looks change the cards' minimum, and so the room the second sees.
+	for i in 2:
+		_body.notification(Container.NOTIFICATION_SORT_CHILDREN)
+		_side.notification(Container.NOTIFICATION_SORT_CHILDREN)
+		_fit()
 	_projection.visible = true
 	_split_tween = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	_split_tween.tween_method(_set_side, _side_w, to, SPLIT_S)
+	_split_tween.tween_method(_set_side, from, to, SPLIT_S)
 	_split_tween.finished.connect(_split_settled)
+	_set_side(from)
+	_ask_area()
+	_size_nav()
 
 
 ## The cards `w` wide and the slot the rest. Past the narrowest phone they blend into the
@@ -831,10 +852,11 @@ func _set_side(w: float) -> void:
 	_split = clampf(inverse_lerp(least, full, w), 0.0, 1.0) if full > least else 1.0
 	var cards: HomeCards = _side.get_node("Panel")
 	var m: float = _side.get_theme_constant("margin_left") * 2.0
-	# A drag shows the column or the dashboard, never a blend, whose cards cross mid-way; the
-	# column fills the side, its edge with the picture's.
-	cards.wide = roundf(_split) if _dragging else _split
-	cards.column = maxf(0.0, (w if _dragging and cards.wide == 0.0 else lerpf(minf(w, least), ThemeManager.px.side, _split)) - m)
+	# A drag or a slide shows the column or the dashboard, never a blend, whose cards cross
+	# mid-way; the column fills the side, its edge with the picture's.
+	var moving := _dragging or _split_tween != null
+	cards.wide = roundf(_split) if moving else _split
+	cards.column = maxf(0.0, (w if moving and cards.wide == 0.0 else lerpf(minf(w, least), ThemeManager.px.side, _split)) - m)
 	_place_handle()
 	_place_source()
 	if app_keyboard:
@@ -869,21 +891,28 @@ func _on_handle_release() -> void:
 	for s in _snaps():
 		if absf(s - phone) < absf(best - phone):
 			best = s
+	# Slides there (`_update_split`) with the look already kept, so the phone is asked at once.
 	_side_to = -1.0
-	_slide(1.0 if best == 0.0 else 0.0, full - best)
 	var look := {home_phone = best > 0.0}
 	if best > 0.0:
 		look.home_split = best / full
-	ThemeManager.set_look(look)
-	ThemeManager.save_look()
+	_keep_split(look)
 
 
 ## A double tap: the phone back at the default width, from any width or hidden.
 func _on_handle_reset() -> void:
 	if not _slot_present:
 		return
-	ThemeManager.set_look({home_phone = true, home_split = 0.0})
+	_keep_split({home_phone = true, home_split = 0.0})
+
+
+## Kept in the look without restyling everything (`ThemeManager.apply`): only home reads them.
+func _keep_split(look: Dictionary) -> void:
+	for k in look:
+		ThemeManager.set(k, look[k])
 	ThemeManager.save_look()
+	_update_split()
+	_tell_front()
 
 
 func _split_settled() -> void:
@@ -893,8 +922,11 @@ func _split_settled() -> void:
 	# A slot that closed is asked for again when it opens, whatever it was before.
 	if _split_to == 1.0:
 		_area_asked = Rect2i()
+		_projection.window.hold = false
 	_place_next_frame()
 	_projection.window.release_hold()
+	# What changed meanwhile.
+	_fit.call_deferred()
 
 
 ## The handle's pill centred in the side's margin toward the slot (the gutter, as wide as the
@@ -1113,10 +1145,23 @@ func _size_nav() -> void:
 	if _page_name == "app":
 		Wayland.set_window_area(nav, 0, 0)
 		_nav_window = -1
-	elif _slot_nav() and _split_tween == null and not _dragging and _slot.size.x >= 1.0:
-		var s := _slot_rect()
+	elif _slot_nav() and not _dragging and _slot_settled().size.x >= 1.0:
+		var s := _slot_rect(true)
 		Wayland.set_window_area(nav, roundi(s.size.x), roundi(s.size.y))
 		_nav_window = nav
+
+
+## Home's slot, global, where a slide leaves it.
+func _slot_settled() -> Rect2:
+	if _split_tween == null:
+		return _slot.get_global_rect()
+	# The content's rect, not the body's: mid-change the cards' minimum may stretch the body.
+	var r := _rect_beside_status()
+	r.position += global_position
+	r.size.x = maxf(0.0, r.size.x - _side_to)
+	if ThemeManager.side_left():
+		r.position.x += _side_to
+	return r
 
 
 ## The last area asked of the phone, in the projection screen's pixels.
@@ -1128,7 +1173,7 @@ var _area_asked := Rect2i()
 func _ask_area(again := false) -> void:
 	if not _shows_projection():
 		return
-	var a: Rect2i = _projection.window.to_screen(_slot.get_global_rect() if _page_name == "home" else get_global_rect())
+	var a: Rect2i = _projection.window.to_screen(_slot_settled() if _page_name == "home" else get_global_rect())
 	if a.size.x <= 0 or a.size.y <= 0 or (a == _area_asked and not again):
 		return
 	_area_asked = a
@@ -1172,8 +1217,8 @@ func _fit() -> void:
 	if not _body.is_visible_in_tree():
 		_fit_due = true
 		return
-	# A drag only places the cards at their looks; the release fits them (`_slide`).
-	if _dragging:
+	# A drag or a slide only places the cards at their looks: `_slide` fits them at its end width.
+	if _dragging or _split_tween:
 		return
 	_fit_due = false
 	var panel: HomeCards = _side.get_node("Panel")
@@ -1341,8 +1386,9 @@ func _keyboard_rect() -> Rect2:
 
 
 ## Home's slot, less what the keyboard takes of it.
-func _slot_rect() -> Rect2:
-	var r := Rect2(_slot.global_position - global_position, _slot.size)
+func _slot_rect(settled := false) -> Rect2:
+	var r := (_slot_settled() if settled else _slot.get_global_rect())
+	r.position -= global_position
 	if _page_name != "home" or app_keyboard == null or app_keyboard.closing():
 		return r
 	var k := _keyboard_rect()

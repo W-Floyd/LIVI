@@ -110,6 +110,85 @@ steps:
       ThemeManager.set_look({hand = "lhd", home_layout = "cards", home_phone = true, home_split = 0.0})
       await runner.frames(30)
       return "; ".join(bad.values())
+  # Releases, animated as on the unit: to the other snap, past the end (hidden) and back. A release
+  # settles at once: one fit at the width it goes to, no restyle, the phone or the navigation app
+  # asked for that width as the slide starts, and the window's last picture held until the new one.
+  # Measured: the release 0.1 ms, the main thread 19-57 ms to settled, asked on its first frame;
+  # 7-8 ms and 64-100 ms when the release restyled everything (ThemeManager.apply) and asked once
+  # the slide had ended (frame 21).
+  - gdscript: &release |
+      ThemeManager.set_look({reduced_motion = false, home_phone = true, home_split = 0.0})
+      await runner.frames(30)
+      var view: WindowView = shell._projection.window
+      var nav: bool = shell.slot_source() == "nav"
+      var asked := func() -> int:
+          if nav:
+              return Array(FileAccess.get_file_as_string(runner._client_events("org.livi.test.grid")).split("\n")).filter(func(l): return l.begins_with("configure ")).size()
+          return Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea").size()
+      var main := [0.0, 0]
+      var on_start := func(): main[1] = Time.get_ticks_usec()
+      var on_draw := func(): if main[1] > 0: main[0] += (Time.get_ticks_usec() - main[1]) / 1000.0
+      var looks := [0]
+      var on_look := func(): looks[0] += 1
+      var bad := PackedStringArray()
+      var full: float = shell.get_node("Page/Body").size.x
+      var out := -1.0 if ThemeManager.side_left() else 1.0
+      for to in ["s0", "hidden", "s1"]:
+          var snaps: Array = shell._snaps()
+          var want: float = {s0 = snaps[0], hidden = 0.0, s1 = snaps.back()}[to]
+          var slot: Control = shell.get_node("Page/Body/Slot")
+          var at: Vector2 = shell.get_node("Page/PhoneHandle/Pill").get_global_rect().get_center()
+          # Past the end for hidden; else to the snap.
+          var d := ((want - slot.size.x) if to != "hidden" else -slot.size.x - 100.0) * out
+          runner._drag_input(at, true, true)
+          await runner.frames(1)
+          for i in 8:
+              runner._drag_input(at + Vector2(d * (i + 1) / 8.0, 0.0), true)
+              await runner.frames(1)
+          var fits0: int = shell.fits
+          var asked0: int = asked.call()
+          main[0] = 0.0
+          main[1] = 0
+          looks[0] = 0
+          shell.get_tree().process_frame.connect(on_start)
+          RenderingServer.frame_pre_draw.connect(on_draw)
+          ThemeManager.changed.connect(on_look)
+          var t0 := Time.get_ticks_usec()
+          runner._drag_input(at + Vector2(d, 0.0), false, true)
+          var sync_ms := (Time.get_ticks_usec() - t0) / 1000.0
+          var settled := -1
+          var asked_at := -1
+          var held_to := -1
+          var fits_at_settle := 0
+          var from: float = slot.size.x
+          for f in 150:
+              await runner.frames(1)
+              # Slid there from where it was let go, not shown there at once.
+              if f == 0 and absf(from - want) > 50.0 and absf(slot.size.x - want) < 0.5:
+                  bad.append("%s: at the end at once" % to)
+              if settled < 0 and shell._split_tween == null:
+                  settled = f
+                  fits_at_settle = shell.fits - fits0
+              if asked_at < 0 and asked.call() > asked0:
+                  asked_at = f
+              if held_to < 0 and not view.hold:
+                  held_to = f
+          shell.get_tree().process_frame.disconnect(on_start)
+          RenderingServer.frame_pre_draw.disconnect(on_draw)
+          ThemeManager.changed.disconnect(on_look)
+          var r := {nav = nav, to = to, release_ms = snappedf(sync_ms, 0.01), main_ms = snappedf(main[0] + sync_ms, 0.01), settled_frame = settled,
+              fits = fits_at_settle, restyles = looks[0], asked_frame = asked_at, asks = asked.call() - asked0, hold_ended_frame = held_to}
+          print("perf-divider release %s" % r)
+          if r.restyles > 0 or r.fits > 2 or r.asks > 1 or (r.asks == 1 and r.asked_frame != 0):
+              bad.append("%s: %s" % [to, r])
+          # The navigation app's new picture arrives during the slide: drawn as it is once settled.
+          if nav and to != "hidden" and (r.asks != 1 or r.hold_ended_frame > r.settled_frame + 3):
+              bad.append("%s: %s" % [to, r])
+          if absf(slot.size.x - want) > 0.5:
+              bad.append("%s: the slot %s, not %s" % [to, slot.size.x, want])
+      ThemeManager.set_look({reduced_motion = true})
+      await runner.frames(3)
+      return ", ".join(bad)
   # The navigation app in the slot: its last picture fills the slot through the drag, it is not
   # configured until the release, and once it has the slot's shape again it is drawn as it is.
   - gdscript: |
@@ -152,3 +231,4 @@ steps:
       await runner.frames(3)
       if view.hold or not whole.call() or configures.call() != before:
           return "released at the same width: held %s, the picture %s in %s, %d configures" % [view.hold, view.picture_rect(), view.size, configures.call() - before]
+  - gdscript: *release

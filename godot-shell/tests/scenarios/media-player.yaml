@@ -158,6 +158,20 @@ steps:
           print("media-player %s: media %s %s, battery %s, precondition %s, left out %s" % [label, player.layout, player.size, stat.visible, where, shell.left_out])
           if r[3] != null and where != r[3]:
               bad.append("%s: precondition %s, want %s" % [label, where, r[3]])
+          # A refit that ends where it began (a new track) leaves every card at its own height,
+          # none over another or the pill.
+          Core.fake_set("nowPlaying/title", "Another Title" if shell.now_playing.title != "Another Title" else "A Remarkably Long Song Title That Goes On")
+          await runner.frames(4)
+          var rects := [["Pill", source.get_global_rect()]]
+          for c in panel.get_children():
+              if not c.visible:
+                  continue
+              if c != player and not c.top_level and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
+                  bad.append("%s: %s at %d, its own height %d" % [label, c.name, c.size.y, c.get_combined_minimum_size().y])
+              for o in rects:
+                  if o[1].grow(-0.5).intersects(c.get_global_rect().grow(-0.5)):
+                      bad.append("%s: %s %s over %s %s" % [label, c.name, c.get_global_rect(), o[0], o[1]])
+              rects.append([c.name, c.get_global_rect()])
           if not player.is_visible_in_tree() or not stat.visible:
               bad.append("%s: media %s, battery %s" % [label, player.visible, stat.visible])
           if where == "band":
@@ -165,6 +179,7 @@ steps:
               var side: Rect2 = shell.get_node("Page/Body/Side").get_global_rect()
               if pr.intersects(source.get_global_rect()) or not side.encloses(pr) or absf(pr.end.y - source.get_global_rect().end.y) > 1.0:
                   bad.append("%s: precondition at %s beside the pill %s in %s" % [label, pr, source.get_global_rect(), side])
+      Core.fake_set("nowPlaying/title", "A Remarkably Long Song Title That Goes On")
       ThemeManager.set_look({nav_app = "", home_split = 0.0, text_scale = 1.0, hand = "lhd"})
       await runner.frames(4)
       if not bad.is_empty():

@@ -1142,6 +1142,9 @@ func _fit() -> void:
 				item.visible = true
 				continue
 			left_out.append(n)
+	# Trying a card's larger look grows it to that look's minimum at once; a fit that ends where
+	# it began changes no minimum, so nothing would shrink it back.
+	panel.queue_sort()
 	var said := "left out %s; it holds %d px" % [", ".join(left_out), roundi(room)] if not left_out.is_empty() else ""
 	if said != _left_out_said:
 		_left_out_said = said

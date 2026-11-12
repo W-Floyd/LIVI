@@ -331,7 +331,10 @@ func frames(n: int) -> void:
 ## vm), since llvmpipe's numbers say nothing about the unit's. Every metric is a maximum.
 ## `scroll: <DragScroll path>` sweeps that list down and up across the frames, as a drag would;
 ## `pulse: { path, every }` sets a core value to a new number every `every` frames, as the car's
-## telemetry streams in.
+## telemetry streams in. `drag: { node, dx, moves }` presses that node's centre, sweeps the finger
+## `dx` panel pixels either way and back across the frames, `moves` motion events a frame (a slow
+## frame gathers several), and lets go after; `fits` counts home's side-panel fits and
+## `projection_areas` the areas asked of the phone meanwhile.
 func _measure(arg: Dictionary) -> String:
 	var name: String = arg.get("name", "measure")
 	var n := int(arg.get("frames", 120))
@@ -339,10 +342,20 @@ func _measure(arg: Dictionary) -> String:
 	if arg.has("scroll") and (scroll == null or scroll.max_offset() <= 0.0):
 		return "%s: nothing to scroll" % arg.scroll
 	var pulse: Dictionary = arg.get("pulse", {})
+	var drag: Dictionary = arg.get("drag", {})
+	var grip: Control = _shell.get_node(str(drag.node)) if drag.has("node") else null
+	if drag.has("node") and (grip == null or not grip.is_visible_in_tree()):
+		return "%s: nothing to drag" % drag.node
+	var press := grip.get_global_rect().get_center() if grip else Vector2.ZERO
 	var rid := _vp.get_viewport_rid()
 	RenderingServer.viewport_set_measure_render_time(rid, true)
 	await _frames(1)
 	Wayland.reset_stats()
+	var fits0: int = _shell.get("fits") if "fits" in _shell else 0
+	var areas := func() -> int: return Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea").size()
+	var areas0: int = areas.call()
+	if grip:
+		_drag_input(press, true, true)
 	var cpu0 := _cpu_seconds()
 	var t0 := Time.get_ticks_usec()
 	var frame_ms := PackedFloat64Array()
@@ -368,6 +381,10 @@ func _measure(arg: Dictionary) -> String:
 			var e: String = Core.fake_set(str(pulse.path), 1000 + i)
 			if e != "":
 				return "pulse %s: %s" % [pulse.path, e]
+		if grip:
+			var k := int(drag.get("moves", 1))
+			for j in k:
+				_drag_input(press + Vector2(float(drag.get("dx", 0.0)) * sin(TAU * (i + (j + 1.0) / k) / n), 0.0), true)
 		await get_tree().process_frame
 		var now := Time.get_ticks_usec()
 		started[0] = now
@@ -379,6 +396,8 @@ func _measure(arg: Dictionary) -> String:
 		last = now
 	await RenderingServer.frame_pre_draw
 	RenderingServer.frame_pre_draw.disconnect(count_process)
+	if grip:
+		_drag_input(press, false, true)
 	get_tree().node_added.disconnect(count_added)
 	var wall := (Time.get_ticks_usec() - t0) / 1e6
 	RenderingServer.viewport_set_measure_render_time(rid, false)
@@ -402,6 +421,8 @@ func _measure(arg: Dictionary) -> String:
 		cpu_pct = 100.0 * (_cpu_seconds() - cpu0) / wall,
 		rss_mb = _rss_mb(),
 		nodes_added = added[0],
+		fits = (_shell.get("fits") if "fits" in _shell else 0) - fits0,
+		projection_areas = areas.call() - areas0,
 	}
 	var stats: Dictionary = Wayland.stats()
 	for k in stats:
@@ -432,6 +453,17 @@ func _measure(arg: Dictionary) -> String:
 		row.msg = "over the %s limits: %s" % [profile, ", ".join(over)]
 		return row.msg
 	return ""
+
+
+## The left button at `at`: a motion while `down`, or with `button` a press or release.
+func _drag_input(at: Vector2, down: bool, button := false) -> void:
+	var e: InputEventMouse = InputEventMouseButton.new() if button else InputEventMouseMotion.new()
+	e.position = at
+	e.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
+	if button:
+		e.button_index = MOUSE_BUTTON_LEFT
+		e.pressed = down
+	_vp.push_input(e)
 
 
 func _pct(sorted: PackedFloat64Array, p: float) -> float:

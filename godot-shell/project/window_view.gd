@@ -27,6 +27,28 @@ var _cropped_size := Vector2.ZERO
 ## phone lays its UI out for exactly that (`/sessions/area`), so it shows 1:1; else all of it,
 ## letterboxed, as for a phone that does not take an area.
 var _region := Rect2(0, 0, 1, 1)
+## While the view is resized ahead of its window (home's divider dragged): the window's last
+## picture, and the phone's last area of it, scaled to cover the view and cut rather than
+## letterboxed, until the window has the view's shape again (`release_hold`).
+var hold := false:
+	set(v):
+		if v == hold:
+			return
+		hold = v
+		_hold_n += 1
+		_releasing = false
+		stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED if v else TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		if _raw and _raw.changed.is_connected(_check_hold) != v:
+			if v:
+				_raw.changed.connect(_check_hold)
+			else:
+				_raw.changed.disconnect(_check_hold)
+		if not v:
+			_fit_crop(true)
+var _hold_n := 0
+var _releasing := false
+## A window that never takes the view's shape (a phone refusing the area) is letterboxed after this.
+const HOLD_S := 2.0
 
 
 func _init() -> void:
@@ -56,6 +78,7 @@ static func projection_crop(stream: Vector2, screen: Vector2) -> Rect2:
 
 
 func _show() -> void:
+	hold = false
 	if _raw and _raw.changed.is_connected(_fit_crop):
 		_raw.changed.disconnect(_fit_crop)
 	_raw = Wayland.texture(window_id) if window_id >= 0 else null
@@ -76,10 +99,32 @@ func _fit_crop(force := false) -> void:
 		return
 	_cropped_size = _raw.get_size()
 	var visible_area := projection_crop(_cropped_size, _projection_screen())
-	_region = _shown_region()
+	var region := _shown_region()
+	# Held, the phone's last area until it takes the view's.
+	if not hold or region != Rect2(0, 0, 1, 1):
+		_region = region
 	# Whole pixels: AtlasTexture's size truncates, so 911.9999 would be a pixel short.
 	var from := (visible_area.position + _region.position * visible_area.size).round()
 	_crop.region = Rect2(from, (visible_area.position + _region.end * visible_area.size).round() - from)
+	_check_hold()
+
+
+## Ends `hold` once the window's picture has the view's shape, or after HOLD_S.
+func release_hold() -> void:
+	if not hold or _releasing:
+		return
+	_releasing = true
+	var n := _hold_n
+	get_tree().create_timer(HOLD_S).timeout.connect(func(): if n == _hold_n: hold = false)
+	_check_hold()
+
+
+func _check_hold() -> void:
+	if not _releasing or texture == null or size.x <= 0.0:
+		return
+	var t := texture.get_size()
+	if t.x > 0.0 and absf(t.y * size.x / t.x - size.y) <= 1.0:
+		hold = false
 
 
 ## The core's projection screen size, which its crop and touch mapping use; else the panel's.
@@ -117,7 +162,7 @@ func picture_rect() -> Rect2:
 	if texture == null:
 		return Rect2(Vector2.ZERO, size)
 	var tex := texture.get_size()
-	var s: float = min(size.x / tex.x, size.y / tex.y)
+	var s: float = max(size.x / tex.x, size.y / tex.y) if stretch_mode == STRETCH_KEEP_ASPECT_COVERED else min(size.x / tex.x, size.y / tex.y)
 	return Rect2((size - tex * s) / 2.0, tex * s)
 
 

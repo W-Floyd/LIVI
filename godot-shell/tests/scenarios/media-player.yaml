@@ -206,3 +206,63 @@ steps:
   - expect_node: { path: Page/Body/Side/Panel/Player, layout: empty }
   - screenshot: media-player-nothing-night-rhd
   - gdscript: *rows
+  # Every control on home's media card, in every arrangement, sends its action and home stays,
+  # with a refit between press and release (the unit's telemetry refits several times a second);
+  # a tap on the card's text opens Media.
+  - set: { core: { nowPlaying: { title: A Remarkably Long Song Title That Goes On, artist: The Extraordinarily Named Ensemble } } }
+  - gdscript: |
+      var looks := [
+          {home_phone = false, home_split = 0.0},
+          {home_phone = true, home_split = 0.37},
+          {home_phone = true, home_split = 0.5},
+          {home_phone = true, home_split = 0.62},
+          {home_phone = true, home_split = 0.62, nav_app = "org.livi.test.grid"},
+      ]
+      var player = shell.get_node("Page/Body/Side/Panel/Player")
+      var mouse := func(at: Vector2, down: bool) -> void:
+          var ev := InputEventMouseButton.new()
+          ev.position = at
+          ev.button_index = MOUSE_BUTTON_LEFT
+          ev.pressed = down
+          ev.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
+          runner._vp.push_input(ev)
+      var bad := PackedStringArray()
+      var layouts := {}
+      var km := 240.0
+      for look in looks:
+          ThemeManager.set_look(look)
+          await runner.frames(8)
+          layouts[player.layout] = true
+          for pair in [["Previous", "prev"], ["Pause", "playPause"], ["Next", "next"]]:
+              var b: Control = player.find_child(pair[0], true, false)
+              if not b.is_visible_in_tree():
+                  continue
+              Core.fake_clear()
+              var at: Vector2 = b.get_global_rect().get_center()
+              mouse.call(at, true)
+              km -= 1.0
+              Core.fake_set("telemetry/rangeKm", km)
+              await runner.frames(3)
+              mouse.call(at, false)
+              await runner.frames(3)
+              var sent: Array = Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.get("control") == pair[1])
+              if sent.is_empty() or shell._page_name != "home":
+                  bad.append("%s, %s: %s sent %d, page %s" % [look, player.layout, pair[0], sent.size(), shell._page_name])
+                  shell.open_page("home")
+                  await runner.frames(4)
+              # Shown paused at once: back to playing for the next control.
+              Core.fake_set("nowPlaying/playing", true)
+              await runner.frames(2)
+          await runner._tap(player.find_child("Title", true, false).get_global_rect().get_center())
+          await runner.frames(3)
+          if shell._page_name != "media":
+              bad.append("%s, %s: a tap on the title shows %s" % [look, player.layout, shell._page_name])
+          shell.open_page("home")
+          await runner.frames(4)
+      for l in ["wide", "tall", "one", "two"]:
+          if not layouts.has(l):
+              bad.append("no arrangement gave %s: %s" % [l, layouts.keys()])
+      ThemeManager.set_look({home_phone = true, home_split = 0.0, nav_app = ""})
+      await runner.frames(4)
+      if not bad.is_empty():
+          return "\n".join(bad)

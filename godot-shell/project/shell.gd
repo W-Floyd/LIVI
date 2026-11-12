@@ -1138,7 +1138,7 @@ func _fit() -> void:
 		_precondition.top_level = true
 	if not fits.call():
 		_stat.compact = true
-	if not fits.call() and _player.two_rows:
+	if not fits.call() and _player._choose()[0] == "two":
 		_player.allow_two_rows = false
 	_place_source()
 	var order := PRIORITY.duplicate()

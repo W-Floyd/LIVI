@@ -59,14 +59,17 @@ var layout := "one"
 var two_rows: bool:
 	get:
 		return layout == "two"
-## Home's panel clears this when a second row would leave the card out.
+## Home's panel clears this when a second row would leave the card out. Arranged after the fit,
+## which tries it on and off: a layout change moves the controls to other boxes, and a control
+## moved under a finger loses its press.
 var allow_two_rows := true:
 	set(v):
 		if v != allow_two_rows:
 			allow_two_rows = v
-			_arrange()
+			_arrange.call_deferred()
 
 var _art: ArtView
+var _down := false
 var _title: Label
 var _subtitle: Label
 var _album: Label
@@ -152,10 +155,15 @@ func _on_seek(f: float) -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
-	# The buttons take their own taps; a release on the rest of the card opens the page.
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+	# The buttons take their own taps; a tap on the rest of the card opens the page. Only a
+	# release after a press here: one a control lost (moved mid-press) is not a tap on the card.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		accept_event()
-		opened.emit()
+		if event.pressed:
+			_down = true
+		elif _down:
+			_down = false
+			opened.emit()
 
 
 func has_content() -> bool:

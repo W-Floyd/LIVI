@@ -12,6 +12,7 @@ Sources:
 - **C**: go-micomd frame captures 2026-11 (charging, driving, parked preconditioning); go-micomd sends almost no
   requests, so request-only answers (0x8C01, 0x8C4A..55 startup reads) are mostly absent.
 - **M**: EV6 owner's manual, EV guide pp. 1-8 to 1-16. **A**: stock EV app strings (HKMC_TAppEV3).
+- **E**: stock V015 under `tools/tcc803x-qemu` with go-micomd's `micom-fake`: the frames its EV settings send.
 
 ## State today
 
@@ -37,27 +38,34 @@ message, a micom-livi opt-in path, a core action, and `write = "core"` with a ca
 ## Per setting
 
 ### Charge limit, AC and DC
-- Write 0x0C18, 7 B: [2] winter mode (gen ≥ 2: << 6), [4] AC target, [5] DC target, [6] GPS/route target; each
-  pct / 0.5, 0xff = unchanged (`setTargetSOCext`). TAppEV3 sends one at a time. **S**
+- Write 0x0C18, 7 B: `00 00 [2] 00 [4] [5] [6]`. [0], [1], [3] always 0 (a fresh array, never written); [2] b7:6
+  winter mode, 3 = unchanged (gen < 2: b1:0); [4] AC, [5] DC, [6] route target: pct / 0.5, 0xff = unchanged
+  (`setTargetSOCext`). **S**
+- Stock sends one limit per frame, the rest 0xff and winter 3, copying nothing from the readback: AC 90 %
+  `00 00 c0 00 b4 ff ff`, DC 50 % `00 00 c0 00 ff 64 ff`; same frames whatever winter mode or other limit the car
+  reports; nothing sent for the value already held; route target never set. **E** (10 % steps 50-100, both)
 - Read items 0x21 (AC), 0x22 (DC), 0x31 (route); 0x8C01 [50], [51]; x0.5 %. **S, G**. Items not seen in **C**:
-  item updates are on change only.
+  item updates are on change only. Stock shows a readback of 75 % as 70 %. **E**
 - Range at limit: items 0x1f/0x20, seen 406-414 km. **C**
-- Steps of 10 %. **M** Range 50-100 assumed.
-- Unknown: bytes [0], [1], [3] of 0x0C18; whether 0xff in [2] leaves winter mode alone; ack beyond the item
-  echo; persistence across ignition (likely VCU-held); whether a value outside 50-100 is refused or clamped.
+- micomd's `-input` keeps the fields an input omits: LIVI must send the other limits and winter mode as `null`,
+  or a DC write resends its last AC value. go-micomd `ev-charge-limits`. **G**
+- Kia Connect (TMU, `HKMC_TAppService`) has the 6-byte `setTargetSOC` (AC and DC together, [2] = 0); no caller
+  found. **S**
+- Unknown: ack beyond the item echo; persistence across ignition (likely VCU-held); whether a value outside
+  50-100 or off the 10 % steps is refused or clamped; whether the car really leaves winter mode on 3.
   Without micomd `-hev-status-request` the limits show only once they change.
-- Risks: a target below the present SoC stops an AC charge (**M**); the Kia Connect app (TMU, `HKMC_TAppService`)
-  sets the same targets: the car's readback, not LIVI, is truth; 0x0C18 also carries winter mode, so a wrong
-  byte flips it.
+- Risks: a target below the present SoC stops an AC charge (**M**); Kia Connect sets the same targets: the car's
+  readback, not LIVI, is truth.
 
 ### AC charging current
-- Write 0x0C5B [1 max, 2 reduced, 3 min], pulse to 0; this car takes the unified path (0x8C5F [0] → flag 82).
-  **S**. Old path 0x0C13 [1, EVSE<<2 | ICCB, 0] when flag 82 ≠ 1. **S**
-- Read 0x8C50 [0] b3:2 OBC_CHGINCURRMODSTA, item 0x51 (stock maps 2→1, 3→2, else 0); item 0x3d VCMS. **S**
-- Stock labels: Maximum / Reduced / Minimum = 100 / 90 / 60 %; separate "portable (120 V)" and "station
-  (240 V)" settings exist. **A, M**
-- Unknown: whether one 0x0C5B value covers both portable and station; raw readback values; 0x8C50 is only
-  answered to the 0x0C50 startup read (not in **C**).
+- Write 0x0C5B [1 = 100 %, 2 = 90 %, 3 = 60 %], then 0 120-180 ms later. **S, E**. One value for portable and
+  station: on this path `setOBCCurrent` sends only the ICCB value; the EV6 app shows one choice. **S, E**
+- Path: HEVService flag 82 = 1, set at `onMicomReady` for CAN DB generation >= 1 (0x8C5F may change it); else
+  0x0C13 [1, EVSE<<2 | ICCB, 0]. **S**. The app greys the setting until OBC or VCMS ready (0x8C4F [3] b1:0,
+  01 on the EV6 unplugged too). **S, E, C**
+- Read 0x8C50 [0] b3:2 OBC_CHGINCURRMODSTA, item 0x51: 2 → 90 %, 3 → 60 %, else 100 %. **S, E**
+- go-micomd `ev-charging-current`. **G**
+- Unknown: raw readback from the car; 0x8C50 is only answered to the 0x0C50 startup read (not in **C**).
 - Risk: changing it mid-charge may stop the charge.
 
 ### Schedule edits (departures, off-peak, climate)
@@ -117,9 +125,11 @@ message, a micom-livi opt-in path, a core action, and `write = "core"` with a ca
 - Risks: on-mode drains range (**M**); LIVI ending its request sends off, which may turn off a mode the car held.
 
 ### Winter mode
-- Write 0x0C18 [2] (gen ≥ 2 << 6). **S**. Read item 0x44 XEV_WINTERMODESTA, 0x8C1A [6] b2:1, 0x8C01 [94]. **S**
-- Unknown: values; whether this EV6 has it (string present in the app, **A**); its relation to battery
-  conditioning.
+- Write 0x0C18 [2] (gen ≥ 2 << 6), the three limits 0xff. **S**. Read item 0x44 XEV_WINTERMODESTA, 0x8C1A [6]
+  b2:1, 0x8C01 [94]. **S**
+- The app shows it only where Battery Conditioning Mode is not offered; under **E** the EV6 shows battery
+  conditioning, so no winter mode frame was captured. **S, E**
+- Unknown: values (the app accepts 0-2 back); whether this EV6 has it.
 
 ### V2L discharge limit
 - Write 0x0C5A [soc], pulse to 0xff. Read item 0x50 CHRG_V2XDISCHRGLIMSOCVAL_SYNC. **S**. Mode 0x0C57 / item 0x4e.
@@ -151,10 +161,13 @@ Reads (no writes):
 
 Writes (one at a time; read back via the items above and the cluster):
 - [ ] 0x0C62 on/off pulse, parked READY and IGN-only: item 0x63 follows? persists across ignition?
-- [ ] 0x0C18 with only [4] = 0xa0 (80 %) and every other byte 0xff: item 0x21 → 0xa0? DC and winter untouched?
-- [ ] 0x0C18 [5] alone; then [4] = 0x64 (50 %) below SoC while AC charging: does the charge stop as **M** says?
-- [ ] 0x0C18 out of range (0x5a = 45 %, 0xc9): refused or clamped?
-- [ ] 0x0C5B 2 then 1, AC plugged, not charging; then while charging: readback, does charging continue?
+- [ ] 0x0C18 `00 00 c0 00 a0 ff ff` (AC 80 %, stock's frame): item 0x21 → 0xa0? DC (0x22) and winter (0x44)
+      untouched?
+- [ ] 0x0C18 `00 00 c0 00 ff b4 ff` (DC 90 %); then AC `.. 64 ff ff` (50 %) below SoC while AC charging: does the
+      charge stop as **M** says?
+- [ ] 0x0C18 off-step or out of range (AC 0x96 = 75 %, 0x5a = 45 %): refused or clamped?
+- [ ] 0x0C5B 02 then 00 (90 %), AC plugged, not charging; then 01; then while charging: item 0x51, does charging
+      continue? Stock HU shows the same choice?
 - [ ] Schedule edits, first write (user's OK first). Before: micom-livi with the new build but without
       `-ev-schedule-writes`; the Schedule page shows the car's values read-only. Check
       `micomd -query /run/micomd.ctl snapshot` holds 0x8C53 and 0x8C54 (without them every edit fails "nothing

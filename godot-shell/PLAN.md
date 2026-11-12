@@ -26,7 +26,7 @@ environment").
   lives in the core: telemetry, the energy model, preconditioning
   (`livi-core/src/precondition.rs`), the charging stop, night mode.
 - **Projection video is a plain Wayland client.**
-  - `livi-core` starts `livi-gst-host` with `WAYLAND_DISPLAY` set to the UI's
+  - `livi-core` starts `livi-output` with `WAYLAND_DISPLAY` set to the UI's
     compositor (`livi-core/src/services.rs:115-118`).
   - Video goes out through `waylandsink` with dmabuf, with the V4L2 decoders
     ranked first (`livi-video-player/src/lib.rs:58`). Each stream is its own
@@ -84,7 +84,7 @@ godot-shell (Godot 4, GLES3 compatibility renderer)
 └── hosted apps as textures: godot-maps, LIVI's Slint UI (settings and media at
     first), anything else that speaks Wayland
 livi-core (unchanged), started with WAYLAND_DISPLAY = the shell's socket
-livi-gst-host (unchanged) -> waylandsink -> the shell's compositor
+livi-output (unchanged) -> waylandsink -> the shell's compositor
 ```
 
 Hosting LIVI's own Slint UI as a window lets the shell start small: it does
@@ -902,7 +902,7 @@ steps:
 
 ## Open questions
 
-- gst-host's toplevels: what `app_id` and title they carry, and how the control
+- livi-output's toplevels: what `app_id` and title they carry, and how the control
   socket's tag handshake runs end to end. Read `livi-compositor/src/ctrl.rs`
   in full.
 - Whether `livi-ui` also drives the compositor's control socket, or only the

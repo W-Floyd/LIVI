@@ -7,7 +7,7 @@
 # compiled in. The editor build, not godot-templates: Alpine's templates are built without
 # path overrides, so they take no --path or --main-pack, only a .pck named after the executable
 # with the extension beside it (see packaging/README.md). The shell is a Wayland client of cage
-# and a compositor itself, for livi-gst-host's video. No Vulkan is needed (compatibility renderer).
+# and a compositor itself, for livi-output's video. No Vulkan is needed (compatibility renderer).
 #
 # Cross-compiled with upstream Rust (pmb:cross-native2) for the reasons in livi-core's APKBUILD;
 # the project is imported in the native chroot with Alpine's aarch64 godot editor (the .godot/

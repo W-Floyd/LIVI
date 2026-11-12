@@ -1,6 +1,6 @@
 # Maintainer: William Floyd <git@notmy.space>
 #
-# livi-core, the backend the Godot shell is a client of, with what it spawns: livi-gst-host
+# livi-core, the backend the Godot shell is a client of, with what it spawns: livi-output
 # (video and audio, GStreamer) and livi-helperd (USB, Bluetooth, Wi-Fi, as root through sudo).
 # From this tree's native/; the shell (livi-shell) is the UI, with no livi-ui or livi-compositor.
 #
@@ -124,7 +124,7 @@ build() {
 	export LIVI_BUILD_SHA=$_livi_commit
 
 	cargo build --release --locked --target $_target \
-		-p livi-core -p livi-gst-host -p livi-helperd
+		-p livi-core -p livi-output -p livi-helperd
 }
 
 package() {
@@ -133,7 +133,7 @@ package() {
 	_d="$pkgdir"/usr/lib/livi-core
 	install -Dm755 "$_r"/livi-core "$_d"/resources/core/livi-core
 	install -Dm755 "$_r"/livi-helperd "$_d"/resources/driver/livi-helperd
-	install -Dm755 "$_r"/livi-gst-host "$_d"/resources/gst-host/livi-gst-host
+	install -Dm755 "$_r"/livi-output "$_d"/resources/output/livi-output
 	install -Dm644 "$builddir"/../LICENSE "$builddir"/../NOTICE -t "$_d"/resources/
 	# The core installs the udev rule, the wireless-projection AP unit and its sudoers from these.
 	for _t in 99-LIVI.rules.template 99-LIVI-wifi-ap.sudoers.template livi-wifi-ap.service.template; do

@@ -9,8 +9,9 @@ use livi_aa_proto::{
 };
 use prost::Message;
 
+use livi_base::num::round_half_up;
+
 use crate::energy::{self, EnergyModel};
-use crate::wire::round_half_up;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GpsFix {

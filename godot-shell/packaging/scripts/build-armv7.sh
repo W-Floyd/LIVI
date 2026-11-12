@@ -4,7 +4,7 @@
 #   packaging/scripts/build-armv7.sh [--debug] [ext] [core]    -> packaging/out/armv7/
 #
 #   ext   liblivi_godot_shell.so (the GDExtension) and livi-shell-test-client
-#   core  livi-core, livi-gst-host, livi-helperd (native/, the backend and what it spawns)
+#   core  livi-core, livi-output, livi-helperd (native/, the backend and what it spawns)
 #
 # The sysroot is Alpine edge's armv7 packages, unpacked (alpine-sysroot.py); the linker is
 # clang + lld. Needs rustup, clang, ld.lld, pkg-config, cmake and perl (brew install lld
@@ -75,8 +75,8 @@ for w in $what; do
          [ ! -d "$sc" ] || [ -f "$sc/libdl.a" ] || llvm-ar rc "$sc/libdl.a"
          RUSTFLAGS="-C target-feature=-crt-static" LIVI_BUILD=g5w LIVI_BUILD_RUN=0 \
              LIVI_BUILD_DATE=$(date -u +%F) LIVI_BUILD_SHA=$(git rev-parse HEAD) LIVI_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1) \
-             cargo build $flag --locked --target $T -p livi-core -p livi-gst-host -p livi-helperd)
-        for f in livi-core livi-gst-host livi-helperd; do
+             cargo build $flag --locked --target $T -p livi-core -p livi-output -p livi-helperd)
+        for f in livi-core livi-output livi-helperd; do
             cp "$gs/../native/target/$T/$profile/$f" "$out/"
         done
         ;;

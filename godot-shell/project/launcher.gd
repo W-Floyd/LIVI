@@ -272,7 +272,7 @@ func _process(_delta: float) -> void:
 
 
 func _on_mapped(id: int, app_id: String, title: String) -> void:
-	# livi-gst-host's: the phone's picture, which the projection pages own.
+	# livi-output's: the phone's picture, which the projection pages own.
 	if app_id.begins_with("livi-video"):
 		return
 	var owner := _owner_of(app_id, id, true)

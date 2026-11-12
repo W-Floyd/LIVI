@@ -1370,7 +1370,7 @@ func _terminal(id: int) -> bool:
 	return bool(launcher.app(str(owner.get("app", ""))).get("terminal", false)) or AppKeyboard.terminal_app(str(_app_ids.get(id, "")))
 
 
-## livi-gst-host names its video windows livi-video; their touches are the phone's.
+## livi-output names its video windows livi-video; their touches are the phone's.
 func _is_projection(id: int) -> bool:
 	return str(_app_ids.get(id, "")).begins_with("livi-video")
 

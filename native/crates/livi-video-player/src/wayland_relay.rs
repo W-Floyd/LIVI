@@ -97,6 +97,7 @@ fn readable(fds: &[RawFd], timeout: Option<Duration>) -> Vec<bool> {
         .collect();
     let ms = timeout.map_or(-1, |t| t.as_millis() as libc::c_int);
     loop {
+        // SAFETY: polls is a live, writable array of polls.len() pollfds.
         let n = unsafe { libc::poll(polls.as_mut_ptr(), polls.len() as _, ms) };
         if n >= 0 || std::io::Error::last_os_error().kind() != ErrorKind::Interrupted {
             break;
@@ -278,18 +279,21 @@ impl Session {
 
 /// None once the peer hung up.
 fn receive(from: &UnixStream, buf: &mut [u8]) -> Option<(usize, Vec<OwnedFd>)> {
+    // SAFETY: CMSG_SPACE is pure arithmetic on its argument.
     const SPACE: usize = unsafe { libc::CMSG_SPACE((MAX_FDS * size_of::<RawFd>()) as _) } as usize;
     let mut control = [0u64; SPACE.div_ceil(8)];
     let mut iov = libc::iovec {
         iov_base: buf.as_mut_ptr().cast(),
         iov_len: buf.len(),
     };
+    // SAFETY: msghdr is plain data; all zeroes is a valid empty header.
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
     msg.msg_iov = &mut iov;
     msg.msg_iovlen = 1;
     msg.msg_control = control.as_mut_ptr().cast();
     msg.msg_controllen = SPACE as _;
     let n = loop {
+        // SAFETY: msg points at iov over buf and at control, both live and SPACE bytes long.
         let n = unsafe {
             libc::recvmsg(
                 from.as_raw_fd(),
@@ -307,18 +311,25 @@ fn receive(from: &UnixStream, buf: &mut [u8]) -> Option<(usize, Vec<OwnedFd>)> {
         }
     };
     let mut fds = Vec::new();
+    // SAFETY: msg is the header recvmsg just filled; the walk stays inside its control.
     let mut cmsg = unsafe { libc::CMSG_FIRSTHDR(&msg) };
     while !cmsg.is_null() {
+        // SAFETY: cmsg is non-null and points into control.
         let c = unsafe { &*cmsg };
         if c.cmsg_level == libc::SOL_SOCKET && c.cmsg_type == libc::SCM_RIGHTS {
+            // SAFETY: CMSG_LEN is pure arithmetic.
             let header = unsafe { libc::CMSG_LEN(0) } as usize;
             let count = (c.cmsg_len as usize - header) / size_of::<RawFd>();
+            // SAFETY: cmsg is a valid header in control.
             let data = unsafe { libc::CMSG_DATA(cmsg) }.cast::<RawFd>();
             for i in 0..count {
+                // SAFETY: i < count, the fds the kernel wrote after the header.
                 let fd = unsafe { std::ptr::read_unaligned(data.add(i)) };
+                // SAFETY: SCM_RIGHTS installed fd in this process, owned by nothing else.
                 fds.push(unsafe { OwnedFd::from_raw_fd(fd) });
             }
         }
+        // SAFETY: cmsg is a valid header in msg's control.
         cmsg = unsafe { libc::CMSG_NXTHDR(&msg, cmsg) };
     }
     (n > 0 || !fds.is_empty()).then_some((n, fds))
@@ -326,6 +337,7 @@ fn receive(from: &UnixStream, buf: &mut [u8]) -> Option<(usize, Vec<OwnedFd>)> {
 
 /// The fds ride with the first byte. False once the peer is gone or stalled.
 fn send(to: &UnixStream, mut bytes: &[u8], fds: &[OwnedFd]) -> bool {
+    // SAFETY: CMSG_SPACE is pure arithmetic on its argument.
     const SPACE: usize = unsafe { libc::CMSG_SPACE((MAX_FDS * size_of::<RawFd>()) as _) } as usize;
     let mut control = [0u64; SPACE.div_ceil(8)];
     let mut fds = &fds[..fds.len().min(MAX_FDS)];
@@ -334,13 +346,16 @@ fn send(to: &UnixStream, mut bytes: &[u8], fds: &[OwnedFd]) -> bool {
             iov_base: bytes.as_ptr().cast_mut().cast(),
             iov_len: bytes.len(),
         };
+        // SAFETY: msghdr is plain data; all zeroes is a valid empty header.
         let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
         msg.msg_iov = &mut iov;
         msg.msg_iovlen = 1;
         if !fds.is_empty() {
             let len = fds.len() * size_of::<RawFd>();
             msg.msg_control = control.as_mut_ptr().cast();
+            // SAFETY: CMSG_SPACE is pure arithmetic.
             msg.msg_controllen = unsafe { libc::CMSG_SPACE(len as _) } as _;
+            // SAFETY: control holds SPACE bytes: one header and up to MAX_FDS fds, and fds is capped there.
             unsafe {
                 let c = libc::CMSG_FIRSTHDR(&msg);
                 (*c).cmsg_level = libc::SOL_SOCKET;
@@ -352,6 +367,7 @@ fn send(to: &UnixStream, mut bytes: &[u8], fds: &[OwnedFd]) -> bool {
                 }
             }
         }
+        // SAFETY: msg points at iov over bytes and, with fds, at control, all live.
         let n = unsafe {
             libc::sendmsg(
                 to.as_raw_fd(),
@@ -383,6 +399,7 @@ fn writable(fd: RawFd) -> bool {
         events: libc::POLLOUT,
         revents: 0,
     };
+    // SAFETY: p is one live, writable pollfd.
     let n = unsafe { libc::poll(&mut p, 1, STALL.as_millis() as _) };
     n > 0 && p.revents & libc::POLLOUT != 0
 }

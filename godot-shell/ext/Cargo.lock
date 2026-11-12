@@ -482,8 +482,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
+name = "livi-base"
+version = "10.5.0"
+
+[[package]]
 name = "livi-core-client"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "libc 1.0.0-alpha.5",
  "livi-core-proto",
@@ -492,9 +496,10 @@ dependencies = [
 
 [[package]]
 name = "livi-core-proto"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "base64",
+ "livi-base",
  "serde",
  "serde_json",
  "serde_repr",
@@ -521,15 +526,16 @@ dependencies = [
 
 [[package]]
 name = "livi-i18n"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "livi-ui-model"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
+ "livi-base",
  "livi-core-proto",
  "livi-i18n",
  "serde_json",

@@ -12,7 +12,7 @@ What the shell needs there:
 |---|---|---|
 | Godot 4.7 runtime | Alpine testing `godot` 4.7.2 (armv7 exists; see Engine) | `godot` |
 | `liblivi_godot_shell.so`, the project, launcher, units | `ext/`, `project/`, this directory | `livi-shell` |
-| `livi-core`, `livi-gst-host`, `livi-helperd` | `native/` | `livi-core` |
+| `livi-core`, `livi-output`, `livi-helperd` | `native/` | `livi-core` |
 | a host compositor for the DRM device | Alpine `cage` | `cage` |
 
 ## Cross build on the Mac (or Linux), no Docker
@@ -20,7 +20,7 @@ What the shell needs there:
 ```sh
 packaging/scripts/build-armv7.sh            # ext + core -> packaging/out/armv7/      (both)
 packaging/scripts/build-armv7.sh ext        # the extension and the test client
-packaging/scripts/build-armv7.sh core       # livi-core, livi-gst-host, livi-helperd
+packaging/scripts/build-armv7.sh core       # livi-core, livi-output, livi-helperd
 ```
 
 Prerequisites: rustup, clang, `ld.lld`, pkg-config, cmake, perl, python3, curl (on a Mac:
@@ -33,7 +33,7 @@ warm) and 46 s on 10 cores (core, 432 CPU-s).
 Output (`readelf -d`): ELF32, ARM, EABI5 hard float (flags `0x5000400`), interpreter
 `/lib/ld-musl-armhf.so.1`, NEEDED limited to `libc.musl-armv7.so.1`, `libgcc_s.so.1` and, per
 binary, `libxkbcommon.so.0` (ext, test client), `libssl.so.3`/`libcrypto.so.3` (livi-core),
-GStreamer/GLib (livi-gst-host). `-z defs` makes an unresolved symbol a link error.
+GStreamer/GLib (livi-output). `-z defs` makes an unresolved symbol a link error.
 
 ## Import the project, and test, in Docker
 
@@ -55,7 +55,7 @@ runs the armv7 `godot --headless --path` on the armv7 extension, and checks that
 proves loading and wiring on an AArch32 userland. It does not prove GL, speed, or anything with
 the kernel (DRM, input, Mali). Two limits of qemu-user: it redirects only the loader (`-L`), so
 data files such as xkeyboard-config are read from the container itself, and it cannot exec a child
-ELF, so livi-core's "cannot start gst-host ... No such file" in its log is the emulation, not the
+ELF, so livi-core's "cannot start output ... No such file" in its log is the emulation, not the
 package (the child needs binfmt or a real armv7 system, e.g. the gen5w QEMU guest).
 
 ## Packages
@@ -107,7 +107,7 @@ sudo systemctl enable --now livi-shell     # starts livi-shell-core first
 `livi-shell` runs `cage -d -s -- godot --path ... --display-driver wayland --rendering-method
 gl_compatibility --rendering-driver opengl3 --fullscreen --resolution 1920x720`, and the shell
 listens on the Wayland socket `$LIVI_SHELL_SOCKET` (`livi-shell`, in `/run/livi-shell`), which
-`livi-gst-host` draws into. Run from inside a Wayland session, `livi-shell` skips cage and is a
+`livi-output` draws into. Run from inside a Wayland session, `livi-shell` skips cage and is a
 fullscreen window of that session. `/etc/livi-shell.conf` has the panel size and the cage/GL
 switches.
 
@@ -156,7 +156,7 @@ scons platform=linuxbsd arch=arm32 target=template_release production=yes \
   without it GL is llvmpipe and the shell is not usable at 1920x720. Cage needs a KMS device
   (`/dev/dri/card0`) with GBM; with only a fbdev console it falls back to nothing
   (`WLR_RENDERER=pixman` still needs KMS).
-- `wl_buffer` formats: livi-gst-host's decoder (CODA) gives NV12; the shell imports dmabuf
+- `wl_buffer` formats: livi-output's decoder (CODA) gives NV12; the shell imports dmabuf
   only when an EGL context is current ("dmabuf off" in the log under qemu), and panfrost's
   NV12 import is the PLAN's open risk.
 - Godot's `wayland` driver under cage: fullscreen, 1920x720 mode of the connector, touch

@@ -1,5 +1,5 @@
 name: home-video-native
-# Projection video as livi-gst-host sends it: Android Auto's 1920x1080 tier for a 1920x720 screen,
+# Projection video as livi-output sends it: Android Auto's 1920x1080 tier for a 1920x720 screen,
 # which waylandsink fits into its 1920x720 window. The projection page shows it at its own size,
 # cut to the area the phone fills (rows 180 to 900), so it is 1:1: the grid's 64 px checks land
 # on the panel's pixels. A tap reaches the core as the point over that area, which the core maps

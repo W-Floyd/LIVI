@@ -29,13 +29,13 @@ mkdir -p /a/opt/project/bin/linux-arm32 && cp /bin-armv7/liblivi_godot_shell.so 
 Q="qemu-arm -L /a"
 LD="$Q /a/lib/ld-musl-armhf.so.1"
 echo "== NEEDED resolution"
-for f in livi-core livi-gst-host livi-helperd livi-shell-test-client liblivi_godot_shell.so; do
+for f in livi-core livi-output livi-helperd livi-shell-test-client liblivi_godot_shell.so; do
     echo "$f: $($LD --list /a/opt/livi/$f 2>&1 | grep -c "not found" || true) unresolved"
 done
 echo "godot: $($LD --list /a/usr/bin/godot 2>&1 | grep -c "not found" || true) unresolved"
 echo "== livi-core"
-R=/a/opt/livi/resources; mkdir -p $R/core $R/gst-host $R/driver
-mv /a/opt/livi/livi-core $R/core/; mv /a/opt/livi/livi-gst-host $R/gst-host/; mv /a/opt/livi/livi-helperd $R/driver/
+R=/a/opt/livi/resources; mkdir -p $R/core $R/output $R/driver
+mv /a/opt/livi/livi-core $R/core/; mv /a/opt/livi/livi-output $R/output/; mv /a/opt/livi/livi-helperd $R/driver/
 export XDG_RUNTIME_DIR=/a/run/r HOME=/a/tmp/home
 mkdir -p $HOME
 (LIVI_RESOURCES=$R LIVI_NO_UI=1 WAYLAND_DISPLAY=livi-shell $Q $R/core/livi-core > /a/tmp/core.log 2>&1 &)

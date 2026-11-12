@@ -242,6 +242,7 @@
     "remove": "Remove",
     "import": "Import",
     "reset": "Reset",
+    "apply": "Apply",
     "system": "System",
     "about": "About",
     "softwareUpdate": "Software Update",

@@ -248,7 +248,7 @@ fn logical_size(area: (i32, i32), s: f64) -> (i32, i32) {
     ((area.0 as f64 / s).round() as i32, (area.1 as f64 / s).round() as i32)
 }
 
-/// livi-gst-host's projection video: waylandsink fits it to the configure, and the core's crop and
+/// livi-output's projection video: waylandsink fits it to the configure, and the core's crop and
 /// touch mapping assume the whole panel.
 fn is_video(app_id: &str) -> bool {
     app_id.starts_with("livi-video")

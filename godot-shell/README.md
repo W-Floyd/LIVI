@@ -210,7 +210,7 @@ what runs where, and what is left for the unit.
 
 ## Video on the unit
 
-The compositor takes planar YUV dmabufs (NV12, I420) from clients, as `livi-gst-host`'s
+The compositor takes planar YUV dmabufs (NV12, I420) from clients, as `livi-output`'s
 `waylandsink` sends them from the CODA decoder. EGL lists NV12 external-only, which Godot's
 canvas shaders cannot sample, so each plane is imported as its own plain image (R8 luma, GR88
 chroma) and `gl_scene.rs` converts to RGB on the GPU (limited range; BT.709 from 720 lines up, else
@@ -229,7 +229,7 @@ gst-launch-1.0 videotestsrc ! video/x-raw,format=NV12,width=1920,height=1080 ! w
 
 ## Projection
 
-livi-gst-host's windows (app_id `livi-video*`) are the phone's picture. `waylandsink` fits its
+livi-output's windows (app_id `livi-video*`) are the phone's picture. `waylandsink` fits its
 video into the 1920x720 window it is given, but Android Auto sends a 16:9 tier (1920x1080 for a
 1920x720 screen) and draws its UI in the middle, in the projection screen's shape; the core maps
 touches over that area into the stream (`android_auto::to_stream`, with livi-media's `crop_for`).

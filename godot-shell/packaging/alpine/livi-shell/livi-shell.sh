@@ -2,7 +2,7 @@
 # Starts the Godot shell fullscreen. Under a Wayland session (WAYLAND_DISPLAY set) it is a
 # window of that compositor; with none it runs inside cage, a kiosk compositor, on the DRM
 # device. The shell opens its own Wayland socket ($LIVI_SHELL_SOCKET) for livi-core's
-# livi-gst-host, which livi-core.service points at it.
+# livi-output, which livi-core.service points at it.
 set -eu
 [ ! -f /etc/livi-shell.conf ] || . /etc/livi-shell.conf
 : "${LIVI_SHELL_SOCKET:=livi-shell}"

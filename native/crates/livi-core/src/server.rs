@@ -17,14 +17,14 @@ use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, Notify, broadcast, oneshot, watch};
 
-use crate::config_file::{ConfigFile, apply_patch};
+use crate::audio::spectrum::Viewer;
 use crate::devices::Shared;
 use crate::dongle::LinkSpeedViewer;
+use crate::files::config_file::{ConfigFile, apply_patch};
+use crate::files::status_file::Activity;
 use crate::hub::{Frame, Hub};
 use crate::projection::{UiCommand, UiSenders};
 use crate::radio::{Band, RadioAsk, Station};
-use crate::spectrum::Viewer;
-use crate::status_file::Activity;
 use crate::update::UpdateAsk;
 
 pub struct Core {
@@ -336,9 +336,9 @@ impl Core {
             Action::AbortUpdate => self.ask_update(UpdateAsk::Abort),
             Action::PreconditionBattery { on } => {
                 let until = match on {
-                    true => Some(crate::precondition::request(
+                    true => Some(crate::vehicle::precondition::request(
                         &self.hub.config(),
-                        crate::precondition::now_s(),
+                        crate::vehicle::precondition::now_s(),
                     )?),
                     false => None,
                 };
@@ -353,11 +353,11 @@ impl Core {
                 let req = {
                     let state = self.hub.watch();
                     let s = state.borrow();
-                    crate::ev_schedule::request(
+                    crate::vehicle::ev_schedule::request(
                         &s.ev_schedule,
                         &s.telemetry,
                         set,
-                        crate::precondition::now_s(),
+                        crate::vehicle::precondition::now_s(),
                     )?
                 };
                 println!(
@@ -504,9 +504,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::config_file::defaults;
+    use crate::files::config_file::defaults;
 
-    use crate::config_file::tests::TempDir;
+    use crate::files::config_file::tests::TempDir;
 
     struct Peer {
         stream: UnixStream,

@@ -439,7 +439,8 @@ as they open, so their rows ask for a second tap.
 `mainUiNightMode`, which follows LIVI's own appearance setting), Day or Night. Its Status bar
 (`status_position`) runs along the top (stock), the bottom, as a column of stacked items down the
 left or right, or is Off. Every page with the bar lays out in the rest (`Shell.content_rect`); on
-the driver's side a docked rail stays at the edge and the column sits beside it as one band.
+the driver's side a docked rail stays at the edge and the column sits beside it as one band. Its
+charge shows wherever home's battery card does not (`StatusBar.charge_shown`).
 
 The docked rail's order is the look's too (`rail_order`, item ids top first; unknown ids are
 dropped and missing ones follow in the default order). On the rail, a press held still for 400 ms

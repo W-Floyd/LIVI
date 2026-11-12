@@ -474,6 +474,7 @@ func open_page(page: String) -> String:
 	# The live page keeps the status bar unless its pack draws its own title bar.
 	$Page.visible = home or page == "apps" or page == "media" or (live and not own_bar)
 	_body.visible = home
+	_show_charge()
 	if home and _cards_due:
 		_bind_cards()
 		_update_player()
@@ -1077,6 +1078,11 @@ func _ask_area(again := false) -> void:
 	Core.act({kind = "projectionArea", screen = "main", x = a.position.x, y = a.position.y, width = a.size.x, height = a.size.y})
 
 
+## The status bar's charge, unless home's battery card shows it.
+func _show_charge() -> void:
+	_status.charge_shown = not _stat.is_visible_in_tree()
+
+
 ## Shows every item that has content, then drops the least important until the rest fit.
 func _fit() -> void:
 	if not _body.is_visible_in_tree():
@@ -1157,6 +1163,7 @@ func _fit() -> void:
 	# Trying a card's larger look grows it to that look's minimum at once; a fit that ends where
 	# it began changes no minimum, so nothing would shrink it back.
 	panel.queue_sort()
+	_show_charge()
 	var said := "left out %s; it holds %d px" % [", ".join(left_out), roundi(room)] if not left_out.is_empty() else ""
 	if said != _left_out_said:
 		_left_out_said = said

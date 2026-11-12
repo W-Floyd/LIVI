@@ -4,7 +4,7 @@ name: status-position
 # live page's scene and labels fitted beside it, and home's slot (the area Android Auto is asked
 # for) clear of it. The app page has no bar: a hosted app keeps the shell's rect. Each edge in
 # either hand, and off (the page has the whole rect), then again with the rail docked, which a
-# column on the driver's side joins.
+# column on the driver's side joins. The bar's charge shows wherever home's battery card doesn't.
 clock: 2026-11-09T08:30:00
 fixtures:
   core: fixtures/ev6-main.json
@@ -29,6 +29,10 @@ steps:
                       return e
                   await runner.frames(3)
                   var at := "%s, %s, %s: " % [pos, hand, page]
+                  # The charge once: the bar's unless home's battery card shows it.
+                  var stat_shown: bool = shell.get_node("Page/Body/Side/Panel/Stat").is_visible_in_tree()
+                  if status.charge_shown == stat_shown or (page == "home") != stat_shown:
+                      return at + "the bar's charge %s, the battery card %s" % [status.charge_shown, stat_shown]
                   var sr: Rect2 = shell.get_global_rect()
                   var rr: Rect2 = rail.get_global_rect() if rail else Rect2()
                   if rail and (sr.intersects(rr) or not is_equal_approx(sr.size.x + rr.size.x, 1920.0)):

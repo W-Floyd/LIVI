@@ -21,6 +21,12 @@ var charge := "":
 		charge = v
 		if _charge: _charge.text = v
 
+## Off while the page shows the charge itself (home's battery card).
+var charge_shown := true:
+	set(v):
+		charge_shown = v
+		if _charge: _charge.get_parent().visible = v
+
 var charge_icon := "bolt":
 	set(v):
 		if v == charge_icon:
@@ -87,6 +93,7 @@ func _arrange() -> void:
 			bars,
 			UI.hbox([_charge_icon, _charge], 0.3),
 		], 1.5))
+		_charge.get_parent().visible = charge_shown
 		return
 	for l in [_clock, _outside, _phone, _charge]:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -104,6 +111,7 @@ func _arrange() -> void:
 		bars,
 		UI.vbox([_charge_icon, _charge], 0.2),
 	], 1.2))
+	_charge.get_parent().visible = charge_shown
 
 
 func _ready() -> void:

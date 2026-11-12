@@ -144,9 +144,10 @@ labels projected from it:
   only emits `Shell.ev_action(id)`; their details ("Not available", "–") say what the
   core does not tell yet.
 - **The car's state** (`CarStatus`), under the title on the car's side, each once micom-livi
-  reports it: what is open (`door*Open`, `trunkOpen`, `hoodOpen`, `chargePortOpen`) on a top view
-  of the car (the driver's door on the driver's side) and in words, past two parts a count, in the
-  warning color unless only the charge port is; the 12 V battery (`auxBatteryPct`, warning under
+  reports it: what is open (`door*Open`, `trunkOpen`, `hoodOpen`) on a top view of the car (the
+  driver's door on the driver's side) and in words, past two parts a count, in the warning color;
+  the charge port (`chargePortOpen`) on its own, "Charge port open", only while no cable is in (the
+  charge card covers it then); the 12 V battery (`auxBatteryPct`, warning under
   30 %); the climate while its blower runs (the same rule as the range's name) with its draw
   (`climatePowerW`); the battery heater while it draws (`batteryHeaterW`).
 - **Charging** (`ChargeCard`), at the top beside it while `charging` or `chargerReady`: "Charging"

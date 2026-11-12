@@ -75,7 +75,8 @@ var _on := {}
 var _off := {}
 var _tiles := {}
 var _settings: EvTile
-## What is open, the 12 V battery, the climate and battery heater; and while plugged in, charging.
+## What is open, the charge port, the 12 V battery, the climate and battery heater; and while
+## plugged in, charging.
 var _car_status: CarStatus
 var _charge_card: ChargeCard
 ## The EV settings, over the page: the gear opens them, the schedule's tiles at the schedule.

@@ -2,8 +2,8 @@ name: ev-live-car-state
 # The EV page shows the car's own state from micom-livi: while plugged in, a card with what the
 # charge is doing, the time to full and when, the power, AC or DC and the limit, and the AC and
 # DC limits, ranges at them and estimates; what is open, on a picture of the
-# car and in words; the 12 V battery; the climate and battery heater while they draw. Each only
-# once the car reports it.
+# car and in words; the charge port while open with no cable in; the 12 V battery; the climate
+# and battery heater while they draw. Each only once the car reports it.
 clock: 2026-11-09T19:05:00
 fixtures:
   core: fixtures/charging.json
@@ -22,8 +22,9 @@ steps:
   - expect_node: { path: EvLive/ChargeCard/Box/Facts/RangeAC, text: 431 km }
   - expect_node: { path: EvLive/ChargeCard/Box/Facts/RangeDC, text: 383 km }
   - expect_node: { path: EvLive/CarStatus/Row0/Aux/Label, text: 12 V 87 % }
-  # The charge port alone is open: said, not a warning.
-  - expect_node: { path: EvLive/CarStatus/Row0/Body/Open, text: Charge port open }
+  # The port is open for the cable: the card says plugged in, nothing is open.
+  - expect_node: { path: EvLive/CarStatus/Row0/Body, visible: "false" }
+  - expect_node: { path: EvLive/CarStatus/Row0/Port, visible: "false" }
   - gdscript: &apart |
       # Nothing the page places overlaps another, the tap targets included.
       var rects := []
@@ -85,6 +86,13 @@ steps:
   - set: { core: { telemetry: { chargePlugged: false } } }
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/ChargeCard, visible: "false" }
+  # The port left open: its own chip, not a door, not a warning.
+  - expect_node: { path: EvLive/CarStatus/Row0/Body, visible: "false" }
+  - expect_node: { path: EvLive/CarStatus/Row0/Port/Label, text: Charge port open }
+  - gdscript: |
+      var l: Label = shell.get_node("EvLive/CarStatus/Row0/Port/Label")
+      if l.get_theme_color("font_color") != ThemeManager.c.text:
+          return "an open charge port is in the warning color"
   # Unplugged: no card. Doors open, a low 12 V battery, the climate (its blower, as the range's
   # name has it) and the battery heater on. A set goes leaf by leaf: the climate object first.
   - set: { core: { telemetry: { climate: {} } } }
@@ -92,6 +100,7 @@ steps:
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/ChargeCard, visible: "false" }
   - expect_node: { path: EvLive/CarStatus/Row0/Body/Open, text: Driver's door and trunk open }
+  - expect_node: { path: EvLive/CarStatus/Row0/Port, visible: "false" }
   - expect_node: { path: EvLive/CarStatus/Row1/Climate/Label, text: Climate 1.4 kW }
   - expect_node: { path: EvLive/CarStatus/Row1/Heater/Label, text: Battery heater 2.1 kW }
   - gdscript: |
@@ -122,6 +131,11 @@ steps:
   - set: { core: { telemetry: { doorPassengerOpen: true, hoodOpen: true } } }
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/CarStatus/Row0/Body/Open, text: 4 open }
+  # The port too: counted apart from the doors.
+  - set: { core: { telemetry: { chargePortOpen: true } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/CarStatus/Row0/Body/Open, text: 4 open }
+  - expect_node: { path: EvLive/CarStatus/Row0/Port/Label, text: Charge port open }
   # Charging again, at night: the card.
   - set: { core: { telemetry: { doorDriverOpen: false, trunkOpen: false, doorPassengerOpen: false, hoodOpen: false, charging: true, chargePlugged: true, chargingPowerKw: 7.2, chargeType: ac, chargerReady: true, chargePortOpen: true, climatePowerW: 0, batteryHeaterW: 0, auxBatteryPct: 88, climate: { fanLevel: 0, on: false } } } }
   - theme: { hand: lhd }

@@ -1,7 +1,8 @@
 class_name CarStatus
 extends VBoxContainer
 ## The car's body and power at a glance on the EV page: what is open (the car from above with
-## the open parts lit, and in words) and the 12 V battery's charge; under them the climate, while
+## the open parts lit, and in words), the charge port while open with no cable in (the charge
+## card covers it plugged in) and the 12 V battery's charge; under them the climate, while
 ## its blower runs as the range's name has it, the battery heater while it draws, and the car's
 ## battery conditioning (running, its mode, or why it would not). Each shows once the car
 ## reports it. Rows hug the side `side` names.
@@ -13,7 +14,7 @@ const CLIMATE_UNREPORTED := ["default", "saved"]
 const PARTS := [
 	["doorDriverOpen", "Driver's door"], ["doorPassengerOpen", "Passenger's door"],
 	["doorRearLeftOpen", "Rear left door"], ["doorRearRightOpen", "Rear right door"],
-	["hoodOpen", "Hood"], ["trunkOpen", "Trunk"], ["chargePortOpen", "Charge port"],
+	["hoodOpen", "Hood"], ["trunkOpen", "Trunk"],
 ]
 
 ## 1 from the left, -1 from the right.
@@ -21,6 +22,7 @@ var side := 1.0
 var _doors: DoorsMark
 var _open: Label
 var _body: HBoxContainer
+var _port: HBoxContainer
 var _aux: HBoxContainer
 var _climate: HBoxContainer
 var _heater: HBoxContainer
@@ -28,8 +30,9 @@ var _cond: HBoxContainer
 var _rows: Array[HBoxContainer] = []
 ## The items with something to show, most important first.
 var _wanted: Array = []
-## What is open in words, and as a count for a short row.
+## What is open in words, and as a count for a short row; likewise the charge port.
 var _said := ["", ""]
+var _port_said := ["", ""]
 
 
 func _init() -> void:
@@ -47,11 +50,12 @@ func _init() -> void:
 	_body = UI.hbox([_doors, _open], 0.5)
 	_body.name = "Body"
 	_rows[0].add_child(_body)
+	_port = _chip(_rows[0], "Port", "plug")
 	_aux = _chip(_rows[0], "Aux", "battery")
 	_climate = _chip(_rows[1], "Climate", "fan")
 	_heater = _chip(_rows[1], "Heater", "therm")
 	_cond = _chip(_rows[1], "Conditioning", "therm")
-	for c in [_body, _aux, _climate, _heater, _cond]:
+	for c in [_body, _port, _aux, _climate, _heater, _cond]:
 		c.alignment = BoxContainer.ALIGNMENT_CENTER
 		c.visible = false
 
@@ -79,14 +83,12 @@ func _set_chip(c: HBoxContainer, text: String, color := "text") -> void:
 ## Fills from `t`, the core's telemetry; false when there is nothing to show.
 func show_for(t: Dictionary) -> bool:
 	var open := []
-	var warn := false
 	var parts := {}
 	for p in PARTS:
 		var on: bool = t.get(p[0]) == true
 		parts[p[0]] = on
 		if on:
 			open.append(p[1])
-			warn = warn or p[0] != "chargePortOpen"
 	_body.visible = not open.is_empty()
 	_doors.parts = parts
 	_doors.queue_redraw()
@@ -99,8 +101,11 @@ func show_for(t: Dictionary) -> bool:
 		said = said.substr(0, 1).to_upper() + said.substr(1)
 	_said = [said, "" if open.is_empty() else "%d open" % open.size()]
 	_open.text = said
-	_open.get_meta("look")[2] = "warn" if warn else "text"
+	_open.get_meta("look")[2] = "warn"
 	UI.style_label(_open)
+	var port: bool = t.get("chargePortOpen") == true and not (ChargeCard.charging(t) or t.get("chargePlugged") == true)
+	_port_said = ["Charge port open", "Port open"] if port else ["", ""]
+	_set_chip(_port, _port_said[0])
 	var aux = t.get("auxBatteryPct")
 	_set_chip(_aux, "" if aux == null else "12 V %d %%" % roundi(float(aux)), "warn" if aux != null and float(aux) < AUX_LOW_PCT else "text")
 	var w = t.get("climatePowerW")
@@ -119,7 +124,7 @@ func show_for(t: Dictionary) -> bool:
 	elif mode is String:
 		cond = "Conditioning " + mode
 	_set_chip(_cond, cond, "warn" if err != "" else "text")
-	_wanted = [_body, _aux, _cond, _heater, _climate].filter(func(c): return c.visible)
+	_wanted = [_body, _port, _aux, _cond, _heater, _climate].filter(func(c): return c.visible)
 	return keep(_wanted.size())
 
 
@@ -147,11 +152,12 @@ static func conditioning_error(code) -> String:
 	return ""
 
 
-## Shows only the `n` most important items it has (what is open, the 12 V battery, the battery
-## conditioning, the heater, the climate), for a page with no room for them all; false when that
-## is none.
+## Shows only the `n` most important items it has (what is open, the charge port, the 12 V
+## battery, the battery conditioning, the heater, the climate), for a page with no room for them
+## all; false when that is none.
 func keep(n: int, terse := false) -> bool:
 	_open.text = _said[1 if terse else 0]
+	(_port.get_node("Label") as Label).text = _port_said[1 if terse else 0]
 	for i in _wanted.size():
 		_wanted[i].visible = i < n
 	for r in _rows:
@@ -166,8 +172,7 @@ func wanted() -> int:
 
 
 ## The car from above, front up, the driver's door on the driver's side: open doors swing out,
-## an open hood or trunk is filled, in the warning color; an open charge port (rear right, as
-## the EV6's) is a dot in the accent.
+## an open hood or trunk is filled, in the warning color.
 class DoorsMark:
 	extends Control
 	var parts := {}
@@ -228,5 +233,3 @@ class DoorsMark:
 				var y: float = body.position.y + body.size.y * d[2]
 				var out := -1.0 if d[1] else 1.0
 				draw_line(Vector2(x, y), Vector2(x + out * door * 0.55, y + door * 0.85), c.warn, line * 1.5, true)
-		if parts.get("chargePortOpen", false):
-			draw_circle(Vector2(body.end.x, body.position.y + body.size.y * 0.8), line * 1.7, c.accent, true, -1.0, true)

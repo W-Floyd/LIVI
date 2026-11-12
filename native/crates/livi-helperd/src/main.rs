@@ -22,6 +22,7 @@ const SWITCHES: &[&str] = &[
     "--wifi-ap-teardown",
     "--bt-tunnel",
     "--wifi-ap",
+    "--reboot",
 ];
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -101,6 +102,21 @@ fn run(host: livi_helper::embedded::Host) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The init system's own reboot: services stop and file systems unmount first.
+fn reboot() -> ExitCode {
+    match std::process::Command::new("reboot").status() {
+        Ok(s) if s.success() => ExitCode::SUCCESS,
+        Ok(s) => {
+            eprintln!("[helperd] reboot: {s}");
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("[helperd] reboot: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn unknown_switch<I: Iterator<Item = String>>(args: I) -> Option<String> {
     args.take_while(|a| a.starts_with("--"))
         .find(|a| !SWITCHES.contains(&a.as_str()))
@@ -111,6 +127,9 @@ fn main() -> ExitCode {
         eprintln!("livi-helperd: unknown switch {bad}");
         eprintln!("livi-helperd: known switches are {}", SWITCHES.join(", "));
         return ExitCode::FAILURE;
+    }
+    if std::env::args().any(|a| a == "--reboot") {
+        return reboot();
     }
     #[cfg(target_os = "linux")]
     {
@@ -176,6 +195,7 @@ mod tests {
     #[test]
     fn a_known_switch_passes() {
         assert_eq!(unknown_switch(args(&["--wifi-ap"])), None);
+        assert_eq!(unknown_switch(args(&["--reboot"])), None);
         assert_eq!(
             unknown_switch(args(&["--install-wifi-ap", "/tmp/a", "/tmp/b"])),
             None

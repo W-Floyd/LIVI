@@ -153,3 +153,34 @@ steps:
               return "no %s in %s" % [row, names]
   - wait: { frames: 3 }
   - screenshot: settings-preconditioning
+  # Reboot: parked only, whatever the lockout mode, and asked again before it acts.
+  - set: { core: { telemetry: { drivingRegulation: true } } }
+  # Below the sections' fold.
+  - gdscript: |
+      shell.get_node("Settings/Sections/List/System").pressed.emit()
+  - expect_node: { path: Settings/Heading/Title, text: System }
+  - tap: { node: Settings/Rows/List/Reboot }
+  - tap: { node: Settings/Rows/List/Reboot }
+  - gdscript: |
+      var row: Control = shell.get_node("Settings/Rows/List/Reboot")
+      if row.mouse_filter != Control.MOUSE_FILTER_IGNORE or row.modulate.a >= 1.0:
+          return "Reboot is not greyed while driving"
+      if Core.fake_sent().any(func(m): return m.get("type") == "action" and m.action.get("kind") == "reboot"):
+          return "Reboot acted while driving"
+  - set: { core: { telemetry: { drivingRegulation: false } } }
+  # Parked has to hold before the lockout lifts.
+  - gdscript: |
+      for i in 600:
+          if not Drive.moving:
+              break
+          await runner.frames(1)
+      if Drive.moving:
+          return "still driving"
+      await runner.frames(2)
+  - tap: { node: Settings/Rows/List/Reboot }
+  - expect_node: { path: Settings/Rows/List/Tap again_ Reboot, visible: true }
+  - gdscript: |
+      if Core.fake_sent().any(func(m): return m.get("type") == "action" and m.action.get("kind") == "reboot"):
+          return "Reboot acted on the first tap"
+  - tap: { node: Settings/Rows/List/Tap again_ Reboot }
+  - expect_action: { Reboot: null }

@@ -248,6 +248,7 @@
     "logs": "Journaux",
     "debugLogging": "Débogage",
     "restartSystem": "Redémarrage",
+    "reboot": "Redémarrer l'appareil",
     "powerOff": "Arrêt",
     "name": "Nom",
     "description": "Description",

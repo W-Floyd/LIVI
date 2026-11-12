@@ -120,7 +120,7 @@ func _ready() -> void:
 	ThemeManager.changed.connect(_style)
 	Core.changed.connect(_on_core_changed)
 	Core.welcome.connect(func(_v): _refresh())
-	Drive.changed.connect(func(): if section is String and section == LOOK: _refresh(true))
+	Drive.changed.connect(func(): if (section is String and section == LOOK) or _view.get("rows", []).any(func(r): return r.get("parkedOnly", false)): _refresh(true))
 	resized.connect(_place)
 	_apps = load_apps()
 	Core.settings_section(int(section) if section is int else -1)
@@ -328,6 +328,13 @@ func _build_livi() -> void:
 				# Skipped, not removed: a row's index is what a touch sends back.
 				if r.get("hidden", false):
 					continue
+				# Drive.moving, not locked(): no passenger unlock or offroad mode lets this through.
+				if r.get("parkedOnly", false) and Drive.moving:
+					r = r.duplicate()
+					r.enabled = false
+					r.detail = "Available when parked"
+					if str(i) == _armed:
+						_armed = ""
 				if str(i) == _armed:
 					r = r.duplicate()
 					r.label = "Tap again: %s" % r.label

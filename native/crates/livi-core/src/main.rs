@@ -37,11 +37,15 @@ fn main() -> ExitCode {
     let code = match outcome {
         Ok(Exit::Quit) => ExitCode::SUCCESS,
         Ok(Exit::PowerOff) => {
-            power::run(power::Power::Off);
+            power::run(power::Power::Off, None);
             ExitCode::SUCCESS
         }
         Ok(Exit::Restart(_)) if power::owns_host() => {
-            power::run(power::Power::Reboot);
+            power::run(power::Power::Reboot, None);
+            ExitCode::SUCCESS
+        }
+        Ok(Exit::Reboot(helper)) => {
+            power::run(power::Power::Reboot, helper.as_deref());
             ExitCode::SUCCESS
         }
         Ok(Exit::Restart(_)) if cfg!(target_os = "macos") => {

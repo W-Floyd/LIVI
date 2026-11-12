@@ -33,6 +33,7 @@ pub struct Core {
     config_writes: Mutex<()>,
     pub quit: Arc<Notify>,
     pub restart: AtomicBool,
+    pub reboot: AtomicBool,
     pub quit_asked: AtomicBool,
     pub ui_path: watch::Sender<String>,
     pub open_page: broadcast::Sender<String>,
@@ -57,6 +58,7 @@ impl Core {
             config_writes: Mutex::new(()),
             quit,
             restart: AtomicBool::new(false),
+            reboot: AtomicBool::new(false),
             quit_asked: AtomicBool::new(false),
             relaunch: std::sync::Mutex::new(None),
             ui_path: watch::channel(String::new()).0,
@@ -180,6 +182,11 @@ impl Core {
             }
             Action::Restart => {
                 self.restart.store(true, Ordering::SeqCst);
+                self.quit.notify_one();
+                Ok(())
+            }
+            Action::Reboot => {
+                self.reboot.store(true, Ordering::SeqCst);
                 self.quit.notify_one();
                 Ok(())
             }
@@ -938,24 +945,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restart_is_a_quit_that_asks_to_come_back() {
-        let dir = TempDir::new();
-        let (core, path) = start(&dir);
-        let mut ui = Peer::hello(&path).await;
-        let quit = core.quit.notified();
-        ui.send(&ToCore::Action {
-            id: 4,
-            action: Action::Restart,
-        })
-        .await;
-        assert_eq!(
-            ui.recv().await,
-            Some(FromCore::Reply { id: 4, error: None })
-        );
-        tokio::time::timeout(Duration::from_secs(5), quit)
-            .await
-            .unwrap();
-        assert!(core.restart.load(Ordering::SeqCst));
+    async fn restart_and_reboot_are_quits_that_say_what_comes_next() {
+        let flags: [(Action, fn(&Core) -> &AtomicBool); 2] = [
+            (Action::Restart, |c| &c.restart),
+            (Action::Reboot, |c| &c.reboot),
+        ];
+        for (action, flag) in flags {
+            let dir = TempDir::new();
+            let (core, path) = start(&dir);
+            let mut ui = Peer::hello(&path).await;
+            let quit = core.quit.notified();
+            ui.send(&ToCore::Action { id: 4, action }).await;
+            assert_eq!(
+                ui.recv().await,
+                Some(FromCore::Reply { id: 4, error: None })
+            );
+            tokio::time::timeout(Duration::from_secs(5), quit)
+                .await
+                .unwrap();
+            assert!(flag(&core).load(Ordering::SeqCst));
+            assert!(!core.quit_asked.load(Ordering::SeqCst));
+        }
     }
 
     #[tokio::test]

@@ -248,6 +248,7 @@
     "logs": "Logs",
     "debugLogging": "Debug",
     "restartSystem": "Restart System",
+    "reboot": "Reboot",
     "powerOff": "Power Off",
     "name": "Name",
     "description": "Description",

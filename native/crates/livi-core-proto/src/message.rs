@@ -175,6 +175,9 @@ pub enum Action {
     },
     Quit,
     Restart,
+    /// The host itself, not the core: on a head unit whose bootloader always starts the stock
+    /// system, that is where it comes back up.
+    Reboot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,10 +229,12 @@ mod tests {
             serde_json::to_value(ToCore::Resync).unwrap(),
             json!({ "type": "resync" })
         );
-        assert_eq!(
-            serde_json::to_value(Action::Quit).unwrap(),
-            json!({ "kind": "quit" })
-        );
+        for (action, kind) in [(Action::Quit, "quit"), (Action::Reboot, "reboot")] {
+            assert_eq!(
+                serde_json::to_value(action).unwrap(),
+                json!({ "kind": kind })
+            );
+        }
     }
 
     #[test]

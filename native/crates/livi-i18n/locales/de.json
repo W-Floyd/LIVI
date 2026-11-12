@@ -248,6 +248,7 @@
     "logs": "Logs",
     "debugLogging": "Debug",
     "restartSystem": "Neustart",
+    "reboot": "Gerät neu starten",
     "powerOff": "Ausschalten",
     "name": "Name",
     "description": "Beschreibung",

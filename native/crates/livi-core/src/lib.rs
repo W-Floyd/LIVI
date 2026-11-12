@@ -87,6 +87,8 @@ pub enum Exit {
     Quit,
     PowerOff,
     Restart(Option<PathBuf>),
+    /// The host, through the root helper when there is one.
+    Reboot(Option<PathBuf>),
 }
 
 pub struct Instance {
@@ -208,6 +210,7 @@ pub async fn run(
             helper_named: user_data.join("driver/livi-helperd"),
             user_data: user_data.clone(),
         });
+    let helper = privileged.as_ref().map(|p| p.helper.clone());
     if let Some(privileged) = privileged {
         if udev_rule::ensure(&privileged).await {
             return Ok(Exit::Restart(None));
@@ -260,6 +263,8 @@ pub async fn run(
                 .unwrap_or_else(|e| e.into_inner())
                 .take(),
         )
+    } else if core.reboot.load(Ordering::SeqCst) {
+        Exit::Reboot(helper)
     } else if core.quit_asked.load(Ordering::SeqCst) && power::owns_host() {
         Exit::PowerOff
     } else {

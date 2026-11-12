@@ -41,7 +41,7 @@ pub fn rows(page: CustomPage, state: &Value, t: &Strings, facts: &Facts) -> Opti
         CustomPage::FmStations => radio::fm_stations(&radio::fm(state), t),
         CustomPage::About => system::about(t, facts),
         CustomPage::SoftwareUpdate => system::update(state, t, facts),
-        CustomPage::Restart | CustomPage::PowerOff => Vec::new(),
+        CustomPage::Restart | CustomPage::Reboot | CustomPage::PowerOff => Vec::new(),
         CustomPage::WifiLinkInfo => system::link_speed(state, t),
         CustomPage::CarReadings => car::readings(state, t),
         CustomPage::Precondition => car::precondition(state, t, car::now_s()),
@@ -67,6 +67,7 @@ pub fn watch(page: CustomPage) -> Option<Watch> {
         CustomPage::WifiLinkInfo => Some(Watch::LinkSpeed),
         CustomPage::SoftwareUpdate => Some(Watch::Act(Action::CheckUpdate)),
         CustomPage::Restart => Some(Watch::Act(Action::Restart)),
+        CustomPage::Reboot => Some(Watch::Act(Action::Reboot)),
         CustomPage::PowerOff => Some(Watch::Act(Action::Quit)),
         _ => None,
     }

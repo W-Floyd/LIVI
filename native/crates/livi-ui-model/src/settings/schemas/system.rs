@@ -55,6 +55,13 @@ pub fn schema() -> Node {
                 CustomPage::Restart,
             ),
             page(
+                "reboot",
+                "settings.reboot",
+                "Reboot",
+                "restart",
+                CustomPage::Reboot,
+            ),
+            page(
                 "poweroff",
                 "settings.powerOff",
                 "Power Off",

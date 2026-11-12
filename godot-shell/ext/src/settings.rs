@@ -179,12 +179,16 @@ impl Controller {
         // Stock's restart and power-off pages act as they open: the shell asks first.
         let mut below = self.stack.clone();
         below.push(r.node);
-        v["confirms"] = json!(r.kind == RowKind::Route
-            && self
-                .model
-                .watches(&below)
-                .iter()
-                .any(|w| matches!(w, Watch::Act(Action::Restart | Action::Quit))));
+        let acts = |a: &[Action]| {
+            r.kind == RowKind::Route
+                && self.model.watches(&below).iter().any(|w| matches!(w, Watch::Act(x) if a.contains(x)))
+        };
+        v["confirms"] = json!(acts(&[Action::Restart, Action::Reboot, Action::Quit]));
+        // The unit's bootloader starts the stock system; the page greys it while driving.
+        if acts(&[Action::Reboot]) {
+            v["parkedOnly"] = json!(true);
+            v["detail"] = json!("Starts again in the head unit's stock system");
+        }
         // What the row's own page would show, so a short choice or a small number can be set
         // in place instead of a page away.
         if r.kind == RowKind::Value && r.change.is_none() && r.action.is_none() {
@@ -636,6 +640,13 @@ mod tests {
                 json!({ "config": { "batteryPreconditioning": "auto" } }), toggle,
                 vec![act(Action::PreconditionBattery { on: true })]),
             (&["System", "Software Update"], "Check for Updates", json!({}), press, vec![act(Action::CheckUpdate)]),
+            // Acts as its page opens, as stock's restart does.
+            (&["System"], "Reboot", json!({}), |c, r, _| {
+                c.open(r);
+                let out = c.follow_watches(false);
+                c.back();
+                out
+            }, vec![act(Action::Reboot)]),
             // Typed on the field's page, which then closes; refused when too short.
             (&["General", "Connections"], "Car Name", json!({}), |c, r, _| {
                 c.open(r);

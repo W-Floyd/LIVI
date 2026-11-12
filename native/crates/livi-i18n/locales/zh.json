@@ -248,6 +248,7 @@
     "logs": "日志",
     "debugLogging": "调试",
     "restartSystem": "重启系统",
+    "reboot": "重启设备",
     "powerOff": "关机",
     "name": "名称",
     "description": "描述",

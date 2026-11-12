@@ -117,6 +117,7 @@ pub enum CustomPage {
     MfiCertificate,
     PowerOff,
     Precondition,
+    Reboot,
     Restart,
     SoftwareUpdate,
     Touch(Screen),

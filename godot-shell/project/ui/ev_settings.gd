@@ -97,7 +97,8 @@ func _place() -> void:
 	_back.size = Vector2(s, s)
 	_back.position = Vector2(left, (bar - s) / 2.0)
 	_title.position = Vector2(left + s + g, (bar - _title.get_combined_minimum_size().y) / 2.0)
-	var col := clampf(size.x * 0.22, 300.0, 440.0)
+	# Wide enough for the longest section's name, up to a third of the page; past that, ellipsized.
+	var col := clampf(maxf(size.x * 0.22, _sections_width()), 300.0, maxf(300.0, size.x / 3.0))
 	_sections.position = Vector2(left, bar + g)
 	_sections.size = Vector2(col, size.y - bar - g * 2)
 	var rx := left + col + g * 3
@@ -107,7 +108,27 @@ func _place() -> void:
 	_heading.size.x = rw
 	_rows.position = Vector2(rx, bar + g * 2 + hh)
 	_rows.size = Vector2(rw, size.y - _rows.position.y - g)
+	_fit_choices()
 	queue_redraw()
+
+
+## A choice is kept on one line, under its row's text if need be, unless the row is narrower.
+func _fit_choices() -> void:
+	var room := floorf(_rows.size.x - ThemeManager.px.gap * 2.4) - 1.0
+	for c: HFlowContainer in _rows.list.find_children("Choice", "HFlowContainer", true, false):
+		var whole := maxf(0.0, c.get_child_count() - 1) * c.get_theme_constant("h_separation")
+		for b: Control in c.get_children():
+			whole += b.get_combined_minimum_size().x
+		c.custom_minimum_size.x = minf(whole, room)
+
+
+func _sections_width() -> float:
+	var font := get_theme_font("font", "Button")
+	var fs := get_theme_font_size("font_size", "Button")
+	var w := 0.0
+	for it in SECTIONS:
+		w = maxf(w, font.get_string_size(it[1], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x)
+	return w + ThemeManager.px.icon + get_theme_constant("h_separation", "Button") + ThemeManager.px.gap * 2 + 2
 
 
 func _draw() -> void:
@@ -153,6 +174,8 @@ func _build() -> void:
 		b.set_pressed_no_signal(it[0] == section)
 		b.text = it[1]
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.clip_text = true
+		b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		b.icon = Icons.texture(it[2], ThemeManager.px.icon)
 		b.custom_minimum_size.y = ThemeManager.px.touch * 1.15
 		b.add_theme_stylebox_override("normal", _flat_box(Color(0, 0, 0, 0)))
@@ -202,6 +225,7 @@ func _build() -> void:
 			add.call(_number_row("v2l_limit", "V2L discharge limit", V2L_LIMIT, _pct, "V2L stops at this charge."))
 			add.call(_utility_row())
 	UI.style_boxes(_rows.list)
+	_fit_choices()
 
 
 # ---- rows ----
@@ -253,8 +277,13 @@ func _row(id: String, label: String, detail: String, control: Control, below: Co
 	text.name = "Text"
 	text.alignment = BoxContainer.ALIGNMENT_CENTER
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var line := UI.hbox([text], 1.0)
+	# Its width before the controls go under it; a longer title wraps.
+	text.custom_minimum_size.x = minf(l.get_combined_minimum_size().x, ThemeManager.font_size("body") * 14.0)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# A flow: controls too wide beside the text go under it, at the row's end, not past the page.
+	var line := _flow([text], 1.0)
 	line.name = "Line"
+	line.alignment = FlowContainer.ALIGNMENT_END
 	line.custom_minimum_size.y = ThemeManager.px.touch * 1.15
 	for c in [lead, control]:
 		if c:
@@ -287,9 +316,8 @@ func _number_row(id: String, label: String, r: Dictionary, fmt: Callable, detail
 
 func _choice_row(id: String, label: String, values: Array, labels: Array, detail := "", can := true) -> Control:
 	var v = _with_pending(id)
-	var box := HBoxContainer.new()
+	var box := _flow([], 0.4)
 	box.name = "Choice"
-	box.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.4))
 	var on := _live(id) and can
 	for i in values.size():
 		var b := _toggle(values[i], labels[i], v == values[i], on)
@@ -319,9 +347,8 @@ func _departure_row(id: String, label: String) -> Control:
 	var h = d.get("hour")
 	var m = d.get("minute")
 	var time := _time("Time", h, m, on and h != null and m != null, func(nh, nm): _send(id, {hour = nh, minute = nm}))
-	var days := HBoxContainer.new()
+	var days := _flow([], 0.3)
 	days.name = "Days"
-	days.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.3))
 	var set_days: Array = d.get("days", [null, null, null, null, null, null, null])
 	var all_known := not set_days.has(null)
 	for i in DAYS.size():
@@ -397,7 +424,7 @@ func _off_peak_row() -> Control:
 	var end := _time("End", eh, em, on and eh != null and em != null,
 		func(h, m): _send(id, {endHour = h, endMinute = m}))
 	var to := UI.label("to", "body", "body", "dim")
-	var below := UI.hbox([start, to, end], 1.0)
+	var below := _flow([start, to, end], 1.0)
 	below.name = "Below"
 	return _row(id, "Off-peak hours", _why(id, "Cheapest hours to charge."), null, below)
 
@@ -518,6 +545,17 @@ func _time(box_name: String, hv: Variant, mv: Variant, on: bool, change: Callabl
 	var box := UI.hbox([hours, colon, mins], 0.3)
 	box.name = box_name
 	return box
+
+
+## Wraps its children, each kept whole, to the next line where they do not fit.
+func _flow(children: Array, gap: float) -> HFlowContainer:
+	var f := HFlowContainer.new()
+	f.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	f.add_theme_constant_override("h_separation", roundi(ThemeManager.px.gap * gap))
+	f.add_theme_constant_override("v_separation", roundi(ThemeManager.px.gap * 0.5))
+	for c in children:
+		f.add_child(c)
+	return f
 
 
 func _switch(checked: bool, on: bool, toggle: Callable) -> Button:

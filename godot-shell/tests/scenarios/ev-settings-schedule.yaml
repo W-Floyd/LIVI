@@ -96,3 +96,43 @@ steps:
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/EvSettings/Rows/List/scheduled_climate/Lines/Line/Text/Detail, text: "Read only while driving" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/scheduled_climate/Lines/Line/Switch, disabled: true }
+  # Every section in the page's rect at every bar edge, hand and text scale, rail or none: each
+  # row and what is in it within the page less the same gutter both sides (wide controls go
+  # under the text), and the section names whole while the column has room, else ellipsized.
+  # Rects in the page's own space: it may still be easing in.
+  - gdscript: |
+      for docked in [false, true]:
+          if docked:
+              NavRail.attach(shell)
+          for pos in ["top", "bottom", "left", "right", "off"]:
+              for hand in ["lhd", "rhd"]:
+                  for scale in [1.0, 1.4]:
+                      ThemeManager.set_look({status_position = pos, hand = hand, text_scale = scale})
+                      var e: String = shell.open_page("ev_live")
+                      if e != "":
+                          return e
+                      var evs: Control = shell.get_node("EvLive/EvSettings")
+                      var secs: DragScroll = evs.get_node("Sections")
+                      var rows: DragScroll = evs.get_node("Rows")
+                      var local := func(c: Control) -> Rect2:
+                          return evs.get_global_transform().affine_inverse() * c.get_global_transform() * Rect2(Vector2.ZERO, c.size)
+                      for s in EvSettings.SECTIONS:
+                          evs.open(s[0])
+                          await runner.frames(3)
+                          var room := Rect2(secs.position.x, 0, evs.size.x - secs.position.x * 2, evs.size.y).grow(0.5)
+                          var at := "rail %s, %s, %s, %s, %s: " % [docked, pos, hand, scale, s[0]]
+                          if absf(rows.get_rect().end.x - room.end.x) > 1.0:
+                              return at + "rows end at %s, the page less its gutter at %s" % [rows.get_rect().end.x, room.end.x]
+                          for row in rows.list.get_children():
+                              var r: Rect2 = local.call(row)
+                              if r.position.x < room.position.x or r.end.x > room.end.x:
+                                  return at + "%s at %s runs out of %s" % [row.name, r, room]
+                              for c in row.find_children("*", "Control", true, false):
+                                  if c.is_visible_in_tree() and not r.grow(0.5).encloses(local.call(c)):
+                                      return at + "%s's %s at %s runs out of the row at %s" % [row.name, row.get_path_to(c), local.call(c), r]
+                          if secs.list.size.x > secs.size.x + 0.5:
+                              return at + "section list %s wider than its column %s" % [secs.list.size.x, secs.size.x]
+                          for b in secs.list.get_children():
+                              var whole: float = b.get_theme_font("font").get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, b.get_theme_font_size("font_size")).x
+                              if whole > b.size.x - b.get_combined_minimum_size().x + 0.5 and secs.size.x < evs.size.x / 3.0 - 0.5:
+                                  return at + "%s cut in a %s column that has room" % [b.name, secs.size.x]

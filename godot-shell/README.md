@@ -208,6 +208,27 @@ APKBUILDs for `livi-core` and `livi-shell` (launcher, systemd and OpenRC units, 
 are in `packaging/alpine/`; see [packaging/README.md](packaging/README.md) for the commands,
 what runs where, and what is left for the unit.
 
+## Deploying to the unit
+
+```sh
+scripts/unit-deploy.sh -n            # what would change: the unit's hashes and versions against HEAD
+scripts/unit-deploy.sh [-b] [shell|core|micomd|all] [host]    # -b: build and compare, install nothing
+```
+
+Builds from HEAD, never the working tree: `shell` and `core` from a clean worktree in
+`~/.cache/livi-unit-deploy` (`LIVI_DEPLOY_CACHE`), `micomd` from `PMAPORTS_DIR`'s HEAD with
+`tools/pmb`. Installs only what differs from the unit, then one root step (one sudo prompt, or
+`LIVI_UNIT_SUDO_PASS`) installs, restarts and prints a check.
+
+- `shell`: `scripts/unit-sync.sh` (project, extension, load check), then restarts livi-shell.
+- `core`: livi-core, livi-output and livi-helperd whose sha256 differs from the unit's, with
+  livi-shell and livi-shell-core stopped. Starts `livi-wifi-ap` if a new helper left it down.
+- `micomd`: micomd and micom-livi when the unit's micomd is not the APKBUILD's go-micomd version,
+  device-mobis-g5w(-systemd) when a file of it differs; `apk add`, a drop-in whose ExecStart flags
+  are now all packaged removed, `mkinitfs`, micomd then micom-livi restarted. A go-micomd commit on
+  no remote branch of `GO_MICOMD_DIR` is built from that checkout.
+- `all` (the default): micomd, core, shell.
+
 ## Video on the unit
 
 The compositor takes planar YUV dmabufs (NV12, I420) from clients, as `livi-output`'s

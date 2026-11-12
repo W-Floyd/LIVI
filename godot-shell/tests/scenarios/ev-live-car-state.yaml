@@ -1,6 +1,7 @@
 name: ev-live-car-state
-# The EV page shows the car's own state from micom-livi: while charging, a card with the time to
-# full and the AC and DC limits, ranges at them and estimates; what is open, on a picture of the
+# The EV page shows the car's own state from micom-livi: while plugged in, a card with what the
+# charge is doing, the time to full and when, the power, AC or DC and the limit, and the AC and
+# DC limits, ranges at them and estimates; what is open, on a picture of the
 # car and in words; the 12 V battery; the climate and battery heater while they draw. Each only
 # once the car reports it.
 clock: 2026-11-09T19:05:00
@@ -12,12 +13,14 @@ steps:
   - expect_node: { path: EvLive/ChargeCard, visible: "true" }
   - expect_node: { path: EvLive/ChargeCard/Box/Head/Title, text: Charging }
   - expect_node: { path: EvLive/ChargeCard/Box/Head/Big/ToFull, text: 1 h 25 min }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/Power, text: 7.2 kW }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/Type, text: AC }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/Target, text: to 90 % }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/When, text: full at 20:30 }
   - expect_node: { path: EvLive/ChargeCard/Box/Facts/LimitAC, text: 90 % }
   - expect_node: { path: EvLive/ChargeCard/Box/Facts/LimitDC, text: 80 % }
   - expect_node: { path: EvLive/ChargeCard/Box/Facts/RangeAC, text: 431 km }
   - expect_node: { path: EvLive/ChargeCard/Box/Facts/RangeDC, text: 383 km }
-  - expect_node: { path: EvLive/ChargeCard/Box/Facts/TimeAC, text: 7 h 10 min }
-  - expect_node: { path: EvLive/ChargeCard/Box/Facts/TimeDC, text: 38 min }
   - expect_node: { path: EvLive/CarStatus/Row0/Aux/Label, text: 12 V 87 % }
   # The charge port alone is open: said, not a warning.
   - expect_node: { path: EvLive/CarStatus/Row0/Body/Open, text: Charge port open }
@@ -38,17 +41,48 @@ steps:
               if mine and rects[i][1].intersects(rects[j][1]):
                   return "%s overlaps %s" % [rects[i][0], rects[j][0]]
   - screenshot: ev-live-charging
-  # Only what the car reports: no DC limit, a dash.
-  - set: { core: { telemetry: { chargeLimitDcPct: null, chargeTimeAcMin: null, chargeTimeDcMin: null } } }
+  # Only what the car reports: no DC limit, a dash; no ranges at the limits, no row, and the
+  # estimates, which the card had no room for, take its place.
+  - set: { core: { telemetry: { chargeLimitDcPct: null, rangeAtChargeLimitAcKm: null, rangeAtChargeLimitDcKm: null } } }
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/ChargeCard/Box/Facts/LimitDC, text: – }
+  - expect_node: { path: EvLive/ChargeCard/Box/Facts/TimeAC, text: 7 h 10 min }
+  - expect_node: { path: EvLive/ChargeCard/Box/Facts/TimeDC, text: 38 min }
   - gdscript: |
-      if shell.has_node("EvLive/ChargeCard/Box/Facts/TimeAC"):
+      if shell.has_node("EvLive/ChargeCard/Box/Facts/RangeAC"):
           return "a row the car does not report"
-  - set: { core: { telemetry: { chargeLimitDcPct: 80, chargeTimeAcMin: 430, chargeTimeDcMin: 38 } } }
-  # Not charging, the charger ready: no card. chargerReady is the on-board charger's ready
+  - set: { core: { telemetry: { chargeLimitDcPct: 80, rangeAtChargeLimitAcKm: 431, rangeAtChargeLimitDcKm: 383 } } }
+  # The car's live AC charge, 2026-11-12: micom-livi's fields from 0x8C4F 51, items 0x5b, 0x1b
+  # and 0x14, the limits from 0x8C01.
+  - set: { core: { telemetry: { fuelPct: 12, chargeLimitAcPct: 100, chargeLimitDcPct: 100, chargeTimeToFullMin: 630, chargingPowerKw: 7.1 } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/ChargeCard/Box/Head/Big/ToFull, text: 10 h 30 min }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/Power, text: 7.1 kW }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/Target, text: to 100 % }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/When, text: full at 05:35 }
+  - gdscript: *apart
+  # Plugged in and not charging: why is inferred, the car does not say. Below the limit, no
+  # schedule: just so; under an off-peak mode, waiting, with the window's start; at the limit,
+  # charged. The time to full, power and type go.
+  - set: { core: { telemetry: { charging: false, chargingPowerKw: 0, chargeType: null, chargeTimeToFullMin: 0 } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/ChargeCard/Box/Head/Title, text: "Plugged in, not charging" }
+  - expect_node: { path: EvLive/ChargeCard/Box/Head/Big, visible: "false" }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/Power, visible: "false" }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/Target, text: to 100 % }
+  - set: { core: { telemetry: { offPeak: {} } } }
+  - set: { core: { telemetry: { scheduledChargingMode: off_peak_only, offPeak: { startHour: 22, startMinute: 0, endHour: 6, endMinute: 0 } } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/ChargeCard/Box/Head/Title, text: Waiting for off-peak }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now/When, text: starts 22:00 }
+  - set: { core: { telemetry: { fuelPct: 100 } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/ChargeCard/Box/Head/Title, text: Charged }
+  - expect_node: { path: EvLive/ChargeCard/Box/Now, visible: "false" }
+  - set: { core: { telemetry: { fuelPct: 46, chargeLimitAcPct: 90, chargeLimitDcPct: 80, chargeTimeToFullMin: 85, scheduledChargingMode: null, offPeak: null } } }
+  # Unplugged, the charger ready: no card. chargerReady is the on-board charger's ready
   # (OBC_SYSRDYSTA), 1 with no plug in too.
-  - set: { core: { telemetry: { charging: false } } }
+  - set: { core: { telemetry: { chargePlugged: false } } }
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/ChargeCard, visible: "false" }
   # Unplugged: no card. Doors open, a low 12 V battery, the climate (its blower, as the range's
@@ -89,7 +123,7 @@ steps:
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/CarStatus/Row0/Body/Open, text: 4 open }
   # Charging again, at night: the card.
-  - set: { core: { telemetry: { doorDriverOpen: false, trunkOpen: false, doorPassengerOpen: false, hoodOpen: false, charging: true, chargerReady: true, chargePortOpen: true, climatePowerW: 0, batteryHeaterW: 0, auxBatteryPct: 88, climate: { fanLevel: 0, on: false } } } }
+  - set: { core: { telemetry: { doorDriverOpen: false, trunkOpen: false, doorPassengerOpen: false, hoodOpen: false, charging: true, chargePlugged: true, chargingPowerKw: 7.2, chargeType: ac, chargerReady: true, chargePortOpen: true, climatePowerW: 0, batteryHeaterW: 0, auxBatteryPct: 88, climate: { fanLevel: 0, on: false } } } }
   - theme: { hand: lhd }
   - wait: { frames: 2 }
   - gdscript: *apart
@@ -99,7 +133,7 @@ steps:
   - gdscript: *apart
   - theme: { text_scale: 1.0 }
   # Nothing reported: neither shows (the drive fixtures' pages are unchanged).
-  - set: { core: { telemetry: { charging: null, chargerReady: null, chargePortOpen: null, auxBatteryPct: null, climatePowerW: null, batteryHeaterW: null } } }
+  - set: { core: { telemetry: { charging: null, chargePlugged: null, chargingPowerKw: null, chargerReady: null, chargePortOpen: null, auxBatteryPct: null, climatePowerW: null, batteryHeaterW: null } } }
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/ChargeCard, visible: "false" }
   - expect_node: { path: EvLive/CarStatus, visible: "false" }

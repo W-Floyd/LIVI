@@ -19,3 +19,11 @@ func now() -> float:
 	if _fixed_start < 0.0:
 		return Time.get_unix_time_from_system()
 	return _fixed_start + _elapsed
+
+
+## `now()` shifted to the system's time zone, for wall-clock fields
+## (`Time.get_datetime_dict_from_unix_time`). A fixed start is already wall time.
+func local() -> float:
+	if _fixed_start >= 0.0:
+		return now()
+	return now() + Time.get_time_zone_from_system().bias * 60.0

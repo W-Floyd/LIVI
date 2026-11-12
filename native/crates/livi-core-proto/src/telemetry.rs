@@ -51,6 +51,8 @@
 //! | batteryUsableKwh                    | ✓    | ✓            | ·               | ·             |
 //! | charging, activeConnector           | ✓    | ·            | ✓ (electric)    | ✓ (electric)  |
 //! | chargerReady, chargeTime*Min        | ✓    | ·            | ·               | ·             |
+//! | chargePlugged, chargeType           | ✓    | ·            | ·               | ·             |
+//! | chargingPowerKw                     | ✓    | ·            | ·               | ·             |
 //! | chargeLimit*, rangeAtChargeLimit*  | ✓    | ·            | ·               | ·             |
 //! | tripEnergyKwh, efficiencyAvg        | ✓    | ·            | ·               | ·             |
 //! | climatePowerW, batteryHeaterW       | ✓    | ·            | ·               | ·             |
@@ -179,6 +181,12 @@ pub struct TelemetrySnapshot {
     pub active_connector: Option<String>,
     /// The on-board charger reports ready.
     pub charger_ready: Option<bool>,
+    /// A charging cable is plugged in, charging or not.
+    pub charge_plugged: Option<bool>,
+    /// `ac` or `dc` while charging; null when not known.
+    pub charge_type: Option<String>,
+    /// What the car is taking from the charger.
+    pub charging_power_kw: Option<f64>,
     /// Until the battery is full at the charging going on.
     pub charge_time_to_full_min: Option<f64>,
     /// The car's estimates to its charge limit, on a fast charger, on AC, and on a DC charger
@@ -479,6 +487,9 @@ mod tests {
             charge_port_open: Some(true),
             aux_battery_pct: Some(87.0),
             charge_time_dc_custom_min: Some(42.0),
+            charge_plugged: Some(true),
+            charge_type: Some("ac".into()),
+            charging_power_kw: Some(7.2),
             range_at_charge_limit_ac_km: Some(410.0),
             climate_power_w: Some(1400.0),
             rear_right_seat_heating: Some(2),
@@ -532,6 +543,9 @@ mod tests {
             ("chargePortOpen", json!(true)),
             ("auxBatteryPct", json!(87.0)),
             ("chargeTimeDcCustomMin", json!(42.0)),
+            ("chargePlugged", json!(true)),
+            ("chargeType", json!("ac")),
+            ("chargingPowerKw", json!(7.2)),
             ("rangeAtChargeLimitAcKm", json!(410.0)),
             ("climatePowerW", json!(1400.0)),
             ("rearRightSeatHeating", json!(2)),

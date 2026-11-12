@@ -41,7 +41,7 @@ steps:
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/Battery/Row1/battery_value, text: "80" }
   - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "320" }
-  - expect_node: { path: EvLive/RangeOn/Row0/on_name, text: "On" }
+  - expect_node: { path: EvLive/RangeOn/Row0/on_name, text: "Climate on" }
   - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "330" }
   - expect_node: { path: EvLive/RangeOff, visible: "true" }
   - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "90" }
@@ -58,15 +58,17 @@ steps:
           return "the lit end is not inside the road, or the road end moved: %s %s" % [before, a]
       if a.car != before.car:
           return "the car moved"
+      # Both kept off the road and each other, by their road ends.
       var on: Control = shell.get_node("EvLive/RangeOn")
       var off: Control = shell.get_node("EvLive/RangeOff")
-      if absf(on.position.x + on.size.x - a.on.x) > 30.0 or absf(off.position.x - a.off.x) > 30.0:
+      var by := func(r: Rect2, p: Vector2) -> float: return p.distance_to(Vector2(clampf(p.x, r.position.x, r.end.x), clampf(p.y, r.position.y, r.end.y)))
+      if by.call(on.get_global_rect(), a.on) > 160.0 or by.call(off.get_global_rect(), a.off) > 160.0:
           return "range labels not at the road ends: %s %s %s" % [on.get_global_rect(), off.get_global_rect(), a]
   # The blower stops: as stock, the climate-off range alone, named so.
   - set: { core: { telemetry: { climate: { fanLevel: 0, on: false } } } }
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "330" }
-  - expect_node: { path: EvLive/RangeOn/Row0/on_name, text: "Off" }
+  - expect_node: { path: EvLive/RangeOn/Row0/on_name, text: "Climate off" }
   - expect_node: { path: EvLive/RangeOff, visible: "false" }
   - gdscript: |
       var s: EvScene = shell.get_node("EvLive/Scene")
@@ -104,10 +106,17 @@ steps:
       var road: ShaderMaterial = s.get_node("World/Road").material_override
       if not is_equal_approx(road.get_shader_parameter("km_warn"), 30.0 - EvScene.WARN_KM):
           return "no warning segment: %s" % road.get_shader_parameter("km_warn")
-      var icon: TextureRect = shell.get_node("EvLive/RangeOn/Row0/fan")
-      if icon.get_meta("icon")[0] != "warn":
+      if not shell.get_node("EvLive/RangeOn/Row0/warn").visible:
           return "the low-range label has no warning icon"
   - screenshot: ev-live-data-low-range
+  # With the climate-off range too, its name keeps the fan beside the warning: "⚠ Off" alone
+  # did not say what was off.
+  - set: { core: { telemetry: { rangeClimateOffKm: 33 } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/RangeOn/Row0/on_name, text: "Climate off" }
+  - expect_node: { path: EvLive/RangeOn/Row0/warn, visible: "true" }
+  - expect_node: { path: EvLive/RangeOn/Row0/fan, visible: "true" }
+  - set: { core: { telemetry: { rangeClimateOffKm: null } } }
   # No charging stop: no pin and no label.
   - set: { core: { navigation: { chargingStop: { distanceM: null } } } }
   - wait: { frames: 2 }
@@ -143,7 +152,7 @@ steps:
   - page: ev_live
   - expect_node: { path: EvLive/Battery/Row1/battery_value, text: "64" }
   - expect_node: { path: EvLive/RangeOn/Row1/on_value, text: "250" }
-  - expect_node: { path: EvLive/RangeOn/Row0/on_name, text: "On" }
+  - expect_node: { path: EvLive/RangeOn/Row0/on_name, text: "Climate on" }
   - expect_node: { path: EvLive/RangeOff/Row1/off_value, text: "270" }
   - expect_node: { path: EvLive/ChargerLabel/Row0/charger_value, text: "12" }
   - expect_node: { path: EvLive/CarStatus/Row1/Climate, visible: "true" }

@@ -32,18 +32,35 @@ steps:
   - screenshot: { name: ev-live-calm-day-rhd, compare: false }
   - theme: { theme_name: instrument, appearance: night, hand: lhd, text_scale: 1.4 }
   - screenshot: ev-live-instrument-night-text-1.4
-  # The two ranges never run into each other, at any text scale, bar edge or drive side.
+  # The two ranges never run into each other nor onto the road (their numerals are the road's
+  # colours), at the fixtures' ranges and the unit's short one (43 km, 2026-11-12), the blower on
+  # and off, at any text scale, bar edge or drive side.
   - gdscript: |
-      for ts in [1.0, 1.2, 1.4]:
-          for pos in ["top", "bottom", "left", "right", "off"]:
-              for hand in ["lhd", "rhd"]:
-                  ThemeManager.set_look({text_scale = ts, status_position = pos, hand = hand})
-                  shell.open_page("ev_live")
-                  await runner.frames(3)
-                  var on: Control = shell.get_node("EvLive/RangeOn")
-                  var off: Control = shell.get_node("EvLive/RangeOff")
-                  if on.visible and off.visible and on.get_global_rect().intersects(off.get_global_rect()):
-                      return "%s, %s, %s: the ranges overlap: %s %s" % [ts, pos, hand, on.get_global_rect(), off.get_global_rect()]
+      for km in [[243, 253], [148, null], [221, 232], [312, null], [43, 44], [12, 13]]:
+          Core.fake_set("telemetry/rangeKm", km[0])
+          Core.fake_set("telemetry/rangeClimateOffKm", km[1])
+          for blower in [3, 0]:
+              Core.fake_set("telemetry/climate/fanLevel", blower)
+              Core.fake_set("telemetry/climate/on", blower > 0)
+              for ts in [1.0, 1.2, 1.4]:
+                  for pos in ["top", "bottom", "left", "right", "off"]:
+                      for hand in ["lhd", "rhd"]:
+                          ThemeManager.set_look({text_scale = ts, status_position = pos, hand = hand})
+                          shell.open_page("ev_live")
+                          await runner.frames(3)
+                          var at := "%s km, blower %s, %s, %s, %s" % [km, blower, ts, pos, hand]
+                          var on: Control = shell.get_node("EvLive/RangeOn")
+                          var off: Control = shell.get_node("EvLive/RangeOff")
+                          if on.visible and off.visible and on.get_global_rect().intersects(off.get_global_rect()):
+                              return "%s: the ranges overlap: %s %s" % [at, on.get_global_rect(), off.get_global_rect()]
+                          var road: PackedVector2Array = shell.get_node("EvLive/Scene").road_polygon()
+                          for l in [on, off]:
+                              if l.visible and EvLive._over_road(l.get_global_rect(), road):
+                                  return "%s: %s is on the road: %s %s" % [at, l.name, l.get_global_rect(), road]
+      Core.fake_set("telemetry/rangeKm", 243)
+      Core.fake_set("telemetry/rangeClimateOffKm", 253)
+      Core.fake_set("telemetry/climate/fanLevel", 3)
+      Core.fake_set("telemetry/climate/on", true)
       ThemeManager.set_look({text_scale = 1.4, status_position = "top", hand = "lhd"})
   # Back to 1.0 on the page itself: the picture drops from the taller targets' lift to where a
   # page opened at 1.0 has it.

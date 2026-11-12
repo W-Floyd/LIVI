@@ -26,6 +26,54 @@ steps:
       var taps: Array = shell.get_meta("taps")
       if taps != ["next_departure", "scheduled", "v2l", "settings"]:
           return "taps were %s" % [taps]
+  # The targets say what the car reports: the next departure that is on (its two timers, Monday
+  # first), "None set" when it reports both off, nothing until it says; scheduled charging and
+  # the climate at departure, on or off.
+  - gdscript: |
+      var at := func(s: String) -> float: return Time.get_unix_time_from_datetime_string(s)
+      var none := [false, false, false, false, false, false, false]
+      var off := {on = false, hour = 12, minute = 0, days = none}
+      var wk := {on = true, hour = 7, minute = 30, days = [true, true, true, true, true, false, false]}
+      var monday := "2026-11-09T19:05:00"
+      for c in [
+          [{}, monday, ""],
+          [{departure1 = off, departure2 = off}, monday, "None set"],
+          [{departure1 = off, departure2 = {on = null, hour = 12, minute = 0, days = none}}, monday, ""],
+          [{departure1 = wk, departure2 = off}, monday, "Tomorrow 07:30"],
+          [{departure1 = wk, departure2 = off}, "2026-11-13T08:00:00", "Mon 07:30"],
+          [{departure1 = {on = true, hour = 20, minute = 0, days = [true, false, false, false, false, false, false]}}, monday, "Today 20:00"],
+          [{departure1 = {on = true, hour = 19, minute = 5, days = [true, false, false, false, false, false, false]}}, monday, "Mon 19:05"],
+          [{departure1 = {on = true, hour = 8, minute = 0, days = none}, departure2 = {on = true, hour = 21, minute = 0, days = []}}, monday, "Today 21:00"],
+      ]:
+          var got: String = EvLive.next_departure(c[0], at.call(c[1]))
+          if got != c[2]:
+              return "%s at %s: %s, want %s" % [c[0], c[1], got, c[2]]
+  - gdscript: &tile_items |
+      var got := []
+      for id in ["next_departure", "scheduled"]:
+          for l in shell.get_node("EvLive/" + id).find_children("*", "Label", true, false):
+              if l.has_meta("item"):
+                  got.append(l.text)
+      shell.set_meta("tile_items", got)
+  - gdscript: |
+      if shell.get_meta("tile_items") != ["Not available", "–", "–"]:
+          return "before the car reports: %s" % [shell.get_meta("tile_items")]
+  - set: { core: { telemetry: { departure1: {}, departure2: {} } } }
+  - set: { core: { telemetry: { departure1: { on: false, hour: 12, minute: 0, days: [false, false, false, false, false, false, false] }, departure2: { on: false, hour: 12, minute: 0, days: [false, false, false, false, false, false, false] }, scheduledChargingMode: "off", scheduledClimate: false } } }
+  - wait: { frames: 2 }
+  - gdscript: *tile_items
+  - gdscript: |
+      if shell.get_meta("tile_items") != ["None set", "Off", "Off"]:
+          return "the car's live schedules, none set: %s" % [shell.get_meta("tile_items")]
+  - set: { core: { telemetry: { departure1: { on: true, hour: 7, minute: 30, days: [true, true, true, true, true, false, false] }, scheduledChargingMode: "off_peak_only", scheduledClimate: true } } }
+  - wait: { frames: 2 }
+  - gdscript: *tile_items
+  - gdscript: |
+      # The scenario's clock is a Thursday, 08:00.
+      if shell.get_meta("tile_items") != ["Tomorrow 07:30", "On", "On"]:
+          return "departure 1 weekdays at 07:30: %s" % [shell.get_meta("tile_items")]
+  - set: { core: { telemetry: { departure1: null, departure2: null, scheduledChargingMode: null, scheduledClimate: null } } }
+  - wait: { frames: 2 }
   # Pressed shows while the finger is down: the accent fill and its foreground.
   - gdscript: |
       var tile: EvTile = shell.get_node("EvLive/v2l")

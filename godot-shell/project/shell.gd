@@ -263,7 +263,7 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	var t := Time.get_datetime_dict_from_unix_time(int(Clock.now()))
+	var t := Time.get_datetime_dict_from_unix_time(int(Clock.local()))
 	_status.clock = "%02d:%02d" % [t.hour, t.minute]
 
 

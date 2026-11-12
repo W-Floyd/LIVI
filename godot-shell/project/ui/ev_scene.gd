@@ -578,6 +578,14 @@ static func road_half(x: float) -> float:
 	return HALF_W * (1.0 - ROAD_TAPER * clampf(x / ROAD_UNITS, 0.0, 1.0))
 
 
+## The road on screen, as panel pixels, from under the car to a little past its end (the bright
+## cap): what a label must stay off.
+func road_polygon() -> PackedVector2Array:
+	var x1 := ROAD_UNITS * 1.04
+	return PackedVector2Array([screen(Vector3(0, 0, road_half(0))), screen(Vector3(x1, 0, road_half(x1))),
+		screen(Vector3(x1, 0, -road_half(x1))), screen(Vector3(0, 0, -road_half(0)))])
+
+
 func anchors() -> Dictionary:
 	return {
 		on = screen(Vector3(km_on * upk(), 0, road_half(km_on * upk()))),

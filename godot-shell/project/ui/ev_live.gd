@@ -21,9 +21,10 @@ const SETTINGS_SECTIONS := {settings = "charging", next_departure = "schedule", 
 
 ## English defaults; a pack's screen overrides them where it has the string.
 const STRINGS := {
-	title = "Electric vehicle", battery = "Battery", on = "On", off = "Off", km = "km", m = "m",
+	title = "Electric vehicle", battery = "Battery", on = "Climate on", off = "Climate off", km = "km", m = "m",
 	charger = "Charger", next_departure = "Next departure", scheduled = "Scheduled charging",
-	v2l = "Electricity use (V2L)", unknown = "–", not_available = "Not available",
+	v2l = "Electricity use (V2L)", unknown = "–", not_available = "Not available", none_set = "None set",
+	today = "Today", tomorrow = "Tomorrow", state_on = "On", state_off = "Off",
 	v2x = "V2X", v2l_badge = "V2L",
 }
 ## The pack screen's view for each string, tile and label.
@@ -84,10 +85,13 @@ var _bound := false
 var _restyle_due := false
 var _row_top := 0.0
 var _numeral_base := {}   # label -> its font size before any fitting
+var _range_base := {}   # the ranges' other numerals and units -> their font sizes, likewise
 var _leader := []   # [the road end, the nearest point of its label]
 var _show_on := false
 var _show_off := false
 var _show_charger := false
+## The tap targets' live texts as last set, so a bind rebuilds them only when they change.
+var _tile_live := {}
 
 
 func _init() -> void:
@@ -118,7 +122,7 @@ func _ready() -> void:
 		(r as HBoxContainer).alignment = BoxContainer.ALIGNMENT_CENTER
 	_charger = _block("ChargerLabel", [[_icon("heading", "text"), _label("charger_value", "display", "title", "text"),
 		_label("charger_unit", "body", "title", "dim"), _label("charger_name", "body", "body", "dim")]])
-	_on = _block("RangeOn", [[_icon("fan"), _label("on_name", "body", "caption", "accent")],
+	_on = _block("RangeOn", [[_icon("warn", "warn"), _icon("fan"), _label("on_name", "body", "caption", "accent")],
 		[_label("on_value", "display", "display", "accent"), _label("on_unit", "body", "title", "accent")]])
 	_off = _block("RangeOff", [[_icon("fan", "text"), _label("off_name", "body", "caption", "text")],
 		[_label("off_value", "display", "title", "text"), _label("off_unit", "body", "caption", "text")]])
@@ -204,7 +208,9 @@ func _process(_delta: float) -> void:
 
 ## A column of rows of controls laid over the scene: they follow it, so they take no input.
 func _block(block_name: String, rows: Array) -> Dictionary:
-	var box := VBoxContainer.new()
+	# Not a VBoxContainer: a range's label may turn its rows side by side (`_compact`).
+	var box := BoxContainer.new()
+	box.vertical = true
 	box.name = block_name
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.set_meta("gap", 0.0)
@@ -318,12 +324,8 @@ func _restyle() -> void:
 	_override(_l(_battery, "battery_value"), "mainview_text_battery_percentage_value", false)
 	_override(_l(_battery, "battery_unit"), "mainview_text_battery_percentage_unit", false)
 	# The charge sits over the car's lines: a halo of the page's ground keeps it readable.
-	var halo: Color = ThemeManager.c.bg
-	halo.a = 0.85
 	for n in ["battery_name", "battery_value", "battery_unit"]:
-		var l := _l(_battery, n)
-		l.add_theme_color_override("font_outline_color", halo)
-		l.add_theme_constant_override("outline_size", roundi(ThemeManager.px.gap * (0.7 if n == "battery_value" else 0.45)))
+		_halo(_l(_battery, n), n == "battery_value")
 	_l(_battery, "battery_unit").add_theme_color_override("font_color", ThemeManager.c.text)
 	_override(_l(_charger, "charger_value"), "mainview_text_nearyby_station_range_value")
 	_override(_l(_charger, "charger_unit"), "mainview_text_nearyby_station_range_unit")
@@ -332,6 +334,11 @@ func _restyle() -> void:
 	_override(_l(_on, "on_name"), "mainview_text_range_climateon")
 	_override(_l(_on, "on_value"), "mainview_text_climateon_range_value")
 	_override(_l(_on, "on_unit"), "mainview_text_climateon_range_unit")
+	# A halo of the page's ground keeps the ranges readable over the scene.
+	for n in ["on_name", "on_value", "on_unit"]:
+		_halo(_l(_on, n), n == "on_value")
+	for n in ["off_name", "off_value", "off_unit"]:
+		_halo(_l(_off, n), n == "off_value")
 	_l(_off, "off_name").text = _str("off")
 	_override(_l(_off, "off_name"), "mainview_text_range_climateoff")
 	_override(_l(_off, "off_value"), "mainview_text_climateoff_range_value")
@@ -347,10 +354,32 @@ func _restyle() -> void:
 		if _look(DISPLAY_VIEWS[pair[1]]).is_empty():
 			l.add_theme_font_size_override("font_size", numeral_px)
 		_numeral_base[l] = l.get_theme_font_size("font_size")
+	_range_base.clear()
+	for l in [_l(_on, "on_unit"), _l(_off, "off_value"), _l(_off, "off_unit")]:
+		_range_base[l] = l.get_theme_font_size("font_size")
 	_set_tiles()
 	_layout()
 	_bind()
 	queue_redraw()
+
+
+func _halo(l: Label, big: bool) -> void:
+	var halo: Color = ThemeManager.c.bg
+	halo.a = 0.85
+	l.add_theme_color_override("font_outline_color", halo)
+	l.add_theme_constant_override("outline_size", roundi(ThemeManager.px.gap * (0.7 if big else 0.45)))
+
+
+## `c`, or the text colour where `c` is under 4.5:1 on the page's ground (docs/car-ux.md).
+static func readable(c: Color) -> Color:
+	return c if contrast(c, ThemeManager.c.bg) >= 4.5 else ThemeManager.c.text
+
+
+## The WCAG contrast ratio of two colours.
+static func contrast(a: Color, b: Color) -> float:
+	var la := a.srgb_to_linear().get_luminance()
+	var lb := b.srgb_to_linear().get_luminance()
+	return (maxf(la, lb) + 0.05) / (minf(la, lb) + 0.05)
 
 
 ## Takes a pack view's size and color for a label, when the pack has the view.
@@ -372,7 +401,8 @@ func _icon_content(view_id: String, fallback: String) -> Dictionary:
 	return {name = fallback}
 
 
-func _item(view_id: String, text_id: String, fallback_icon: String, fallback_text: String) -> Array:
+## `live`, the car's state, wins over the pack's text and `fallback_text`.
+func _item(view_id: String, text_id: String, fallback_icon: String, fallback_text: String, live := "") -> Array:
 	var out := []
 	if view_id != "":
 		var ic := _icon_content(view_id, fallback_icon)
@@ -381,15 +411,17 @@ func _item(view_id: String, text_id: String, fallback_icon: String, fallback_tex
 		elif fallback_icon != "":
 			out.append({icon = fallback_icon})
 	var v := _view(text_id)
-	out.append({text = str(v.text.string) if v.has("text") else fallback_text})
+	out.append({text = live if live != "" else str(v.text.string) if v.has("text") else fallback_text})
 	return out
 
 
 func _set_tiles() -> void:
+	var tel = Core.get_value("/telemetry")
+	_tile_live = tile_texts(tel if tel is Dictionary else {}, Clock.local())
 	var items := {
-		next_departure = _item("", "mainview_nextDeparture_value_soff", "", STRINGS.not_available),
-		scheduled = _item("mainview_schedule_charging_icon", "mainview_text_scheduled_charging_mode_status", "plug", STRINGS.unknown)
-			+ _item("mainview_schedule_climate_icon", "mainview_text_scheduled_climate_mode_status", "fan", STRINGS.unknown),
+		next_departure = _item("", "mainview_nextDeparture_value_soff", "", STRINGS.not_available, _tile_live.departure),
+		scheduled = _item("mainview_schedule_charging_icon", "mainview_text_scheduled_charging_mode_status", "plug", STRINGS.unknown, _tile_live.charging)
+			+ _item("mainview_schedule_climate_icon", "mainview_text_scheduled_climate_mode_status", "fan", STRINGS.unknown, _tile_live.climate),
 		v2l = _badges(),
 	}
 	var icons := {next_departure = "plug", scheduled = "clock", v2l = "v2l"}
@@ -405,6 +437,52 @@ func _set_tiles() -> void:
 			items = items[id], look = look})
 	_settings.skin_key = str(_view(SETTINGS_VIEW).get("background", "")) if skin else ""
 	_settings.set_content({title = "", items = [], icon = {} if _settings.skin_key != "" else {name = "gear"}})
+
+
+## What the car says for the tap targets: the next departure, scheduled charging and the climate
+## at departure; "" where it has not said.
+static func tile_texts(t: Dictionary, now_local: float) -> Dictionary:
+	var mode = t.get("scheduledChargingMode")
+	var climate = t.get("scheduledClimate")
+	return {
+		departure = next_departure(t, now_local),
+		charging = STRINGS.state_off if mode == "off" else STRINGS.state_on if mode in ChargeCard.WAITING_MODES else "",
+		climate = STRINGS.state_on if climate == true else STRINGS.state_off if climate == false else "",
+	}
+
+
+## The next time an enabled departure timer comes round, "Today 07:30", "Tomorrow 07:30" or
+## "Wed 07:30"; "None set" when the car reports both and neither is on; "" while it has not said.
+## A timer on with no days goes once, at its next time.
+static func next_departure(t: Dictionary, now_local: float) -> String:
+	var now := Time.get_datetime_dict_from_unix_time(int(now_local))
+	var mins: int = now.hour * 60 + now.minute
+	var today: int = (int(now.weekday) + 6) % 7   # Monday 0, as the car's days
+	var best := -1
+	var text := ""
+	var known := 0
+	for k in ["departure1", "departure2"]:
+		var d := EvSettings._departure(t.get(k))
+		if d.is_empty() or d.on == null:
+			continue
+		known += 1
+		if d.on != true or d.hour == null or d.minute == null:
+			continue
+		var days: Array = d.days
+		var any_day := days.has(true)
+		for i in 8:
+			var day := (today + i) % 7
+			var wait: int = i * 1440 + d.hour * 60 + d.minute - mins
+			if wait <= 0 or (any_day and days[day] != true):
+				continue
+			if best < 0 or wait < best:
+				best = wait
+				var at := "%02d:%02d" % [d.hour, d.minute]
+				text = "%s %s" % [STRINGS.today if i == 0 else STRINGS.tomorrow if i == 1 else EvSettings.DAYS[day], at]
+			break
+	if text != "":
+		return text
+	return STRINGS.none_set if known == 2 else ""
 
 
 func _badges() -> Array:
@@ -483,25 +561,27 @@ func _bind() -> void:
 	var low := on_km <= EvScene.LOW_RANGE_KM
 	_l(_on, "on_name").text = range_name
 	_l(_on, "on_name").visible = range_name != ""
-	# Low range says so in an icon as well as the warning color.
+	# Low range says so in an icon as well as the warning color; the fan stays, so the name
+	# reads as the climate's.
+	var warn_icon: TextureRect = (_on.box as Control).find_child("warn", true, false)
+	warn_icon.visible = low
 	var on_icon: TextureRect = (_on.box as Control).find_child("fan", true, false)
-	on_icon.get_meta("icon")[0] = "warn" if low else "fan"
 	on_icon.get_meta("icon")[2] = "warn" if low else "accent"
-	on_icon.visible = low or range_name != ""
+	on_icon.visible = range_name != ""
 	UI.style_icon(on_icon)
-	var warn: Color = ThemeManager.c.warn
+	# The text keeps to a readable colour; the warning is the icon's and the road's.
 	for n in ["on_value", "on_unit", "on_name"]:
 		var l := _l(_on, n)
-		if low:
-			l.add_theme_color_override("font_color", warn)
-		else:
-			l.remove_theme_color_override("font_color")
-			_override(l, {on_value = "mainview_text_climateon_range_value", on_unit = "mainview_text_climateon_range_unit",
-				on_name = "mainview_text_range_climateon"}[n])
+		var look := _look({on_value = "mainview_text_climateon_range_value", on_unit = "mainview_text_climateon_range_unit",
+			on_name = "mainview_text_range_climateon"}[n])
+		l.add_theme_color_override("font_color", ThemeManager.c.text if low else look.get("color", readable(ThemeManager.c.accent)))
 	var t = Core.get_value("/telemetry")
 	_car_status.side = -1.0 if ThemeManager.hand == "rhd" else 1.0
 	_car_status.show_for(t if t is Dictionary else {})
 	_charge_card.show_for(t if t is Dictionary else {})
+	if tile_texts(t if t is Dictionary else {}, Clock.local()) != _tile_live:
+		_set_tiles()
+		_layout()
 	_show_charger = stop_km >= 0.0
 	if _show_charger:
 		var d := Units.distance(stop_km)
@@ -609,6 +689,10 @@ func _place() -> void:
 	var floor_y := _title.position.y + _title.size.y
 	var bounds := Rect2(edge, floor_y, w - 2.0 * edge, maxf(room_bottom - floor_y, 1.0))
 	# The numerals give way when the blocks would not fit between the title and the targets.
+	for l in _range_base:
+		l.add_theme_font_size_override("font_size", _range_base[l])
+	for b in [_on, _off]:
+		_compact(b, false)
 	var now := _numeral_base.duplicate()
 	for _i in 3:
 		for l in now:
@@ -675,26 +759,58 @@ func _place() -> void:
 	if _show_charger:
 		_clear(ch, placed, bounds)
 		placed.append(Rect2(ch.position, ch.size))
+	# The ranges keep off the road: their numerals are the road's colours.
+	var road: PackedVector2Array = _scene.road_polygon()
+	for i in road.size():
+		road[i] -= get_global_rect().position
 	var off: Control = _off.box
 	off.visible = _show_off
-	var off_y: float = (a.off as Vector2).y + gap * 0.7
-	if off_y + off.size.y > room_bottom:
-		off_y = (a.off_far as Vector2).y - gap - off.size.y
-	off.position = Vector2(a.off.x + gap * LABEL_GAP * side - (off.size.x if side < 0 else 0.0), off_y)
-	_fit_in(off, bounds)
-	if _show_off:
-		_clear(off, placed, bounds)
-		placed.append(Rect2(off.position, off.size))
 	var on: Control = _on.box
 	on.visible = _show_on
-	var on_y: float = (a.on as Vector2).y + gap * 6.5
-	var above: bool = on_y + on.size.y > room_bottom
-	if above:
-		on_y = (a.on_far as Vector2).y - gap * 1.5 - on.size.y
-	on.position = Vector2(a.on.x + gap * LABEL_GAP * side - (on.size.x if side > 0 else 0.0), on_y)
-	_fit_in(on, bounds)
+	var off_spots := func(sz: Vector2) -> Array:
+		var x: float = a.off.x + gap * LABEL_GAP * side - (sz.x if side < 0 else 0.0)
+		var span := _road_span(road, x, x + sz.x)
+		return [Vector2(x, maxf((a.off as Vector2).y, span.y) + gap * 0.7),
+			Vector2(x, minf((a.off_far as Vector2).y, span.x) - gap - sz.y)]
+	var tip := maxf(maxf(a.on.x, a.on_far.x), maxf(a.off.x, a.off_far.x)) if side > 0 \
+		else minf(minf(a.on.x, a.on_far.x), minf(a.off.x, a.off_far.x))
+	# Under the end with a leader; above the far end; just under the road; past its end.
+	var on_spots := func(sz: Vector2) -> Array:
+		var x: float = a.on.x + gap * LABEL_GAP * side - (sz.x if side > 0 else 0.0)
+		var span := _road_span(road, x, x + sz.x)
+		return [Vector2(x, maxf((a.on as Vector2).y + gap * 6.5, span.y + gap * 0.7)),
+			Vector2(x, minf((a.on_far as Vector2).y - gap * 1.5, span.x - gap) - sz.y),
+			Vector2(x, span.y + gap * 0.7),
+			Vector2(tip + gap * LABEL_GAP * side - (0.0 if side > 0 else sz.x),
+				((a.on as Vector2).y + (a.on_far as Vector2).y - sz.y) / 2.0)]
+	var ranges := []
+	if _show_off:
+		ranges.append([_off, off_spots])
 	if _show_on:
-		_clear(on, placed, bounds)
+		ranges.append([_on, on_spots])
+	var before := placed.duplicate()
+	# The far range first, as it was; where the near one then finds no room, the other way round;
+	# where the far one still has none, it goes (the road's paler end still shows it).
+	for attempt in 2:
+		var ok := true
+		for r in ranges:
+			var fits := _place_range(r[0], r[1], placed, bounds, road)
+			ok = ok and fits
+			if not fits and attempt == 1 and r[0] == _off:
+				off.visible = false
+				continue
+			placed.append(Rect2((r[0].box as Control).position, (r[0].box as Control).size))
+		if ok or ranges.size() < 2 or attempt == 1:
+			break
+		placed = before.duplicate()
+		ranges.reverse()
+		for l in _range_base:
+			l.add_theme_font_size_override("font_size", _range_base[l])
+		var v := _l(_on, "on_value")
+		v.add_theme_font_size_override("font_size", now[v])
+		for b in [_on, _off]:
+			_compact(b, false)
+	var above: bool = on.position.y + on.size.y <= (a.on_far as Vector2).y
 	# The leader runs from the road end to the nearest point of the label.
 	var end: Vector2 = a.on_far if above else a.on
 	var r := Rect2(on.position, on.size)
@@ -741,6 +857,95 @@ func _status_in(slot: Rect2) -> bool:
 				return true
 	_car_status.keep(_car_status.wanted())
 	return false
+
+
+## The road's top and bottom (x, y) between `x0` and `x1`; (INF, -INF) where it is not.
+static func _road_span(road: PackedVector2Array, x0: float, x1: float) -> Vector2:
+	var strip := PackedVector2Array([Vector2(x0, -1e5), Vector2(x1, -1e5), Vector2(x1, 1e5), Vector2(x0, 1e5)])
+	var span := Vector2(INF, -INF)
+	for part in Geometry2D.intersect_polygons(strip, road):
+		for p in part:
+			span = Vector2(minf(span.x, p.y), maxf(span.y, p.y))
+	return span
+
+
+static func _over_road(r: Rect2, road: PackedVector2Array) -> bool:
+	var box := PackedVector2Array([r.position, Vector2(r.end.x, r.position.y), r.end, Vector2(r.position.x, r.end.y)])
+	return road.size() >= 3 and not Geometry2D.intersect_polygons(box, road).is_empty()
+
+
+## Inside `bounds`, off the road and clear of the labels placed.
+func _free(r: Rect2, placed: Array[Rect2], bounds: Rect2, road: PackedVector2Array) -> bool:
+	var g := r.grow(ThemeManager.px.gap * 0.5)
+	return bounds.encloses(r) and not placed.any(func(o: Rect2) -> bool: return g.intersects(o)) \
+		and not _over_road(g, road)
+
+
+## The first of `spots` where a label `size` big is free, else the free spot nearest the first
+## within `reach`; null when there is none.
+func _find_clear(size: Vector2, spots: Array, placed: Array[Rect2], bounds: Rect2,
+		road: PackedVector2Array, reach := INF) -> Variant:
+	for p in spots:
+		if is_finite(p.y) and _free(Rect2(p, size), placed, bounds, road):
+			return p
+	var want: Vector2 = spots[0]
+	var step: float = ThemeManager.px.gap * 1.5
+	var best := Vector2.INF
+	var limit := reach * reach
+	var y := bounds.position.y
+	while y + size.y <= bounds.end.y:
+		var x := bounds.position.x
+		while x + size.x <= bounds.end.x:
+			var p := Vector2(x, y)
+			var d := p.distance_squared_to(want)
+			if d <= limit and d < best.distance_squared_to(want) and _free(Rect2(p, size), placed, bounds, road):
+				best = p
+			x += step
+		y += step
+	return best if best.is_finite() else null
+
+
+## Puts a range's label where `spots` (its size to candidate positions) finds room, or near the
+## first; where none has, its number gives way, then its rows go side by side, its number giving
+## way again, to 60 %; then anywhere free; else it is left at the first spot, inside `bounds`.
+func _place_range(block: Dictionary, spots: Callable, placed: Array[Rect2], bounds: Rect2,
+		road: PackedVector2Array) -> bool:
+	var box: Control = block.box
+	var nums: Array[Label] = []
+	for n in box.find_children("*_value", "Label", true, false) + box.find_children("*_unit", "Label", true, false):
+		nums.append(n)
+	var base := nums.map(func(l: Label) -> int: return l.get_theme_font_size("font_size"))
+	var first := Vector2.ZERO
+	var levels := [[false, 1.0], [false, 0.9], [false, 0.8], [true, 1.0], [true, 0.85], [true, 0.7], [true, 0.6]]
+	for k in levels.size():
+		_compact(block, levels[k][0])
+		for i in nums.size():
+			nums[i].add_theme_font_size_override("font_size", maxi(8, roundi(base[i] * levels[k][1])))
+		box.size = box.get_combined_minimum_size()
+		var cands: Array = spots.call(box.size)
+		if k == 0:
+			first = cands[0]
+		var at = _find_clear(box.size, cands, placed, bounds, road, size.x * 0.2)
+		if at == null and k == levels.size() - 1:
+			at = _find_clear(box.size, cands, placed, bounds, road)
+		if at != null:
+			box.position = at
+			return true
+	_compact(block, false)
+	for i in nums.size():
+		nums[i].add_theme_font_size_override("font_size", base[i])
+	box.size = box.get_combined_minimum_size()
+	box.position = Vector2(clampf(first.x, bounds.position.x, maxf(bounds.position.x, bounds.end.x - box.size.x)),
+		clampf(first.y, bounds.position.y, maxf(bounds.position.y, bounds.end.y - box.size.y)))
+	return false
+
+
+## A label's rows one under the other, or side by side (`on`), the name centred on the number.
+func _compact(block: Dictionary, on: bool) -> void:
+	var box: BoxContainer = block.box
+	box.vertical = not on
+	box.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.5) if on else 0)
+	(block.rows[0] as Control).size_flags_vertical = Control.SIZE_SHRINK_CENTER if on else Control.SIZE_FILL
 
 
 ## Keeps a label inside `bounds` as far as it can: it may be too big for them, then it stays at

@@ -3,7 +3,8 @@ name: perf-divider
 # playing. Every frame of the drag the picture, the pill and the cards move together: the picture
 # is the slot, the pill between its edge and the cards and under the finger, the cards' near edge
 # a margin from the picture's, no card over another, and the window's last picture filling the
-# slot rather than letterboxed. A drag only places things: the cards keep their looks until the
+# slot rather than letterboxed; the status bar rides the cards' column, the picture the whole
+# height. A drag only places things: the cards keep their looks until the
 # release fits them, and nothing is asked of the phone until then.
 clock: 2026-11-09T08:30:00
 fixtures:
@@ -97,6 +98,11 @@ steps:
               var got: float = cards.map(func(r): return r.end.x).max() if left else cards.map(func(r): return r.position.x).min()
               if absf(got - near) > 0.5:
                   bad.get_or_add("edge", "%s: the cards' near edge %s, not %s" % [tag, got, near])
+              # The bar rides the cards' column, the picture the panel's whole height.
+              if shell._riding():
+                  var st: Rect2 = shell.get_node("Page/Status").get_global_rect()
+                  if absf(st.position.x - sd.position.x) > 0.5 or absf(st.size.x - sd.size.x) > 0.5 or (s.size.x >= 1.0 and absf(s.size.y - shell.size.y) > 0.5):
+                      bad.get_or_add("bar", "%s: the bar %s over the cards %s, the picture %s" % [tag, st, sd, s])
               # The window's last picture fills the slot, cropped, while the window is not its size.
               if view.texture and s.size.x >= 1.0 and not view.picture_rect().grow(0.5).encloses(Rect2(Vector2.ZERO, view.size)):
                   bad.get_or_add("letterbox", "%s: the picture letterboxed: %s in %s" % [tag, view.picture_rect(), view.size])
@@ -206,10 +212,10 @@ steps:
       var view: WindowView = shell._projection.window
       var configures := func() -> int:
           return Array(FileAccess.get_file_as_string(runner._client_events("org.livi.test.grid")).split("\n")).filter(func(l): return l.begins_with("configure ")).size()
-      # Within a pixel: the app's buffer is in its own scale's pixels.
+      # Within a step of its scale: the app's buffer is in its own scale's whole pixels.
       var whole := func() -> bool:
           var d: Vector2 = (view.picture_rect().size - view.size).abs()
-          return maxf(d.x, d.y) <= 1.0
+          return maxf(d.x, d.y) <= maxf(1.0, Wayland.window_scale(w))
       for i in 120:
           if view.window_id == w and view.texture and whole.call():
               break

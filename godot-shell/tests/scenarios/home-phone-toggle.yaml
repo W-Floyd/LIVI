@@ -43,12 +43,18 @@ steps:
               return "hidden: the tab at %s, not at the edge of %s (slot %s)" % [p, content, slot]
       elif slot.size.x < ThemeManager.px.side - 0.5:
           return "shown: the slot %s" % slot
+      # Shown, a top or bottom bar rides the cards: the picture has the whole height, the bar is
+      # within the cards' column, clear of the picture and the cards.
+      if shell._riding():
+          var st: Rect2 = shell.get_node("Page/Status").get_global_rect()
+          if absf(slot.size.y - shell.size.y) > 0.5 or st.position.x < side.position.x - 0.5 or st.end.x > side.end.x + 0.5 or st.intersects(slot) or st.intersects(cards):
+              return "riding: the bar %s, the side %s, the slot %s, the cards %s" % [st, side, slot, cards]
   - expect_node: { path: Page/Body/Slot, visible: true }
   - screenshot: { name: home-phone-toggle-shown, tolerance: 8 }
   # Drags from each width: [from, to, snapped], in each home layout. The phone's widths are the
-  # snaps (s0 <= s1 <= s2, s1 the default) or none; a release between them takes the nearest,
-  # beyond them the last. The picture first: the cards never take more than half the body nor less
-  # than their column, and by default no more than a third (side by side a half).
+  # snaps (s0 < s1 < s2: a third, a half, two thirds; def the default) or none; a release between
+  # them takes the nearest, beyond them the last. The cards never take less than their column; by
+  # default, the picture first, no more than a third of the body (side by side a half).
   # A tap, a drag inside the slop or up the handle changes nothing; a double tap goes back to the
   # default, hidden too. The phone is asked once per release that changes the slot, with its size,
   # and never mid-drag.
@@ -59,8 +65,7 @@ steps:
         await runner.frames(4)
         var snaps: Array = shell._snaps()
         var full: float = shell.get_node("Page/Body").size.x
-        var most: float = maxf(ThemeManager.px.side, roundf(full * 0.5))
-        if snaps.is_empty() or snaps.any(func(w): return w < ThemeManager.px.side - 0.5 or full - w > most + 0.5 or full - w < ThemeManager.px.side - 0.5):
+        if snaps.size() != 3 or snaps.any(func(w): return w < ThemeManager.px.side - 0.5 or full - w < ThemeManager.px.side - 0.5):
             return "%s: snaps %s of %s" % [layout, snaps, full]
         var own: float = maxf(ThemeManager.px.side, roundf(full * (0.5 if layout == "split" else 1.0 / 3.0)))
         var half: float = snaps.back()
@@ -68,14 +73,14 @@ steps:
             if full - w <= own + 0.5:
                 half = w
                 break
-        var v := {hidden = 0.0, s0 = snaps[0], s1 = half, s2 = snaps.back(), mid01 = (snaps[0] + half) / 2.0 - 10.0,
-            past12 = half + 30.0, near0 = snaps[0] * 0.4, far0 = snaps[0] * 0.6, beyond = full + 200.0, under = -200.0}
+        var v := {hidden = 0.0, s0 = snaps[0], s1 = snaps[1], s2 = snaps[2], def = half, mid01 = (snaps[0] + snaps[1]) / 2.0 - 10.0,
+            past12 = snaps[1] + 30.0, near0 = snaps[0] * 0.4, far0 = snaps[0] * 0.6, beyond = full + 200.0, under = -200.0}
         var areas := func():
             return Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea")
         for row in [["s2", "s0", "s0"], ["s0", "s1", "s1"], ["s1", "s2", "s2"], ["s2", "hidden", "hidden"], ["hidden", "past12", "s1"],
                 ["s1", "mid01", "s0"], ["s0", "near0", "hidden"], ["hidden", "far0", "s0"], ["s0", "beyond", "s2"], ["s2", "under", "hidden"],
                 ["hidden", "tap", "hidden"], ["s1", "tap", "s1"], ["s1", "tiny", "s1"], ["s1", "up", "s1"],
-                ["s0", "double", "s1"], ["s2", "double", "s1"], ["s1", "double", "s1"], ["hidden", "double", "s1"],
+                ["s0", "double", "def"], ["s2", "double", "def"], ["s1", "double", "def"], ["hidden", "double", "def"],
                 ["s0", "slow", "s0"], ["s2", "apart", "s2"], ["hidden", "slow", "hidden"], ["hidden", "apart", "hidden"]]:
             ThemeManager.set_look({home_phone = row[0] != "hidden", home_split = v[row[0]] / full if row[0] != "hidden" else ThemeManager.home_split})
             # Past the last row's taps.

@@ -25,6 +25,12 @@ var phone_name := "":
 		if v != phone_name:
 			phone_name = v
 			_restyle_segments()
+## Narrower in a row: 1 the app's segment its icon alone, 2 both.
+var squeeze := 0:
+	set(v):
+		if v != squeeze:
+			squeeze = v
+			_restyle_segments()
 ## Stacked, icons only: in a status bar column.
 var vertical := false:
 	set(v):
@@ -89,7 +95,8 @@ func _restyle_segments() -> void:
 	for pair in [[_phone, phone_name if phone_name != "" else "Phone", "phone"], [_nav, nav_name if nav_name != "" else "Maps", "pin"]]:
 		var b: Button = pair[0]
 		var on := (b == _phone) == (source == "phone")
-		b.text = "" if vertical else pair[1]
+		var icons := vertical or squeeze >= (1 if b == _nav else 2)
+		b.text = "" if icons else pair[1]
 		b.tooltip_text = pair[1]
 		b.icon = Icons.texture(pair[2], ThemeManager.px.icon)
 		var box := StyleBoxFlat.new()
@@ -110,9 +117,9 @@ func _restyle_segments() -> void:
 		b.add_theme_constant_override("h_separation", roundi(g * 0.5))
 		# As wide as its word, within a few touch targets: a long app name is cut short.
 		var w: float = font.get_string_size(b.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + ThemeManager.px.icon + g * 2.7
-		b.custom_minimum_size = Vector2(h, h) if vertical else Vector2(clampf(ceilf(w), h * 1.6, h * 4.0), h)
-		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER if vertical else HORIZONTAL_ALIGNMENT_LEFT
-		if vertical:
+		b.custom_minimum_size = Vector2(h, h) if icons else Vector2(clampf(ceilf(w), h * 1.6, h * 4.0), h)
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER if icons else HORIZONTAL_ALIGNMENT_LEFT
+		if icons:
 			box.content_margin_left = 0
 			box.content_margin_right = 0
 		elif b == _phone:

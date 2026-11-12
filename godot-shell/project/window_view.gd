@@ -123,7 +123,8 @@ func _check_hold() -> void:
 	if not _releasing or texture == null or size.x <= 0.0:
 		return
 	var t := texture.get_size()
-	if t.x > 0.0 and absf(t.y * size.x / t.x - size.y) <= 1.0:
+	# Within a pixel of the window's own: its buffer is whole pixels at its scale.
+	if t.x > 0.0 and absf(t.y * size.x / t.x - size.y) <= maxf(1.0, size.x / t.x):
 		hold = false
 
 

@@ -49,8 +49,17 @@ steps:
                           return at + "the app is %s at %s, the shell %s (bar shown: %s)" % [w.texture.get_size() if w.texture else null, w.get_global_rect(), sr, status.is_visible_in_tree()]
                       continue
                   var b := status.get_global_rect() if pos != "off" else Rect2()
-                  var on_edge := {off = not status.is_visible_in_tree(), top = b.position.y == sr.position.y and b.size.x == sr.size.x,
-                      bottom = b.end.y == sr.end.y and b.size.x == sr.size.x,
+                  # Home with the picture shown: a top or bottom bar rides the cards' column, as
+                  # wide, and the picture has the whole height.
+                  var riding: bool = shell._riding()
+                  var span := sr
+                  if riding:
+                      span = shell.get_node("Page/Body/Side").get_global_rect()
+                      var slot_r: Rect2 = shell.get_node("Page/Body/Slot").get_global_rect()
+                      if page != "home" or absf(slot_r.size.y - sr.size.y) > 0.5 or slot_r.intersects(b):
+                          return at + "riding: the picture %s beside the bar %s in %s" % [slot_r, b, sr]
+                  var on_edge := {off = not status.is_visible_in_tree(), top = b.position.y == sr.position.y and absf(b.position.x - span.position.x) < 0.5 and absf(b.size.x - span.size.x) < 0.5,
+                      bottom = b.end.y == sr.end.y and absf(b.position.x - span.position.x) < 0.5 and absf(b.size.x - span.size.x) < 0.5,
                       left = b.position.x == sr.position.x and b.size.y == sr.size.y,
                       right = b.end.x == sr.end.x and b.size.y == sr.size.y}
                   if pos != "off" and (not status.is_visible_in_tree() or b.size.x < 1.0 or b.size.y < 1.0) or not on_edge[pos]:
@@ -59,8 +68,16 @@ steps:
                       return at + "the bar is %s, not whole pixels" % b.size
                   var c: Rect2 = shell.content_rect()
                   c.position += sr.position
-                  if c.intersects(b) or not is_equal_approx(c.get_area() + b.get_area(), sr.get_area()):
+                  if not riding and (c.intersects(b) or not is_equal_approx(c.get_area() + b.get_area(), sr.get_area())):
                       return at + "the page's rect %s beside the bar at %s" % [c, b]
+                  # In a row the clock in the bar's middle, while the sides have room for it.
+                  if pos in ["top", "bottom"]:
+                      var row: Control = status.get_child(0)
+                      var mid: Rect2 = row.get_child(1).get_global_rect()
+                      if row.get_child(0).size.x > 0.5 and absf(mid.get_center().x - b.get_center().x) > 1.0:
+                          return at + "the clock at %s, not the middle of the bar %s" % [mid, b]
+                      if row.get_combined_minimum_size().x > b.size.x - status.get_theme_stylebox("panel").get_minimum_size().x + 0.5:
+                          return at + "the bar's row %s wider than the bar %s" % [row.get_combined_minimum_size(), b]
                   if rail and rail.joined != (pos == ("left" if hand == "lhd" else "right")):
                       return at + "the rail joined: %s" % rail.joined
                   # Pages with a top inset span the top, under a bar there, and draw below it.
@@ -70,7 +87,8 @@ steps:
                       if n == status or n is CanvasLayer or (n is CanvasItem and not n.visible):
                           continue
                       if n is Control:
-                          var spans: bool = n.name == "Page" or (pos == "top" and "top_inset" in n)
+                          # Riding, the body and the cards' column run under the bar, their cards not.
+                          var spans: bool = n.name == "Page" or (pos == "top" and "top_inset" in n) or (riding and n.name in ["Body", "Side", "PhoneHandle"])
                           var g: Rect2 = n.get_global_rect()
                           # A label's box runs past its glyphs, as the settings header's always has.
                           if n is Label:

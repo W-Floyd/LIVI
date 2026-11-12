@@ -16,6 +16,13 @@ var phone := "":
 	set(v):
 		phone = v
 		if _phone: _phone.text = v
+## Too narrow for everything (riding home's cards): the outside temperature goes first.
+var narrow := false:
+	set(v):
+		narrow = v
+		if _temp_item and not vertical():
+			_temp_item.visible = not v
+
 ## The room the slot toggle takes in place of the phone's name; zero: the name.
 var source_size := Vector2.ZERO:
 	set(v):
@@ -64,6 +71,7 @@ var _clock: Label
 var _outside: Label
 var _phone: Label
 var _phone_item: Control
+var _temp_item: Control
 ## The phone's signal: on the slot toggle's phone side while it shows in a row.
 var _bars: Control
 var _charge: Label
@@ -101,16 +109,15 @@ func _arrange() -> void:
 		_phone.clip_text = false
 		_phone.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 		_phone_item = UI.hbox([phone_icon, _phone], 0.3)
-		add_child(UI.hbox([
-			_clock,
-			UI.hbox([temp, _outside], 0.3),
-			UI.spacer(),
-			_phone_item,
-			_slot(),
-			bars,
-			UI.hbox([_charge_icon, _charge], 0.3),
-		], 1.5))
+		_temp_item = UI.hbox([temp, _outside], 0.3)
+		# The clock in the middle: the sides share what is left alike, until the right one's
+		# items want more.
+		var right := UI.hbox([_phone_item, _slot(), bars, UI.hbox([_charge_icon, _charge], 0.3)], 1.5)
+		right.alignment = BoxContainer.ALIGNMENT_END
+		right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		add_child(UI.hbox([UI.spacer(), UI.hbox([_clock, _temp_item], 1.0), right], 1.5))
 		_charge.get_parent().visible = charge_shown
+		_temp_item.visible = not narrow
 		_show_source()
 		return
 	for l in [_clock, _outside, _phone, _charge]:
@@ -123,7 +130,7 @@ func _arrange() -> void:
 	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(UI.vbox([
 		_clock,
-		UI.vbox([temp, _outside], 0.2),
+		_temp_vbox(temp),
 		gap,
 		_phone_vbox(phone_icon),
 		_slot(),
@@ -132,6 +139,11 @@ func _arrange() -> void:
 	], 1.2))
 	_charge.get_parent().visible = charge_shown
 	_show_source()
+
+
+func _temp_vbox(icon: Control) -> Control:
+	_temp_item = UI.vbox([icon, _outside], 0.2)
+	return _temp_item
 
 
 func _phone_vbox(icon: Control) -> Control:

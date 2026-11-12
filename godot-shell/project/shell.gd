@@ -158,6 +158,8 @@ func _init() -> void:
 	var side := MarginContainer.new()
 	side.name = "Side"
 	side.clip_contents = true
+	# Riding the cards, the status bar follows their column as it sorts.
+	side.item_rect_changed.connect(func(): _place_status())
 	var panel := HomeCards.new()
 	panel.name = "Panel"
 	for pair in [["Stat", StatTile], ["Precondition", ToggleRow], ["Stop", StopCard], ["Player", MiniPlayer]]:
@@ -349,6 +351,9 @@ func content_rect() -> Rect2:
 
 func _rect_beside_status() -> Rect2:
 	var r := Rect2(Vector2.ZERO, size)
+	# Riding the cards, the bar takes from their column only (its margin), not the body.
+	if _riding():
+		return r
 	var t := _status_thickness()
 	match _status.edge:
 		"bottom":
@@ -373,10 +378,66 @@ func _status_thickness() -> float:
 	return ceilf(m.x) if _status.vertical() else floorf(m.y)
 
 
+## Home with the picture shown and the bar along the top or the bottom: the bar rides the cards'
+## column, over or under them, and the picture has the panel's whole height. Left, right or off,
+## the picture had it already.
+func _riding() -> bool:
+	return _status != null and _page_name == "home" and _split_to < 1.0 and _status.edge in ["top", "bottom"]
+
+
+## Riding: the bar over the cards' column, as wide; where its row does not fit, the outside
+## temperature goes, then the slot toggle's words (`_status_tight`).
+func _place_status() -> void:
+	if not _riding() or _placing_status:
+		return
+	_placing_status = true
+	var t := _status_thickness()
+	var side := _side.get_rect()
+	_status.position = Vector2(_body.position.x + side.position.x, 0.0 if _status.edge == "top" else size.y - t)
+	_status.size = Vector2(side.size.x, t)
+	# Measured with the toggle's widths at each squeeze, whatever it shows now, so the choice
+	# does not flip: the temperature goes, then the toggle's names are cut, then it is icons.
+	var rest := func() -> float: return _status.get_combined_minimum_size().x - _status.source_size.x
+	_status.narrow = false
+	var level := 0
+	if _source_in_bar:
+		_status.narrow = rest.call() + _source_widths[0] > side.size.x
+		while level < 2 and rest.call() + _source_widths[level] > side.size.x:
+			level += 1
+	else:
+		_status.narrow = rest.call() > side.size.x
+	if level != _status_tight:
+		_status_tight = level
+		_update_source()
+	_placing_status = false
+
+
+## Riding, how far the slot toggle is squeezed (SourceToggle.squeeze) to fit the bar's row.
+var _status_tight := 0
+var _placing_status := false
+## The slot toggle's width at each squeeze.
+var _source_widths: Array[float] = [0.0, 0.0, 0.0]
+
+
+## The cards' margins: a band for the slot toggle with the bar off, room for the bar riding them.
+func _side_margins(band: float) -> void:
+	var m := roundi(ThemeManager.px.gap * 1.5)
+	var t := roundi(_status_thickness()) if _riding() else 0
+	var top := m + (t if _status.edge == "top" else 0)
+	var bottom := m + roundi(band) + (t if _status.edge == "bottom" else 0)
+	if _side.get_theme_constant("margin_top") != top or _side.get_theme_constant("margin_bottom") != bottom:
+		_side.add_theme_constant_override("margin_top", top)
+		_side.add_theme_constant_override("margin_bottom", bottom)
+		_fit.call_deferred()
+
+
 ## Puts the status bar on its edge and the body in the rest, and the open page with it.
 func _layout_status() -> void:
 	if _status == null:
 		return
+	if not _riding():
+		_status.narrow = false
+		_status_tight = 0
 	var t := _status_thickness()
 	const PRESETS := {top = Control.PRESET_TOP_WIDE, bottom = Control.PRESET_BOTTOM_WIDE, left = Control.PRESET_LEFT_WIDE, right = Control.PRESET_RIGHT_WIDE, off = Control.PRESET_TOP_WIDE}
 	_status.visible = _status.edge != "off"
@@ -398,6 +459,11 @@ func _layout_status() -> void:
 	_body.offset_top = r.position.y
 	_body.offset_right = r.end.x - size.x
 	_body.offset_bottom = r.end.y - size.y
+	if _riding():
+		_status.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		_place_status()
+		_place_status.call_deferred()
+	_update_source()
 	if _page:
 		_fit_page(_page)
 	_place_next_frame()
@@ -745,27 +811,24 @@ func _update_split() -> void:
 	_update_source()
 
 
-## The phone's widths home snaps to: about a half and two thirds of the body, none narrower
-## than the cards' column nor leaving the cards less than it. Android Auto takes any area (a phone
-## that refuses one is letterboxed), so the cards set the limits. The picture comes first: the
-## cards never take more than half the body (SIDE_MOST), and on their own (`_phone_width` with no
-## choice in the look) no more than SIDE_SHARE (side by side SIDE_SHARE_SPLIT).
+## The phone's widths home snaps to: about a third, a half and two thirds of the body, none
+## narrower than the cards' column nor leaving the cards less than it. Android Auto takes any
+## area (a phone that refuses one is letterboxed), so the cards set the limits. The picture comes
+## first on its own: with no choice in the look (`_phone_width`) the cards take no more than
+## SIDE_SHARE (side by side SIDE_SHARE_SPLIT).
 func _snaps() -> Array[float]:
 	var full := _rect_beside_status().size.x
-	var side: float = ThemeManager.px.side
-	var lo := maxf(side, full - maxf(side, roundf(full * SIDE_MOST)))
-	var hi := maxf(lo, full - side)
+	var lo: float = ThemeManager.px.side
+	var hi := maxf(lo, full - lo)
 	var out: Array[float] = []
-	for f in [0.5, 2.0 / 3.0]:
+	for f in [1.0 / 3.0, 0.5, 2.0 / 3.0]:
 		var w := roundf(clampf(full * f, lo, hi))
 		if out.is_empty() or w - out.back() >= ThemeManager.px.touch:
 			out.append(w)
 	return out
 
 
-## The most of home's body the cards take beside the picture: at all, and by default in each
-## layout.
-const SIDE_MOST := 0.5
+## The most of home's body the cards take beside the picture by default, in each layout.
 const SIDE_SHARE := 1.0 / 3.0
 const SIDE_SHARE_SPLIT := 0.5
 
@@ -807,9 +870,12 @@ func _resplit() -> void:
 func _slide(want: float, to: float) -> void:
 	if want == _split_to and is_equal_approx(to, _side_to):
 		return
+	var rode := _riding()
 	_split_to = want
 	_side_to = to
 	_slides += 1
+	if _riding() != rode:
+		_layout_status()
 	if _split_tween:
 		_split_tween.kill()
 		_split_tween = null
@@ -858,6 +924,7 @@ func _set_side(w: float) -> void:
 	cards.wide = roundf(_split) if moving else _split
 	cards.column = maxf(0.0, (w if moving and cards.wide == 0.0 else lerpf(minf(w, least), ThemeManager.px.side, _split)) - m)
 	_place_handle()
+	_place_status()
 	_place_source()
 	if app_keyboard:
 		_place_keyboard()
@@ -1079,13 +1146,14 @@ func _update_source() -> void:
 	_source.visible = shown and _page_name == "home"
 	_source_in_bar = _source.visible and ThemeManager.status_position != "off"
 	_source.vertical = _source_in_bar and _status.vertical()
+	for i in 3:
+		_source.squeeze = i
+		_source_widths[i] = _source.get_combined_minimum_size().x
+	_source.squeeze = _status_tight if _source_in_bar and _riding() else 0
 	_status.source_size = _source.get_combined_minimum_size() if _source_in_bar else Vector2.ZERO
 	var band := shown and ThemeManager.status_position == "off"
 	var m := roundi(ThemeManager.px.gap * 1.5)
-	var bottom := m + (roundi(_source.get_combined_minimum_size().y) + m if band else 0)
-	if _side.get_theme_constant("margin_bottom") != bottom:
-		_side.add_theme_constant_override("margin_bottom", bottom)
-		_fit.call_deferred()
+	_side_margins(_source.get_combined_minimum_size().y + m if band else 0.0)
 	_place_source()
 	_place_source.call_deferred()
 
@@ -1230,7 +1298,9 @@ func _fit() -> void:
 		- _side.get_theme_constant("margin_top") - _side.get_theme_constant("margin_bottom")
 	# Telemetry refits several times a second, mostly with nothing the fit reads changed; a refit
 	# restyles every card twice over.
-	var key := [room, _side.size, panel.size, dashboard, wanted, panel.side_by_side, _source.visible, _source.get_combined_minimum_size(),
+	# Widths only: the room is the height, and the side's own runs past it while the cards that
+	# made it too tall wait for this fit.
+	var key := [room, _side.size.x, panel.size.x, dashboard, wanted, panel.side_by_side, _source.visible and not _source_in_bar, Vector2.ZERO if _source_in_bar else _source.get_combined_minimum_size(),
 		_stat.value, _stat.unit, _stat.sub_label, _stat.sub_value, _stat.icon_name,
 		_precondition.label, _precondition.short_label, _precondition.detail, _stop.stop,
 		_player.title, _player.artist, _player.album, _player.initials, _player.show_position, _player.art,

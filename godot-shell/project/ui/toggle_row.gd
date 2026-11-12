@@ -24,7 +24,8 @@ var trailing: Control:
 			_style()
 
 ## One line, a touch target high: the label (`short_label` where set) without the detail, for
-## home when the full row has no room.
+## home when the full row has no room. A full row too shows `short_label` where `label` would be
+## cut.
 var compact := false:
 	set(v):
 		if v != compact:
@@ -128,6 +129,12 @@ func _style() -> void:
 		trailing.size = t
 		trailing.position = Vector2(size.x - m - t.x, (size.y - t.y) * 0.5).round()
 		row.offset_right = -(m + t.x + ThemeManager.px.gap)
+	# The short label whole rather than the long one cut.
+	if not compact and short_label != "":
+		var f: Font = _label.get_theme_font("font")
+		var room: float = size.x + row.offset_right - row.offset_left - _icon.get_combined_minimum_size().x - row.get_theme_constant("separation")
+		if f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, _label.get_theme_font_size("font_size")).x > room:
+			_label.text = short_label
 	# Foreground follows the state: on-accent over the accent fill.
 	var on := button_pressed
 	_label.add_theme_color_override("font_color", ThemeManager.c.on_accent if on else ThemeManager.c.text)

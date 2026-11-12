@@ -24,6 +24,7 @@ var car := "auto"             # auto | procedural: the EV page's car, a model wh
 var quality := "normal"        # normal | low: what the 3D pages may spend (PLAN.md, "Quality profiles")
 var home_phone := true         # whether home shows the phone's picture beside its cards
 var home_split := 0.0          # the phone's share of home's width, snapped (Shell._snaps); 0: a half
+var home_layout := "cards"     # cards | split: home's cards stacked, or the battery a column beside the media card (HomeCards.side_by_side)
 var status_position := "top"   # top | bottom | left | right: the panel edge the status bar runs along; off: none
 var volume_style := "card"    # card | glow: the volume overlay, a card with the level, or a line along the bottom
 var ev_page := "auto"          # auto | image | live: which "Electric vehicle" page `ev` opens
@@ -36,7 +37,7 @@ var home_source := "phone"     # phone | nav: what home's slot shows while both 
 var home_swipe := "off"        # off | left | right | top | bottom: the panel edge a swipe in from goes home (EdgeSwipe)
 
 ## The driver's choices that `save_look` keeps; `look_file` is where ("" keeps nothing: tests).
-const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "home_phone", "home_split", "status_position", "app_scale", "app_scales", "app_window_modes", "rail_order", "nav_app", "home_source", "home_swipe"]
+const SAVED := ["theme_name", "appearance_mode", "hand", "near", "text_scale", "material", "reduced_motion", "quality", "ev_page", "volume_style", "home_phone", "home_split", "home_layout", "status_position", "app_scale", "app_scales", "app_window_modes", "rail_order", "nav_app", "home_source", "home_swipe"]
 var look_file := ""
 ## The resolved look for apps the shell hosts, rewritten on every change (`write_tokens`); "" writes
 ## none. Beside `look_file`.
@@ -175,7 +176,7 @@ func defaults() -> void:
 	# Scenarios and the live tuner get a fixed look: the core's night (a fake core's default) does
 	# not repaint them. A theme step with appearance_mode "auto" opts back in.
 	appearance_mode = "day"
-	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto", volume_style = "card", home_phone = true, home_split = 0.0, status_position = "top", app_scale = 0, app_scales = {}, app_window_modes = {}, rail_order = [], nav_app = "", home_source = "phone"})
+	set_look({theme_name = "instrument", appearance = "day", hand = "lhd", near = "projection", text_scale = 1.0, material = "solid", reduced_motion = false, quality = "normal", car = "procedural", ev_page = "auto", volume_style = "card", home_phone = true, home_split = 0.0, home_layout = "cards", status_position = "top", app_scale = 0, app_scales = {}, app_window_modes = {}, rail_order = [], nav_app = "", home_source = "phone"})
 
 
 ## The "Electric vehicle" page `ev` stands for: the look's choice, else the theme's own

@@ -1,6 +1,6 @@
 class_name ArtView
 extends Control
-## A cover, cropped square and centred in the rect, in rounded corners; without one, the theme's placeholder with a
+## A cover, cropped square and centred in the rect (or to fill it, `fill_rect`), in rounded corners; without one, the theme's placeholder with a
 ## note. A new cover fades in over the old unless motion is reduced.
 
 const FADE_S := 0.25
@@ -27,6 +27,11 @@ var fill := Color(0, 0, 0, 0):
 	set(v):
 		fill = v
 		queue_redraw()
+## The whole rect, the cover cropped to fill it, rather than a square in it.
+var fill_rect := false:
+	set(v):
+		fill_rect = v
+		_shape()
 var radius := -1.0:
 	set(v):
 		radius = v
@@ -101,6 +106,8 @@ func _draw() -> void:
 
 ## Where it draws: the largest square centred in the rect, so a stretched rect never stretches it.
 func square() -> Rect2:
+	if fill_rect:
+		return Rect2(Vector2.ZERO, size)
 	var side := minf(size.x, size.y)
 	return Rect2(((size - Vector2(side, side)) / 2.0).round(), Vector2(side, side))
 
@@ -111,7 +118,7 @@ func _draw_one(t: Texture2D, alpha: float) -> void:
 		var ground: Color = fill if fill.a > 0.0 else ThemeManager.c.surface2.lerp(ThemeManager.c.accent, 0.15)
 		ground.a *= alpha
 		draw_rect(r, ground)
-		var side := r.size.x
+		var side := minf(r.size.x, r.size.y)
 		if initials != "":
 			var font: Font = ThemeManager.fonts.display
 			var fs := roundi(side * 0.36)
@@ -125,8 +132,8 @@ func _draw_one(t: Texture2D, alpha: float) -> void:
 		col.a *= alpha
 		draw_texture_rect(note, Rect2(r.get_center() - Vector2(s, s) / 2.0, Vector2(s, s)), false, col)
 		return
-	# Cover: the middle square of the image.
+	# Cover: the middle of the image in the rect's shape.
 	var ts := t.get_size()
-	var m := minf(ts.x, ts.y)
-	var src := Rect2((ts - Vector2(m, m)) / 2.0, Vector2(m, m))
+	var k := minf(ts.x / r.size.x, ts.y / r.size.y) if r.size.x > 0.0 and r.size.y > 0.0 else 1.0
+	var src := Rect2((ts - r.size * k) / 2.0, r.size * k)
 	draw_texture_rect_region(t, r, src, Color(1, 1, 1, alpha))

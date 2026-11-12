@@ -293,6 +293,9 @@ func _style() -> void:
 	cards.gap = roundi(g * 1.5)
 	cards.column = ThemeManager.px.side - roundi(g * 1.5) * 2
 	cards.column_left = ThemeManager.side_left()
+	cards.driver_left = _driver_left()
+	cards.side_by_side = ThemeManager.home_layout == "split"
+	_stat.vertical = cards.side_by_side
 	_body.move_child(_side, 0 if ThemeManager.side_left() else 1)
 	_resplit()
 	_place_handle.call_deferred()
@@ -1022,6 +1025,12 @@ func _place_source() -> void:
 	var s := _source.get_combined_minimum_size()
 	s.x = minf(s.x, side.size.x - m * 2.0)
 	var x := side.end.x - m - s.x if ThemeManager.side_left() else side.position.x + m
+	var panel: HomeCards = _side.get_node("Panel")
+	# Side by side: under the media column, from its edge.
+	if panel.side_by_side and panel.below > 0.0:
+		var col := panel.side_column()
+		s.x = minf(s.x, col.y)
+		x = panel.global_position.x + col.x
 	_source.size = s
 	_source.global_position = Vector2(x, side.end.y - m - s.y).round()
 	# Precondition, one line, at the band's other end when the cards had no room for it.
@@ -1083,6 +1092,33 @@ func _show_charge() -> void:
 	_status.charge_shown = not _stat.is_visible_in_tree()
 
 
+## Side by side: Precondition one line in the battery column's foot (its icon where its words
+## don't fit), the column down beside the Phone | <app> pill, as wide as its widest part.
+func _fit_side_by_side(panel: HomeCards, fits: Callable, inside: Callable) -> void:
+	_precondition.compact = true
+	inside.call(_precondition.visible)
+	var pad: float = _stat.get_theme_stylebox("panel").get_minimum_size().x
+	var widen := func() -> void:
+		panel.host_width = ceilf(maxf(ThemeManager.px.touch * HOST_TOUCH, maxf(_stat.get_combined_minimum_size().x, _precondition.compact_width(false) + pad)))
+		_precondition.icon_only = _precondition.compact_width(true) + pad > panel.host_width
+		panel.sync_foot()
+	widen.call()
+	# The media card's controls want the width: the battery's type smaller first.
+	var narrow := func() -> bool: return panel.side_column().y - _player.get_theme_stylebox("panel").get_minimum_size().x < _player._buttons_width(2, ThemeManager.px.touch)
+	if narrow.call():
+		_stat.compact = true
+		widen.call()
+	# Under the media column where it fits there, else across the foot as in the stack.
+	if _source.visible and _source.get_combined_minimum_size().x <= panel.side_column().y:
+		panel.below = _side.get_theme_constant("margin_bottom") - roundf(ThemeManager.px.gap * 1.5)
+	if not fits.call():
+		_stat.compact = true
+
+
+## The battery column's least width side by side, in touch targets.
+const HOST_TOUCH := 2.6
+
+
 ## Shows every item that has content, then drops the least important until the rest fit.
 func _fit() -> void:
 	if not _body.is_visible_in_tree():
@@ -1098,7 +1134,7 @@ func _fit() -> void:
 		- _side.get_theme_constant("margin_top") - _side.get_theme_constant("margin_bottom")
 	# Telemetry refits several times a second, mostly with nothing the fit reads changed; a refit
 	# restyles every card twice over.
-	var key := [room, _side.size, panel.size, dashboard, wanted, _source.visible, _source.get_combined_minimum_size(),
+	var key := [room, _side.size, panel.size, dashboard, wanted, panel.side_by_side, _source.visible, _source.get_combined_minimum_size(),
 		_stat.value, _stat.unit, _stat.sub_label, _stat.sub_value, _stat.icon_name,
 		_precondition.label, _precondition.short_label, _precondition.detail, _stop.stop,
 		_player.title, _player.artist, _player.album, _player.initials, _player.show_position, _player.art,
@@ -1123,22 +1159,26 @@ func _fit() -> void:
 	inside.call(false)
 	_stat.compact = false
 	_player.allow_two_rows = true
+	panel.below = 0.0
+	if panel.side_by_side:
+		_fit_side_by_side(panel, fits, inside)
 	# Nothing playing, the media card is the first to go.
-	if not fits.call() and not _player.has_content():
+	if not fits.call() and not _player.has_content() and not panel.side_by_side:
 		_player.visible = false
 		left_out.append("Player")
-	if not fits.call() and _precondition.visible:
+	if not fits.call() and _precondition.visible and not panel.side_by_side:
 		inside.call(true)
 	if not fits.call() and _precondition.visible:
 		_precondition.compact = true
 		panel.sync_foot()
-	if not fits.call() and _precondition.visible and _band_room() != "":
+	if not fits.call() and _precondition.visible and _band_room() != "" and not panel.side_by_side:
 		inside.call(false)
 		_precondition.icon_only = _band_room() == "icon"
 		_precondition.top_level = true
 	if not fits.call():
 		_stat.compact = true
-	if not fits.call() and _player._choose()[0] == "two":
+	# Side by side the media card has its column whatever the battery's needs.
+	if not fits.call() and _player._choose()[0] == "two" and not panel.side_by_side:
 		_player.allow_two_rows = false
 	_place_source()
 	var order := PRIORITY.duplicate()

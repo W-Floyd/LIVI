@@ -1194,6 +1194,8 @@ func _look_rows() -> Array:
 		_look_choice("app_scale", "App size", [[0, "Auto (%d %%)" % Launcher.auto_scale()]] + Launcher.SCALES.map(func(p): return [p, "%d %%" % p]),
 			"Apps from the launcher; hold an app's tile for its own"),
 		{key = "home_phone", kind = "switch", label = "Phone on home", detail = "Android Auto, CarPlay or the navigation app beside the cards", checked = ThemeManager.home_phone, enabled = true},
+		_look_choice("home_layout", "Home layout", [["cards", "Cards"], ["split", "Side by side"]],
+			"Side by side: the battery a column beside the media card"),
 		_look_choice("nav_app", "Navigation app", _nav_apps(), "On home beside the phone, and usable while driving"),
 		_look_choice("status_position", "Status bar", [["top", "Top"], ["bottom", "Bottom"], ["left", "Left"], ["right", "Right"], ["off", "Off"]]),
 		_look_choice("home_swipe", "Swipe home", [["off", "Off"], ["left", "Left"], ["right", "Right"], ["top", "Top"], ["bottom", "Bottom"]],

@@ -28,14 +28,16 @@ steps:
           return "the cover was not decoded"
       await runner.frames(3)
   # Rows: the phone's share of home (0: hidden; else snapping to 680, 912 and 1117 px), the
-  # status bar's edge, text scale, hand, and the media card's layout.
+  # status bar's edge, text scale, hand, the media card's layout, and home's layout (cards unless
+  # given). In every one no card is over another.
   - gdscript: &rows |
       var rows := [
           [0.0, "top", 1.0, "lhd", "wide"],
           [0.0, "left", 1.0, "lhd", "wide"],
           [0.0, "bottom", 1.3, "rhd", "wide"],
           [0.0, "right", 1.6, "rhd", "wide"],
-          [0.37, "top", 1.0, "lhd", "tall"],
+          [0.37, "top", 1.0, "lhd", "wide"],
+          [0.37, "top", 1.0, "rhd", "wide"],
           [0.37, "left", 1.0, "lhd", "one"],
           [0.37, "top", 1.3, "rhd", "one"],
           [0.5, "top", 1.0, "lhd", "one"],
@@ -46,15 +48,22 @@ steps:
           [0.62, "right", 1.0, "rhd", "two"],
           [0.62, "top", 1.3, "rhd", "one"],
           [0.37, "left", 1.6, "lhd", "two"],
+          [0.0, "top", 1.0, "lhd", "wide", "split"],
+          [0.37, "top", 1.0, "rhd", "wide", "split"],
+          [0.5, "left", 1.0, "lhd", "cover", "split"],
+          [0.62, "top", 1.0, "lhd", "cover", "split"],
+          [0.62, "bottom", 1.3, "rhd", null, "split"],
+          [0.5, "top", 1.6, "lhd", null, "split"],
       ]
       var panel = shell.get_node("Page/Body/Side/Panel")
       var player = panel.get_node("Player")
       var stat: Control = panel.get_node("Stat")
       var bad := PackedStringArray()
       for r in rows:
-          ThemeManager.set_look({home_phone = r[0] > 0.0, home_split = r[0], status_position = r[1], text_scale = r[2], hand = r[3]})
+          var split: bool = r.size() > 5 and r[5] == "split"
+          ThemeManager.set_look({home_phone = r[0] > 0.0, home_split = r[0], status_position = r[1], text_scale = r[2], hand = r[3], home_layout = "split" if split else "cards"})
           await runner.frames(6)
-          var label := "share %s, status %s, text %s, %s" % [r[0], r[1], r[2], r[3]]
+          var label := "share %s, status %s, text %s, %s%s" % [r[0], r[1], r[2], r[3], ", split" if split else ""]
           var prev: Control = player.find_child("Previous", true, false)
           var pr: Rect2 = player.get_global_rect()
           var sr: Rect2 = stat.get_global_rect()
@@ -63,16 +72,36 @@ steps:
               bad.append("%s: %s, want %s" % [label, player.layout, r[4]])
           if player.layout != player._choose()[0]:
               bad.append("%s: %s, its room picks %s" % [label, player.layout, player._choose()[0]])
-          # Every card but the media card at its own height.
+          # Every card but the media card (and side by side the battery's column) at its own height.
+          var rects := []
           for c in panel.get_children():
-              if c != player and c.visible and not c.top_level and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
+              if c != player and c.visible and not c.top_level and not (split and c == stat) and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
                   bad.append("%s: %s stretched to %d" % [label, c.name, c.size.y])
+              if c.visible and c != panel.foot:
+                  for o in rects:
+                      if o[1].grow(-0.5).intersects(c.get_global_rect().grow(-0.5)):
+                          bad.append("%s: %s %s over %s %s" % [label, c.name, c.get_global_rect(), o[0], o[1]])
+                  rects.append([c.name, c.get_global_rect()])
+          # Beside each other, the media card on the driver's side.
+          if stat.visible and (sr.end.x <= pr.position.x or pr.end.x <= sr.position.x) and (pr.position.x < sr.position.x) != (r[3] == "lhd"):
+              bad.append("%s: the media card %s not on the driver's side of the battery %s" % [label, pr, sr])
+          # Side by side: the battery a column the panel's height (and under it beside the pill),
+          # the media card the rest of the width; Precondition, if shown, in the battery's foot.
+          if split and stat.visible:
+              var cr: Rect2 = panel.get_global_rect()
+              if absf(sr.position.y - cr.position.y) > 1.0 or absf(sr.end.y - cr.end.y - panel.below) > 1.0:
+                  bad.append("%s: the battery %s, not the column of %s" % [label, sr, cr])
+              if absf(sr.size.x + player.size.x + panel.gap - cr.size.x) > 1.0:
+                  bad.append("%s: the battery %s and media %s not across %s" % [label, sr, player.get_global_rect(), cr])
+              var pre: Control = panel.get_node("Precondition")
+              if pre.visible and (panel.foot != pre or not sr.encloses(pre.get_global_rect())):
+                  bad.append("%s: Precondition %s outside the battery %s" % [label, pre.get_global_rect(), sr])
           if not player.is_visible_in_tree():
               if player.has_content():
                   bad.append("%s: the media card left out" % label)
               continue
           # The battery card's own part: a row it carries (Precondition) aside.
-          if player.has_content() and stat.visible and pr.get_area() + 1.0 < sr.size.x * (sr.size.y - stat.foot):
+          if player.has_content() and stat.visible and not split and pr.get_area() + 1.0 < sr.size.x * (sr.size.y - stat.foot):
               bad.append("%s: media %s smaller than the battery %s" % [label, pr.size, sr.size])
           var art_view = player.find_child("Art", true, false)
           var sq: Rect2 = art_view.square()
@@ -82,26 +111,30 @@ steps:
           var buttons: Rect2 = player.find_child("Buttons", true, false).get_global_rect()
           if player.layout in ["one", "two"] and (absf(art_view.size.x - art_view.size.y) > 1.0 or absf(art_view.size.y - player.art_side()) > 1.0):
               bad.append("%s: the cover %s, not a square of %d" % [label, art_view.size, player.art_side()])
-          if player.layout in ["wide", "tall"] and sq.size.x < ThemeManager.px.touch * 2.0 - 1.0:
+          if player.layout in ["wide", "tall", "cover"] and sq.size.y < ThemeManager.px.touch * 2.0 - 1.0:
               bad.append("%s: a large card's cover %s" % [label, sq.size])
-          var parts := [art, t, s] + ([buttons] if player.layout != "empty" else [])
+          # Side by side, the cover the card's width.
+          if player.layout == "cover" and absf(art.size.x - (pr.size.x - player.get_theme_stylebox("panel").get_minimum_size().x)) > 1.0:
+              bad.append("%s: the cover %s, not the card's width %s" % [label, art, pr])
+          var controls: bool = player.layout != "empty" and player.has_content()
+          var parts := [art, t, s] + ([buttons] if controls else [])
           for x in parts:
               if not pr.grow(0.5).encloses(x):
                   bad.append("%s: %s out of the card %s" % [label, x, pr])
-          if player.layout != "empty" and (t.intersects(buttons) or s.intersects(buttons) or art.intersects(buttons)):
+          if controls and (t.intersects(buttons) or s.intersects(buttons) or art.intersects(buttons)):
               bad.append("%s: the text or cover under the controls %s" % [label, buttons])
           # Alignment: beside the cover, the text from its top and the controls from the text's
           # edge; under it, the controls centred on the card.
           if player.layout == "wide" and (absf(t.position.y - art.position.y) > 1.0 or absf(buttons.position.x - t.position.x) > 1.0):
               bad.append("%s: cover top %d, title top %d; controls from %d, text from %d" % [label, art.position.y, t.position.y, buttons.position.x, t.position.x])
-          if player.layout in ["tall", "two"]:
+          if player.layout in ["tall", "two", "cover"] and player.has_content():
               var shown_buttons := Rect2()
               for b in player.find_child("Buttons", true, false).get_children():
                   if b.visible:
                       shown_buttons = b.get_global_rect() if shown_buttons.size == Vector2.ZERO else shown_buttons.merge(b.get_global_rect())
               if absf(shown_buttons.get_center().x - pr.get_center().x) > 1.0:
                   bad.append("%s: the controls centred at %d in the card at %d" % [label, shown_buttons.get_center().x, pr.get_center().x])
-      ThemeManager.set_look({home_phone = true, home_split = 0.0, status_position = "top", text_scale = 1.0, hand = "lhd"})
+      ThemeManager.set_look({home_phone = true, home_split = 0.0, status_position = "top", text_scale = 1.0, hand = "lhd", home_layout = "cards"})
       await runner.frames(4)
       if not bad.is_empty():
           return "\n".join(bad)
@@ -118,8 +151,14 @@ steps:
   - screenshot: media-player-tight
   - theme: { home_split: 0.37 }
   - wait: { frames: 4 }
-  - expect_node: { path: Page/Body/Side/Panel/Player, layout: tall }
-  - screenshot: media-player-tall
+  # Two columns: the media card on the driver's side, its cover beside the text.
+  - expect_node: { path: Page/Body/Side/Panel/Player, layout: wide }
+  - screenshot: media-player-columns
+  - theme: { hand: rhd }
+  - wait: { frames: 4 }
+  - screenshot: media-player-columns-rhd
+  - theme: { hand: lhd }
+  - wait: { frames: 4 }
   # The large card's bar seeks, under CarPlay.
   - gdscript: |
       await runner._tap(shell.get_node("Page/Body/Side/Panel/Player").find_child("Seek", true, false).get_global_rect().get_center())
@@ -138,13 +177,19 @@ steps:
       var source: Control = shell.get_node("Page/Source")
       if not source.visible:
           return "no pill with the phone and a navigation app"
-      # share, text scale, hand, Precondition: "row" | "inside row" | "inside compact" | "band" | "none" (no room)
+      # share, text scale, hand, Precondition: "row" | "inside row" | "inside compact" | "band" |
+      # "none" (no room), and home's layout (cards unless given). Side by side the pill sits under
+      # the media card, from its edge, where it fits there.
       var rows := [
           [0.37, 1.0, "lhd", "row"],
           [0.5, 1.0, "lhd", "band"],
           [0.62, 1.0, "lhd", "inside compact"],
           [0.5, 1.0, "rhd", "band"],
           [0.62, 1.3, "lhd", "none"],
+          [0.37, 1.0, "lhd", "inside compact", "split"],
+          [0.5, 1.0, "rhd", "inside compact", "split"],
+          [0.62, 1.0, "lhd", "inside compact", "split"],
+          [0.5, 1.3, "lhd", null, "split"],
       ]
       var panel = shell.get_node("Page/Body/Side/Panel")
       var player = panel.get_node("Player")
@@ -152,9 +197,10 @@ steps:
       var pre = panel.get_node("Precondition")
       var bad := PackedStringArray()
       for r in rows:
-          ThemeManager.set_look({home_split = r[0], text_scale = r[1], hand = r[2]})
+          var split: bool = r.size() > 4 and r[4] == "split"
+          ThemeManager.set_look({home_split = r[0], text_scale = r[1], hand = r[2], home_layout = "split" if split else "cards"})
           await runner.frames(6)
-          var label := "pill, share %s, text %s, %s" % [r[0], r[1], r[2]]
+          var label := "pill, share %s, text %s, %s%s" % [r[0], r[1], r[2], ", split" if split else ""]
           var where: String = "none" if not pre.visible else "band" if pre.top_level else ("inside " if panel.foot == pre else "") + ("compact" if pre.compact else "row")
           print("media-player %s: media %s %s, battery %s, precondition %s, left out %s" % [label, player.layout, player.size, stat.visible, where, shell.left_out])
           if r[3] != null and where != r[3]:
@@ -167,7 +213,7 @@ steps:
           for c in panel.get_children():
               if not c.visible:
                   continue
-              if c != player and not c.top_level and c != panel.foot and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
+              if c != player and not c.top_level and c != panel.foot and not (split and c == stat) and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
                   bad.append("%s: %s at %d, its own height %d" % [label, c.name, c.size.y, c.get_combined_minimum_size().y])
               # A carried row inside its card, clear of the card's own content.
               if c == panel.foot:
@@ -180,13 +226,17 @@ steps:
               rects.append([c.name, c.get_global_rect()])
           if not player.is_visible_in_tree() or not stat.visible:
               bad.append("%s: media %s, battery %s" % [label, player.visible, stat.visible])
+          if split and panel.below > 0.0:
+              var src: Rect2 = source.get_global_rect()
+              if absf(src.position.x - player.get_global_rect().position.x) > 1.0 or absf(src.end.y - stat.get_global_rect().end.y) > 1.0:
+                  bad.append("%s: the pill %s, not under the media card %s to the battery's foot %s" % [label, src, player.get_global_rect(), stat.get_global_rect()])
           if where == "band":
               var pr: Rect2 = pre.get_global_rect()
               var side: Rect2 = shell.get_node("Page/Body/Side").get_global_rect()
               if pr.intersects(source.get_global_rect()) or not side.encloses(pr) or absf(pr.end.y - source.get_global_rect().end.y) > 1.0:
                   bad.append("%s: precondition at %s beside the pill %s in %s" % [label, pr, source.get_global_rect(), side])
       Core.fake_set("nowPlaying/title", "A Remarkably Long Song Title That Goes On")
-      ThemeManager.set_look({nav_app = "", home_split = 0.0, text_scale = 1.0, hand = "lhd"})
+      ThemeManager.set_look({nav_app = "", home_split = 0.0, text_scale = 1.0, hand = "lhd", home_layout = "cards"})
       await runner.frames(4)
       if not bad.is_empty():
           return "\n".join(bad)
@@ -194,6 +244,19 @@ steps:
       ThemeManager.set_look({nav_app = "org.livi.test.grid", home_split = 0.5})
       await runner.frames(6)
   - screenshot: media-player-pill-half
+  # As the unit had it: a route in the slot, 15 %, Precondition with its detail; then side by side.
+  - set: { core: { telemetry: { fuelPct: 15.0, preconditionState: armed } } }
+  - theme: { home_split: 0.37 }
+  - wait: { frames: 6 }
+  - screenshot: media-player-pill-third
+  - theme: { home_split: 0.5, home_layout: split }
+  - wait: { frames: 6 }
+  - screenshot: media-player-split
+  - theme: { home_split: 0.62, hand: rhd }
+  - wait: { frames: 6 }
+  - screenshot: media-player-split-tight-rhd
+  - set: { core: { telemetry: { fuelPct: 50.0, preconditionState: null } } }
+  - theme: { hand: lhd, home_layout: cards }
   - theme: { home_split: 0.62 }
   - wait: { frames: 6 }
   - screenshot: media-player-pill-wide
@@ -206,17 +269,24 @@ steps:
   - expect_node: { path: Page/Body/Side/Panel/Player, layout: empty }
   - screenshot: media-player-nothing-night-rhd
   - gdscript: *rows
+  # Side by side with nothing playing, the media card keeps its column.
+  - theme: { home_phone: false, home_layout: split, appearance: day, hand: lhd }
+  - wait: { frames: 6 }
+  - expect_node: { path: Page/Body/Side/Panel/Player, layout: cover }
+  - screenshot: media-player-split-nothing
   # Every control on home's media card, in every arrangement, sends its action and home stays,
   # with a refit between press and release (the unit's telemetry refits several times a second);
   # a tap on the card's text opens Media.
   - set: { core: { nowPlaying: { title: A Remarkably Long Song Title That Goes On, artist: The Extraordinarily Named Ensemble } } }
   - gdscript: |
       var looks := [
-          {home_phone = false, home_split = 0.0},
-          {home_phone = true, home_split = 0.37},
-          {home_phone = true, home_split = 0.5},
-          {home_phone = true, home_split = 0.62},
-          {home_phone = true, home_split = 0.62, nav_app = "org.livi.test.grid"},
+          {home_phone = false, home_split = 0.0, home_layout = "cards"},
+          {home_phone = true, home_split = 0.37, home_layout = "cards"},
+          {home_phone = true, home_split = 0.5, home_layout = "cards"},
+          {home_phone = true, home_split = 0.62, home_layout = "cards"},
+          {home_phone = true, home_split = 0.62, home_layout = "cards", nav_app = "org.livi.test.grid"},
+          {home_phone = true, home_split = 0.5, home_layout = "split", nav_app = ""},
+          {home_phone = true, home_split = 0.62, home_layout = "split", nav_app = "org.livi.test.grid"},
       ]
       var player = shell.get_node("Page/Body/Side/Panel/Player")
       var mouse := func(at: Vector2, down: bool) -> void:
@@ -259,10 +329,10 @@ steps:
               bad.append("%s, %s: a tap on the title shows %s" % [look, player.layout, shell._page_name])
           shell.open_page("home")
           await runner.frames(4)
-      for l in ["wide", "tall", "one", "two"]:
+      for l in ["wide", "one", "two", "cover"]:
           if not layouts.has(l):
               bad.append("no arrangement gave %s: %s" % [l, layouts.keys()])
-      ThemeManager.set_look({home_phone = true, home_split = 0.0, nav_app = ""})
+      ThemeManager.set_look({home_phone = true, home_split = 0.0, home_layout = "cards", nav_app = ""})
       await runner.frames(4)
       if not bad.is_empty():
           return "\n".join(bad)

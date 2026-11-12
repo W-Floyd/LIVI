@@ -49,6 +49,17 @@ var compact := false:
 		compact = v
 		if _bar: _restyle()
 
+## A narrow column: the value over a bar that fills upward, the secondary value under it (home's
+## split layout).
+var vertical := false:
+	set(v):
+		if v == vertical:
+			return
+		vertical = v
+		if _bar:
+			_arrange()
+			_restyle()
+
 ## Room kept along the card's foot for a row placed over it (home's Precondition, `HomeCards.foot`).
 var foot := 0.0:
 	set(v):
@@ -67,6 +78,8 @@ var _sub_value: Label
 var _bar: Control
 var _fill: Control
 var _foot: Control
+var _number: HBoxContainer
+var _sub: VBoxContainer
 ## The hero's type over the tile's.
 const HERO_SCALE := 1.8
 
@@ -84,10 +97,8 @@ func _build() -> void:
 	lift.add_child(_unit)
 	lift.size_flags_vertical = Control.SIZE_SHRINK_END
 	_icon = UI.icon(icon_name, "icon", "dim")
-	var number := UI.hbox([_icon, _value, lift], 0.3)
-	number.alignment = BoxContainer.ALIGNMENT_BEGIN
-	var sub := UI.vbox([_sub_label, _sub_value], 0)
-	sub.size_flags_vertical = Control.SIZE_SHRINK_END
+	_number = UI.hbox([_icon, _value, lift], 0.3)
+	_sub = UI.vbox([_sub_label, _sub_value], 0)
 	_bar = Control.new()
 	_bar.draw.connect(_draw_bar)
 	_fill = Control.new()
@@ -96,7 +107,28 @@ func _build() -> void:
 	_foot = Control.new()
 	_foot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_foot.visible = false
-	add_child(UI.vbox([UI.hbox([number, UI.spacer(), sub]), _fill, _bar, _foot], 0.6))
+	_arrange()
+
+
+## Into a row with the bar under it, or the column.
+func _arrange() -> void:
+	for n in [_number, _sub, _fill, _bar, _foot]:
+		if n.get_parent():
+			n.get_parent().remove_child(n)
+	for c in get_children():
+		remove_child(c)
+		c.queue_free()
+	var side := HORIZONTAL_ALIGNMENT_CENTER if vertical else HORIZONTAL_ALIGNMENT_RIGHT
+	_sub_label.horizontal_alignment = side
+	_sub_value.horizontal_alignment = side
+	_number.alignment = BoxContainer.ALIGNMENT_CENTER if vertical else BoxContainer.ALIGNMENT_BEGIN
+	_sub.size_flags_vertical = Control.SIZE_SHRINK_END
+	_bar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER if vertical else Control.SIZE_FILL
+	_bar.size_flags_vertical = Control.SIZE_EXPAND_FILL if vertical else Control.SIZE_FILL
+	if vertical:
+		add_child(UI.vbox([_number, _bar, _sub, _foot], 0.6))
+	else:
+		add_child(UI.vbox([UI.hbox([_number, UI.spacer(), _sub]), _fill, _bar, _foot], 0.6))
 
 
 func _style() -> void:
@@ -118,13 +150,22 @@ func _style() -> void:
 	(_unit.get_parent() as MarginContainer).add_theme_constant_override("margin_bottom", roundi(max(0.0, lift)))
 	# Pushes the bar to the hero's foot; nothing (no extra gap) in the column.
 	_fill.visible = hero
-	_bar.custom_minimum_size.y = roundi(ThemeManager.px.gap * (2.0 if hero else 0.8 if compact else 1.2))
+	_bar.custom_minimum_size = Vector2(0, roundi(ThemeManager.px.gap * (2.0 if hero else 0.8 if compact else 1.2)))
+	if vertical:
+		_bar.custom_minimum_size = Vector2(roundi(ThemeManager.px.touch * 0.9), roundi(ThemeManager.px.touch * 1.5))
 	_bar.visible = fraction >= 0.0
 	_bar.queue_redraw()
 
 
 func _draw_bar() -> void:
 	var r := Rect2(Vector2.ZERO, _bar.size)
+	if vertical:
+		var rv := minf(r.size.x / 2.0, ThemeManager.px.radius)
+		_rounded(r, rv, ThemeManager.c.surface2)
+		if fraction > 0.0:
+			var h := maxf(rv * 2.0, r.size.y * clampf(fraction, 0, 1))
+			_rounded(Rect2(r.position.x, r.end.y - h, r.size.x, h), rv, ThemeManager.c.accent)
+		return
 	var radius := r.size.y / 2.0
 	_rounded(r, radius, ThemeManager.c.surface2)
 	if fraction > 0.0:

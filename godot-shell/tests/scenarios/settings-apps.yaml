@@ -154,7 +154,8 @@ steps:
           bad = "no tokens.json"
       elif t.appearance != "night" or t.hand != "rhd" or not is_equal_approx(float(t.text_scale), 1.2) or int(t.version) != 1:
           bad = "tokens look: %s" % [[t.appearance, t.hand, t.text_scale, t.version]]
-      elif Color(t.colors.accent) != ThemeManager.c.accent or Color(t.colors.bg) != ThemeManager.c.bg:
+      # Every token: godot-maps colours its map from proj, accent, on_accent, text, dim, warn and crit.
+      elif t.colors.keys().size() != ThemeManager.c.size() or ThemeManager.c.keys().any(func(k): return not t.colors.has(k) or not Color(t.colors[k]).is_equal_approx(ThemeManager.c[k])):
           bad = "tokens colors: %s" % [t.colors]
       elif not is_equal_approx(float(t.px.body), snappedf(ThemeManager.px.body, 0.01)) or not t.fonts.body.has("weight"):
           bad = "tokens px or fonts: %s %s" % [t.px, t.fonts]

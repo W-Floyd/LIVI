@@ -27,9 +27,9 @@ var section := "charging"
 var _back: Button
 var _title: Label
 var _sections: DragScroll
-var _heading: Label
 var _rows: DragScroll
 var _shown := ""
+var _notes: Array = []
 var _t := {}
 
 
@@ -47,9 +47,6 @@ func _init() -> void:
 	_sections = DragScroll.new()
 	_sections.name = "Sections"
 	add_child(_sections)
-	_heading = UI.label("", "strong", "title")
-	_heading.name = "Heading"
-	add_child(_heading)
 	_rows = DragScroll.new()
 	_rows.name = "Rows"
 	add_child(_rows)
@@ -103,23 +100,26 @@ func _place() -> void:
 	_sections.size = Vector2(col, size.y - bar - g * 2)
 	var rx := left + col + g * 3
 	var rw := size.x - rx - g * 1.5
-	var hh: float = ThemeManager.px.touch
-	_heading.position = Vector2(rx, bar + g + (hh - _heading.get_combined_minimum_size().y) / 2.0)
-	_heading.size.x = rw
-	_rows.position = Vector2(rx, bar + g * 2 + hh)
+	# No heading over the rows: the section list shows which is open.
+	_rows.position = Vector2(rx, bar + g)
 	_rows.size = Vector2(rw, size.y - _rows.position.y - g)
-	_fit_choices()
+	_fit_rows()
 	queue_redraw()
 
 
-## A choice is kept on one line, under its row's text if need be, unless the row is narrower.
-func _fit_choices() -> void:
+## A choice keeps one line and a title its line, the controls going under the text when they do
+## not fit beside it; either wraps only where the row is narrower than it alone.
+func _fit_rows() -> void:
 	var room := floorf(_rows.size.x - ThemeManager.px.gap * 2.4) - 1.0
 	for c: HFlowContainer in _rows.list.find_children("Choice", "HFlowContainer", true, false):
 		var whole := maxf(0.0, c.get_child_count() - 1) * c.get_theme_constant("h_separation")
 		for b: Control in c.get_children():
 			whole += b.get_combined_minimum_size().x
 		c.custom_minimum_size.x = minf(whole, room)
+	for t: Control in _rows.list.find_children("Text", "VBoxContainer", true, false):
+		var l: Label = t.get_node("Label")
+		var w := l.get_theme_font("font").get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, l.get_theme_font_size("font_size")).x
+		t.custom_minimum_size.x = minf(ceilf(w) + 1.0, room)
 
 
 func _sections_width() -> float:
@@ -189,9 +189,7 @@ func _build() -> void:
 		_rows.list.remove_child(c)
 		c.queue_free()
 	_rows.list.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.6))
-	for it in SECTIONS:
-		if it[0] == section:
-			_heading.text = it[1]
+	_notes = []
 	var add := func(c: Control): _rows.list.add_child(c)
 	match section:
 		"charging":
@@ -224,24 +222,45 @@ func _build() -> void:
 		"power":
 			add.call(_number_row("v2l_limit", "V2L discharge limit", V2L_LIMIT, _pct, "V2L stops at this charge."))
 			add.call(_utility_row())
+	if not _notes.is_empty():
+		var n := UI.label("\n".join(_notes), "body", "caption", "dim")
+		n.name = "Note"
+		n.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_rows.list.add_child(n)
+		_rows.list.move_child(n, 0)
 	UI.style_boxes(_rows.list)
-	_fit_choices()
+	_fit_rows()
 
 
 # ---- rows ----
 
-## Why a row takes no change, or its own detail.
+## A row's own detail, or that the car has not reported it.
 func _why(id: String, detail := "") -> String:
+	return "Not reported by the car yet" if EvSettingsLink.state(id, _t) == "unreported" else detail
+
+
+## A row's tag when it takes no change; why goes in the section's note, once for every row it
+## holds for.
+func _lock(id: String) -> String:
+	var tag := "Read only"
+	var why := "LIVI cannot set these on the car yet"
 	match EvSettingsLink.state(id, _t):
+		"ok":
+			return ""
 		"unavailable":
-			return "Not available: LIVI cannot read or set this yet"
+			tag = "Not available"
+		"unreported":
+			if EvSettingsLink.writable(id):
+				return ""
 		"read_only":
 			var b := EvSettingsLink.blocked(id, _t)
-			return b if b != "" else "Read only: LIVI cannot set this on the car yet"
-		"unreported":
-			return "Not reported by the car yet" if EvSettingsLink.writable(id) \
-				else "Not reported by the car; read only"
-	return detail
+			if b != "":
+				why = b
+				if b == "Sending to the car…":
+					tag = "Sending…"
+	if not why in _notes:
+		_notes.append(why)
+	return tag
 
 
 ## A row takes a change once LIVI can send it and knows the value to change.
@@ -255,15 +274,15 @@ func _send(id: String, v: Variant) -> void:
 		push_error("ev settings: %s" % err)
 
 
-func _row(id: String, label: String, detail: String, control: Control, below: Control = null, lead: Control = null) -> PanelContainer:
+func _row(id: String, label: String, detail: String, control: Control, below: Control = null, lead: Control = null, tag := "") -> PanelContainer:
 	var p := PanelContainer.new()
 	p.name = id
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var box := _flat_box(ThemeManager.c.surface)
 	box.content_margin_left = ThemeManager.px.gap * 1.2
 	box.content_margin_right = ThemeManager.px.gap * 1.2
-	box.content_margin_top = ThemeManager.px.gap * 0.5
-	box.content_margin_bottom = ThemeManager.px.gap * 0.5
+	box.content_margin_top = ThemeManager.px.gap * 0.4
+	box.content_margin_bottom = ThemeManager.px.gap * 0.4
 	p.add_theme_stylebox_override("panel", box)
 	var l := UI.label(label, "strong", "body")
 	l.name = "Label"
@@ -277,14 +296,19 @@ func _row(id: String, label: String, detail: String, control: Control, below: Co
 	text.name = "Text"
 	text.alignment = BoxContainer.ALIGNMENT_CENTER
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# Its width before the controls go under it; a longer title wraps.
-	text.custom_minimum_size.x = minf(l.get_combined_minimum_size().x, ThemeManager.font_size("body") * 14.0)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	# A flow: controls too wide beside the text go under it, at the row's end, not past the page.
 	var line := _flow([text], 1.0)
 	line.name = "Line"
 	line.alignment = FlowContainer.ALIGNMENT_END
-	line.custom_minimum_size.y = ThemeManager.px.touch * 1.15
+	line.custom_minimum_size.y = ThemeManager.px.touch
+	if tag != "":
+		var tl := UI.label(tag, "body", "caption", "dim")
+		tl.name = "Label"
+		var t := UI.hbox([UI.icon("lock", "caption", "dim"), tl], 0.3)
+		t.name = "Tag"
+		t.alignment = BoxContainer.ALIGNMENT_CENTER
+		line.add_child(t)
 	for c in [lead, control]:
 		if c:
 			c.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -311,7 +335,7 @@ func _number_row(id: String, label: String, r: Dictionary, fmt: Callable, detail
 	var box := _stepper(fmt.call(v) if v != null else "–", on and at - step >= r.min - 1e-6, on and at + step <= r.max + 1e-6,
 		func(): _send(id, clampf(snappedf(at - step, step), r.min, r.max)),
 		func(): _send(id, clampf(snappedf(at + step, step), r.min, r.max)))
-	return _row(id, label, _why(id, detail), box)
+	return _row(id, label, _why(id, detail), box, null, null, _lock(id))
 
 
 func _choice_row(id: String, label: String, values: Array, labels: Array, detail := "", can := true) -> Control:
@@ -327,12 +351,12 @@ func _choice_row(id: String, label: String, values: Array, labels: Array, detail
 			if not _rows.dragged and v != want:
 				_send(id, want))
 		box.add_child(b)
-	return _row(id, label, _why(id, detail), box)
+	return _row(id, label, _why(id, detail), box, null, null, _lock(id) if can else "Read only")
 
 
 func _switch_row(id: String, label: String, detail := "") -> Control:
 	var v = _with_pending(id)
-	return _row(id, label, _why(id, detail), _switch(v == true, _live(id), func(): _send(id, not (v == true))))
+	return _row(id, label, _why(id, detail), _switch(v == true, _live(id), func(): _send(id, not (v == true))), null, null, _lock(id))
 
 
 ## Times and days of one departure. A change sends only what it changes; the car link keeps the
@@ -342,6 +366,7 @@ func _departure_row(id: String, label: String) -> Control:
 	var d := _departure(v)
 	var on := _live(id) and v is Dictionary
 	var detail := _why(id, _departure_text(d))
+	var tag := _lock(id)
 	var is_on = d.get("on")
 	var sw := _switch(is_on == true, on and is_on != null, func(): _send(id, {on = not (is_on == true)}))
 	var h = d.get("hour")
@@ -361,7 +386,7 @@ func _departure_row(id: String, label: String) -> Control:
 				n[i] = not (n[i] == true)
 				_send(id, {days = n}))
 		days.add_child(b)
-	return _row(id, label, detail, sw, days, time)
+	return _row(id, label, detail, sw, days, time, tag)
 
 
 ## A departure as the car reports it: on, hour, minute, days (Monday first), each null where the
@@ -426,7 +451,7 @@ func _off_peak_row() -> Control:
 	var to := UI.label("to", "body", "body", "dim")
 	var below := _flow([start, to, end], 1.0)
 	below.name = "Below"
-	return _row(id, "Off-peak hours", _why(id, "Cheapest hours to charge."), null, below)
+	return _row(id, "Off-peak hours", _why(id, "Cheapest hours to charge."), null, below, null, _lock(id))
 
 
 ## The car's off-peak charging mode. A mode LIVI does not know (the car's code 1) is shown and
@@ -437,7 +462,7 @@ func _mode_row() -> Control:
 	var known: bool = v in EvSettingsLink.OFF_PEAK_MODES
 	var detail := ""
 	if v is String and not known:
-		detail = "The car reports %s, not known to LIVI; read only" % v
+		detail = "The car reports %s, not known to LIVI" % v
 	return _choice_row(id, "Off-peak charging", EvSettingsLink.OFF_PEAK_MODES, ["Off", "Prioritise", "Only"], detail, known)
 
 
@@ -448,8 +473,8 @@ func _climate_temp_row() -> Control:
 	var v = EvSettingsLink.value(id, _t)
 	var value := UI.label("code %d" % int(v) if v != null else "–", "strong", "body")
 	value.name = "Value"
-	var detail := "Read only: the car's code, not yet known in degrees" if v != null else _why(id)
-	return _row(id, "Temperature", detail, value)
+	var detail := "The car's code, not yet known in degrees" if v != null else _why(id)
+	return _row(id, "Temperature", detail, value, null, null, "Read only" if v != null else _lock(id))
 
 
 ## LIVI's request, which micom-livi turns into the car's conditioning mode while it lasts; the
@@ -503,7 +528,7 @@ func _utility_row() -> Control:
 	# Stock turns it off only with the start button; READY and Park to turn it on.
 	act.disabled = not _live(id) or v == true
 	act.pressed.connect(func(): if not _rows.dragged: _send(id, true))
-	return _row(id, "Utility mode", _why(id, "Parked and READY. Off with the start button."), act)
+	return _row(id, "Utility mode", _why(id, "Parked and READY. Off with the start button."), act, null, null, _lock(id))
 
 
 # ---- controls ----

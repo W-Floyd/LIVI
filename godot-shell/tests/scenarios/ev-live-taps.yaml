@@ -97,9 +97,11 @@ steps:
   - tap: { node: EvLive/Settings }
   - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Value, text: 90 % }
   - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Plus, disabled: true }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Text/Detail, text: "Read only: LIVI cannot set this on the car yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Tag/Label, text: "Read only" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_dc/Lines/Line/Stepper/Value, text: 100 % }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Text/Detail, text: "Not available: LIVI cannot read or set this yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Tag/Label, text: "Not available" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Text/Detail, text: "Lower it if a charger stops." }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "LIVI cannot set these on the car yet" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/max, disabled: true }
   - screenshot: ev-settings-charging
   - tap: { node: EvLive/EvSettings/Sections/List/schedule }

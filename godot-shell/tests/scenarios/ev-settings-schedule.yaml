@@ -17,7 +17,9 @@ steps:
   - tap: { node: EvLive/scheduled }
   - expect_node: { path: EvLive/EvSettings, visible: "true", section: schedule }
   # Read only: the car link does not set schedules.
-  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Text/Detail, text: "Read only: the car link does not set schedules (micom-livi -ev-schedule-writes)" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "Read only: the car link does not set schedules (micom-livi -ev-schedule-writes)\nLIVI cannot set these on the car yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Tag/Label, text: "Read only" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Text/Detail, text: "07:30, Mon, Wed" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Switch, button_pressed: true, disabled: true }
   - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Time/Hour/Value, text: "07" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Time/Minute/Value, text: "30" }
@@ -26,7 +28,8 @@ steps:
   - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/End/Hour/Value, text: "––" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Choice/off_peak_only, button_pressed: true, disabled: true }
   - expect_node: { path: EvLive/EvSettings/Rows/List/climate_temp/Lines/Line/Value, text: "code 20" }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/climate_temp/Lines/Line/Text/Detail, text: "Read only: the car's code, not yet known in degrees" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/climate_temp/Lines/Line/Text/Detail, text: "The car's code, not yet known in degrees" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/climate_temp/Lines/Line/Tag/Label, text: "Read only" }
   - screenshot: { name: ev-settings-schedule-read, compare: false }
   # The car link sets them: what the car has not said still takes no change.
   - set: { core: { telemetry: { evScheduleWrites: true } } }
@@ -51,7 +54,8 @@ steps:
       Core.fake_set("evSchedule/request", {id = 1, at = 1794213000, set = {departure1 = {days = [true, false, true, false, true, false, false]}}})
       await runner.frames(2)
   - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Days/Fri, button_pressed: true, disabled: true }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Text/Detail, text: "Sending to the car…" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "Sending to the car…\nLIVI cannot set these on the car yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/departure_1/Lines/Line/Tag/Label, text: "Sending…" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak/Lines/Below/Start/Hour/Plus, disabled: true }
   # The car reported it back.
   - set: { core: { telemetry: { departure1: { days: [true, false, true, false, true, false, false] } } } }
@@ -90,11 +94,13 @@ steps:
   - set: { core: { telemetry: { scheduledChargingMode: "code 1" } } }
   - wait: { frames: 2 }
   - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Choice/off, button_pressed: false, disabled: true }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Text/Detail, text: "The car reports code 1, not known to LIVI; read only" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Text/Detail, text: "The car reports code 1, not known to LIVI" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/off_peak_mode/Lines/Line/Tag/Label, text: "Read only" }
   # Driving locks them.
   - set: { core: { telemetry: { drivingRegulation: true, gear: D } } }
   - wait: { frames: 2 }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/scheduled_climate/Lines/Line/Text/Detail, text: "Read only while driving" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "Read only while driving\nLIVI cannot set these on the car yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/scheduled_climate/Lines/Line/Tag/Label, text: "Read only" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/scheduled_climate/Lines/Line/Switch, disabled: true }
   # Every section in the page's rect at every bar edge, hand and text scale, rail or none: each
   # row and what is in it within the page less the same gutter both sides (wide controls go

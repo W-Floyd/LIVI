@@ -33,6 +33,10 @@ var _app_ids := {}
 const PRIORITY := ["Player", "Stop", "Stat", "Precondition"]
 ## What the panel left out last time it was laid out, for tests and the shots' notes.
 var left_out: Array[String] = []
+## Logged once per change: telemetry refits the panel several times a second.
+var _left_out_said := ""
+## What the last fit was of (`_fit`); emptied by a restyle.
+var _fit_key := []
 
 ## A scene theme's 3D layer, while one is in use.
 var _scene: SceneSkin
@@ -208,6 +212,7 @@ func _ready() -> void:
 	# Compact: the media card leads home.
 	_stat.hero = false
 	_projection.visible = false
+	_projection.visibility_changed.connect(_pace_windows)
 	_precondition.icon_name = "therm"
 	_precondition.pressed.connect(_on_precondition)
 	var auto := AutoChip.new("Auto")
@@ -294,6 +299,7 @@ func _style() -> void:
 	$Page.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	queue_redraw()
+	_fit_key = []
 	_fit.call_deferred()
 	_place_projection.call_deferred()
 	# The driver's side may have changed.
@@ -467,6 +473,11 @@ func open_page(page: String) -> String:
 	# The live page keeps the status bar unless its pack draws its own title bar.
 	$Page.visible = home or page == "apps" or page == "media" or (live and not own_bar)
 	_body.visible = home
+	if home and _cards_due:
+		_bind_cards()
+		_update_player()
+	elif home and _fit_due:
+		_fit.call_deferred()
 	# Off home, the split is where it will be when home shows again.
 	if not home and (_split_tween or _dragging):
 		if _split_tween:
@@ -1067,15 +1078,29 @@ func _ask_area(again := false) -> void:
 
 ## Shows every item that has content, then drops the least important until the rest fit.
 func _fit() -> void:
+	if not _body.is_visible_in_tree():
+		_fit_due = true
+		return
+	_fit_due = false
 	var panel: HomeCards = _side.get_node("Panel")
 	var dashboard := _split_to == 1.0
 	var electric := _powertrain() == "electric"
 	var wanted := {Stat = true, Precondition = electric, Stop = electric and _stop.has_content(), Player = true}
-	for n in PRIORITY:
-		panel.get_node(n).visible = wanted[n]
 	# The screen's height, not the panel's: the panel grows with what it holds.
 	var room: float = _rect_beside_status().size.y \
 		- _side.get_theme_constant("margin_top") - _side.get_theme_constant("margin_bottom")
+	# Telemetry refits several times a second, mostly with nothing the fit reads changed; a refit
+	# restyles every card twice over.
+	var key := [room, _side.size, panel.size, dashboard, wanted, _source.visible, _source.get_combined_minimum_size(),
+		_stat.value, _stat.unit, _stat.sub_label, _stat.sub_value, _stat.icon_name,
+		_precondition.label, _precondition.short_label, _precondition.detail, _stop.stop,
+		_player.title, _player.artist, _player.album, _player.initials, _player.show_position, _player.art,
+		_player.has_content()]
+	if key == _fit_key:
+		return
+	_fit_key = key
+	for n in PRIORITY:
+		panel.get_node(n).visible = wanted[n]
 	left_out.clear()
 	# Before any card goes: Precondition one line, then beside the Phone | <app> pill (an icon
 	# where its words don't fit), then the battery card compact, then the media card one row
@@ -1117,8 +1142,11 @@ func _fit() -> void:
 				item.visible = true
 				continue
 			left_out.append(n)
-	if not left_out.is_empty():
-		print("side panel: left out %s; it holds %d px" % [", ".join(left_out), roundi(room)])
+	var said := "left out %s; it holds %d px" % [", ".join(left_out), roundi(room)] if not left_out.is_empty() else ""
+	if said != _left_out_said:
+		_left_out_said = said
+		if said != "":
+			print("side panel: " + said)
 
 
 func _on_window_unmapped(id: int) -> void:
@@ -1154,11 +1182,21 @@ func _show_app() -> void:
 		var shown: Array = _windows.filter(_is_projection) if phone else _windows.filter(func(w): return not _is_projection(w)) if _page_name == "app" else Array(_windows)
 		id = shown[-1] if not shown.is_empty() else -1
 	_projection.show_window(id, id >= 0 and _is_projection(id))
+	_pace_windows()
 	_size_nav()
 	# The keyboard types into the app showing, on its page only.
 	if app_keyboard and (not _typing_page() or app_keyboard.window_id != id):
 		app_keyboard.close()
 	_update_keys_button()
+
+
+## Hosted windows off screen get no frame callbacks, so a hidden app (the navigation app behind
+## the phone, one left running off the app page) does not keep drawing on the shared GPU. The
+## phone's video keeps its pace: its stream is the core's to stop.
+func _pace_windows() -> void:
+	var drawn := _projection.window.window_id if _projection.is_visible_in_tree() else -1
+	for w in _windows:
+		Wayland.set_window_paused(w, w != drawn and not _is_projection(w))
 
 
 func _driver_left() -> bool:
@@ -1357,14 +1395,41 @@ func _refresh_dirty() -> void:
 	_refresh(d)
 
 
+## What home's cards and the status bar read.
+const CARD_READS := ["telemetry", "config", "precondition", "navigation"]
+## The cards were left stale off home (`_refresh`), or unfitted (`_fit`).
+var _cards_due := false
+var _fit_due := false
+
+
 ## `sections` are the changed ones; empty means all.
 func _refresh(sections := {}) -> void:
 	if sections.is_empty() or sections.has("front"):
 		_follow_front()
 	if sections.is_empty() or sections.has("config"):
 		_follow_night()
+	if not sections.is_empty() and not CARD_READS.any(func(r): return sections.has(r)):
+		return
 	var t := func(p: String): return Core.get_value("/telemetry/" + p)
 	# fuelPct is the charge for an electric car and the tank otherwise.
+	var power := _powertrain()
+	var soc = t.call("fuelPct")
+	var amb = t.call("ambientC")
+	_status.outside = "" if amb == null else Units.temperature(amb)
+	_status.charge = "" if soc == null else "%d %%" % roundi(soc)
+	_status.charge_icon = "bolt" if power == "electric" else "fuel"
+	_status.phone = "Pixel"
+	# Off home, telemetry streaming in would lay the hidden cards out again and again, at the cost
+	# of every other page's frames (the unit's CPU): they catch up when home shows.
+	if not _body.is_visible_in_tree():
+		_cards_due = true
+		return
+	_bind_cards()
+
+
+func _bind_cards() -> void:
+	_cards_due = false
+	var t := func(p: String): return Core.get_value("/telemetry/" + p)
 	var power := _powertrain()
 	var soc = t.call("fuelPct")
 	_stat.icon_name = "bolt" if power == "electric" else "fuel"
@@ -1377,11 +1442,6 @@ func _refresh(sections := {}) -> void:
 	var ev_km = t.call("rangeElectricKm")
 	if power == "hybrid" and ev_km != null:
 		_stat.sub_label = "Range · %s electric" % Units.range_text(ev_km)
-	var amb = t.call("ambientC")
-	_status.outside = "" if amb == null else Units.temperature(amb)
-	_status.charge = "" if soc == null else "%d %%" % roundi(soc)
-	_status.charge_icon = "bolt" if power == "electric" else "fuel"
-	_status.phone = "Pixel"
 
 	var on := _preconditioning()
 	var auto: AutoChip = _precondition.trailing
@@ -1439,6 +1499,9 @@ func _refresh(sections := {}) -> void:
 
 ## Home's player: the phone's track, or the radio station on air.
 func _update_player() -> void:
+	if not _body.is_visible_in_tree():
+		_cards_due = true
+		return
 	var np := now_playing
 	var band: Dictionary = np.dab if np.on_air() == "dab" else np.fm if np.on_air() == "fm" else {}
 	if band.is_empty():

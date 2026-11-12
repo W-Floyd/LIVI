@@ -471,6 +471,14 @@ impl WaylandCompositor {
         }
     }
 
+    /// A window not shown gets no frame callbacks until shown again (`Window::paused`).
+    #[func]
+    fn set_window_paused(&mut self, id: i64, on: bool) {
+        if let Some(s) = self.server.as_mut() {
+            s.state.set_window_paused(id as u64, on);
+        }
+    }
+
     /// Clients whose PID or process group is `pid` start their windows fullscreen rather than
     /// maximized; false forgets the PID.
     #[func]

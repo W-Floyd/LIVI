@@ -144,6 +144,8 @@ pub struct Window {
     /// Its own place in panel pixels instead of the app area (`State::set_window_area`): home's
     /// slot, for the navigation app.
     area: Option<(i32, i32)>,
+    /// Not shown: its frame callbacks wait, so it draws nothing no one sees on the shared GPU.
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -405,7 +407,7 @@ impl Server {
         }
         self.state.release_now = std::mem::take(&mut self.state.release_next);
         let ms = self.started.elapsed().as_millis() as u32;
-        let roots = self.state.windows.iter().map(|w| w.toplevel.wl_surface().clone());
+        let roots = self.state.windows.iter().filter(|w| !w.paused).map(|w| w.toplevel.wl_surface().clone());
         let popups = self.state.xdg_shell.popup_surfaces().iter().map(|p| p.wl_surface().clone());
         for root in roots.chain(popups).collect::<Vec<_>>() {
             with_surface_tree_downward(
@@ -915,6 +917,13 @@ impl State {
         }
     }
 
+    /// See `Window::paused`.
+    pub fn set_window_paused(&mut self, id: u64, on: bool) {
+        if let Some(w) = self.windows.iter_mut().find(|w| w.id == id) {
+            w.paused = on;
+        }
+    }
+
     /// See `Window::native`. Lays the window out again at once, so a still picture follows.
     pub fn set_native(&mut self, id: u64, on: bool) {
         let Some(i) = self.windows.iter().position(|w| w.id == id) else { return };
@@ -1329,6 +1338,7 @@ impl XdgShellHandler for State {
             scale,
             buffer_scale: 1.0,
             area: None,
+            paused: false,
         });
     }
 
@@ -1510,8 +1520,12 @@ mod tests {
     use crate::test_client::{self, Format as BufFormat, Honour, Opts, Pattern};
 
     /// Dispatches and completes frames until `done` holds; false after five seconds.
-    fn pump(server: &mut Server, mut done: impl FnMut(&State) -> bool) -> bool {
-        let until = Instant::now() + Duration::from_secs(5);
+    fn pump(server: &mut Server, done: impl FnMut(&State) -> bool) -> bool {
+        pump_for(server, Duration::from_secs(5), done)
+    }
+
+    fn pump_for(server: &mut Server, wait: Duration, mut done: impl FnMut(&State) -> bool) -> bool {
+        let until = Instant::now() + wait;
         while Instant::now() < until {
             server.dispatch().unwrap();
             if done(&server.state) {
@@ -1814,6 +1828,12 @@ mod tests {
         for dmabuf in [false, true] {
             let mut server = server();
             let client = client(&mut server, opts(Pattern::Bars, Some(5), dmabuf));
+            assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Mapped(1))), "dmabuf={dmabuf}");
+            // Paused, it draws no further frame however many the shell draws.
+            server.state.set_window_paused(1, true);
+            server.state.windows[0].frame = None;
+            assert!(!pump_for(&mut server, Duration::from_millis(200), |s| s.windows[0].frame.is_some()), "dmabuf={dmabuf}");
+            server.state.set_window_paused(1, false);
             assert!(pump(&mut server, |s| s.events.contains(&WindowEvent::Unmapped(1))), "dmabuf={dmabuf}");
             assert_eq!(client.join().unwrap().drawn, 5);
             assert!(server.state.windows.is_empty());

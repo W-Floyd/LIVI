@@ -1,0 +1,49 @@
+name: perf-scroll
+# Scrolling the long pages with the solid look, while the car's telemetry streams in (a value a
+# few times a second, as on the unit) and an app runs off screen. Neither adds work to a frame:
+# home's cards catch up only when home shows, and an app not shown gets no frame callbacks, so
+# draws nothing on the shared GPU.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/parked.json
+  clients:
+    - { role: app, app_id: org.livi.test.anim, pattern: grid, size: 1280x720, animate: 100000 }
+steps:
+  - wait: { window: org.livi.test.anim }
+  - page: settings
+  - tap: { node: Settings/Sections/List/Look }
+  - wait: { frames: 2 }
+  - measure:
+      name: settings-scroll
+      frames: 240
+      scroll: Settings/Rows
+      pulse: { path: telemetry/rangeKm, every: 10 }
+      expect:
+        # Regression limits for llvmpipe in the VM, about twice what it measured (release: frame
+        # p95 16 ms; main thread 0.4 ms p95, 1 ms before home's cards waited off home; the
+        # hidden app drew at the shell's frame rate before it was paused).
+        vm: { frame_ms_p95: 32, process_ms_p95: 0.8, "client_fps:org.livi.test.anim": 1 }
+  - page: apps
+  - gdscript: |
+      var apps := []
+      for i in 60:
+          apps.append({id = "org.livi.test.app%d" % i, name = "App %d" % i, icon = "", exec = "true"})
+      shell.launcher._set_apps(apps)
+      await runner.frames(2)
+  - measure:
+      name: apps-scroll
+      frames: 240
+      scroll: Apps/Scroll
+      pulse: { path: telemetry/rangeKm, every: 10 }
+      expect:
+        # Measured: frame p95 16.4 ms; main thread 0.2 ms p95, 1 ms before.
+        vm: { frame_ms_p95: 32, process_ms_p95: 0.5, "client_fps:org.livi.test.anim": 1 }
+  # On home a value the cards do not show refits nothing.
+  - page: home
+  - measure:
+      name: home-telemetry
+      frames: 120
+      pulse: { path: telemetry/odometerKm, every: 10 }
+      expect:
+        # Measured: main thread 1.1 ms p95, 3.7 ms when every change refitted the cards.
+        vm: { process_ms_p95: 2.2 }

@@ -329,9 +329,16 @@ func frames(n: int) -> void:
 ## `{ name, frames: N, expect: { <profile>: { <metric>: max } } }`: runs N frames as fast as
 ## they go and records what they cost. Thresholds are per profile (SHELL_PERF_PROFILE, default
 ## vm), since llvmpipe's numbers say nothing about the unit's. Every metric is a maximum.
+## `scroll: <DragScroll path>` sweeps that list down and up across the frames, as a drag would;
+## `pulse: { path, every }` sets a core value to a new number every `every` frames, as the car's
+## telemetry streams in.
 func _measure(arg: Dictionary) -> String:
 	var name: String = arg.get("name", "measure")
 	var n := int(arg.get("frames", 120))
+	var scroll: DragScroll = _shell.get_node(str(arg.scroll)) if arg.has("scroll") else null
+	if arg.has("scroll") and (scroll == null or scroll.max_offset() <= 0.0):
+		return "%s: nothing to scroll" % arg.scroll
+	var pulse: Dictionary = arg.get("pulse", {})
 	var rid := _vp.get_viewport_rid()
 	RenderingServer.viewport_set_measure_render_time(rid, true)
 	await _frames(1)
@@ -340,17 +347,40 @@ func _measure(arg: Dictionary) -> String:
 	var t0 := Time.get_ticks_usec()
 	var frame_ms := PackedFloat64Array()
 	var render_ms := PackedFloat64Array()
+	var draws := PackedFloat64Array()
+	var items := PackedFloat64Array()
+	var prims := PackedFloat64Array()
+	# The main thread's share of a frame: from the tree's process to the renderer's draw, so
+	# scripts, deferred calls and layout, not llvmpipe.
+	var process_list := []
+	var started := [0]
+	var count_process := func(): if started[0] > 0: process_list.append((Time.get_ticks_usec() - started[0]) / 1000.0)
+	RenderingServer.frame_pre_draw.connect(count_process)
 	var last := t0
 	for i in n:
+		if scroll:
+			scroll.offset = scroll.max_offset() * pingpong(i * 4.0 / n, 1.0)
+		if not pulse.is_empty() and i % int(pulse.get("every", 10)) == 0:
+			var e: String = Core.fake_set(str(pulse.path), 1000 + i)
+			if e != "":
+				return "pulse %s: %s" % [pulse.path, e]
 		await get_tree().process_frame
 		var now := Time.get_ticks_usec()
+		started[0] = now
 		frame_ms.append((now - last) / 1000.0)
 		render_ms.append(RenderingServer.viewport_get_measured_render_time_cpu(rid))
+		draws.append(RenderingServer.viewport_get_render_info(rid, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS, RenderingServer.VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME))
+		items.append(RenderingServer.viewport_get_render_info(rid, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME))
+		prims.append(RenderingServer.viewport_get_render_info(rid, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_CANVAS, RenderingServer.VIEWPORT_RENDER_INFO_PRIMITIVES_IN_FRAME))
 		last = now
+	await RenderingServer.frame_pre_draw
+	RenderingServer.frame_pre_draw.disconnect(count_process)
 	var wall := (Time.get_ticks_usec() - t0) / 1e6
 	RenderingServer.viewport_set_measure_render_time(rid, false)
 	frame_ms.sort()
 	render_ms.sort()
+	var process_ms := PackedFloat64Array(process_list)
+	process_ms.sort()
 	var m := {
 		frames = n,
 		fps = n / wall,
@@ -358,6 +388,12 @@ func _measure(arg: Dictionary) -> String:
 		frame_ms_p95 = _pct(frame_ms, 0.95),
 		frame_ms_max = frame_ms[-1],
 		render_cpu_ms_p95 = _pct(render_ms, 0.95),
+		process_ms_p50 = _pct(process_ms, 0.5),
+		process_ms_p95 = _pct(process_ms, 0.95),
+		process_ms_max = process_ms[-1],
+		draw_calls_max = Array(draws).max(),
+		canvas_items_max = Array(items).max(),
+		primitives_max = Array(prims).max(),
 		cpu_pct = 100.0 * (_cpu_seconds() - cpu0) / wall,
 		rss_mb = _rss_mb(),
 	}
@@ -376,6 +412,9 @@ func _measure(arg: Dictionary) -> String:
 	var limits: Dictionary = arg.get("expect", {}).get(profile, {})
 	var over := PackedStringArray()
 	for k in limits:
+		# A client that drew nothing has no count.
+		if k.begins_with("client_fps:") and not m.has(k):
+			m[k] = 0.0
 		if not m.has(k):
 			over.append("%s: no such metric" % k)
 		elif m[k] > limits[k]:

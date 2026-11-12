@@ -23,6 +23,8 @@ var charge := "":
 
 var charge_icon := "bolt":
 	set(v):
+		if v == charge_icon:
+			return
 		charge_icon = v
 		if _charge_icon:
 			_charge_icon.get_meta("icon")[0] = v

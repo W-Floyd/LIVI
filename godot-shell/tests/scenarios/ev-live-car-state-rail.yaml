@@ -51,3 +51,37 @@ steps:
   - wait: { frames: 2 }
   - gdscript: *row
   - screenshot: { name: ev-live-car-state-rail-rhd, compare: false }
+  # The targets fit their text: every label inside its tile, wrapped or trimmed with an ellipsis,
+  # never cut off, at small and large text, every bar edge and both drive sides, beside the rail;
+  # with the car's live schedules (2026-11-12) and a V2L limit.
+  - set: { core: { telemetry: { departure1: {}, departure2: {} } } }
+  - set: { core: { telemetry: { departure1: { on: false, hour: 12, minute: 0, days: [false, false, false, false, false, false, false] }, departure2: { on: false, hour: 12, minute: 0, days: [false, false, false, false, false, false, false] }, scheduledChargingMode: "off", scheduledClimate: false, v2lDischargeLimitPct: 20 } } }
+  - gdscript: |
+      for ts in [1.0, 1.4]:
+          for pos in ["top", "bottom", "left", "right", "off"]:
+              for hand in ["lhd", "rhd"]:
+                  ThemeManager.set_look({text_scale = ts, status_position = pos, hand = hand})
+                  shell.open_page("ev_live")
+                  await runner.frames(3)
+                  for id in ["next_departure", "scheduled", "v2l", "Settings"]:
+                      var tile: Control = shell.get_node("EvLive/" + id)
+                      var box := tile.get_global_rect().grow(0.5)
+                      for l in tile.find_children("*", "Label", true, false):
+                          if not l.is_visible_in_tree() or l.text == "":
+                              continue
+                          var at := "%s, %s, %s: %s %s \"%s\"" % [ts, pos, hand, id, l.name, l.text]
+                          if not box.encloses(l.get_global_rect()):
+                              return "%s is outside its tile: %s %s" % [at, l.get_global_rect(), box]
+                          var w: float = l.get_theme_font("font").get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, l.get_theme_font_size("font_size")).x
+                          # Trimmed with an ellipsis is said; cut off is not.
+                          if l.text_overrun_behavior == TextServer.OVERRUN_TRIM_ELLIPSIS:
+                              continue
+                          if l.autowrap_mode == TextServer.AUTOWRAP_OFF and w > l.size.x + 1.0:
+                              return "%s is cut off: %s wide in %s" % [at, w, l.size.x]
+                          if l.autowrap_mode != TextServer.AUTOWRAP_OFF and l.get_line_count() > l.get_visible_line_count():
+                              return "%s needs %s lines, shows %s" % [at, l.get_line_count(), l.get_visible_line_count()]
+      ThemeManager.set_look({text_scale = 1.0, status_position = "top", hand = "lhd"})
+  - screenshot: { name: ev-live-tiles-rail, compare: false }
+  - theme: { text_scale: 1.4 }
+  - wait: { frames: 2 }
+  - screenshot: { name: ev-live-tiles-rail-text-1.4, compare: false }

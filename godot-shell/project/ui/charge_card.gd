@@ -16,8 +16,8 @@ var _unit: Label
 ## "Done at 00:29", or when a waiting charge starts.
 var _when: Label
 var _t := {}
-## The line under the number, while there is room for it (`fit`).
-var keep_lines := true
+## The lines shown, for a page short of room: 3 all, 2 without when it is done, 1 the headline.
+var lines := 3
 ## For a page short of room: the number in the body face, whose line is shorter.
 var stacked := false:
 	set(v):
@@ -25,7 +25,6 @@ var stacked := false:
 		if _value:
 			_value.set_meta("look", ["strong" if v else "display", "title", "text"])
 			UI.style_label(_value)
-var _fit_h := -1.0
 
 
 func _build() -> void:
@@ -57,14 +56,12 @@ func _style() -> void:
 		box.content_margin_top = ThemeManager.px.gap * 0.1
 		box.content_margin_bottom = ThemeManager.px.gap * 0.1
 		add_theme_stylebox_override("panel", box)
-	_fit_h = -1.0
 	_fill()
 
 
 ## Shows for `t`, the core's telemetry; false (and hidden) when nothing is plugged in.
 func show_for(t: Dictionary) -> bool:
 	_t = t
-	_fit_h = -1.0
 	visible = charging(t) or t.get("chargePlugged") == true
 	_fill()
 	return visible
@@ -137,16 +134,14 @@ func _fill() -> void:
 	elif st == "waiting" and off_peak is Dictionary and off_peak.get("startHour") != null:
 		var m = off_peak.get("startMinute")
 		_when.text = "Starts at %02d:%02d" % [int(off_peak.startHour), int(m) if m != null else 0]
-	_when.visible = keep_lines and _when.text != ""
+	_when.visible = lines >= 3 and _when.text != ""
+	big.visible = big.visible and lines >= 2
 
 
-## Drops the line under the number when the card would be taller than `h`.
+## As many lines as fit in `h`, the last first; the headline always.
 func fit(h: float) -> void:
-	if h == _fit_h:
-		return
-	_fit_h = h
-	keep_lines = true
-	_fill()
-	if get_combined_minimum_size().y > h:
-		keep_lines = false
+	for n in [3, 2, 1]:
+		lines = n
 		_fill()
+		if get_combined_minimum_size().y <= h:
+			return

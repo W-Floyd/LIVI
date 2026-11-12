@@ -431,7 +431,7 @@ func _set_tiles() -> void:
 	# The shell's own tiles say it in words: a plug and a fan beside "Off" read as nothing.
 	if not skin:
 		var words := [] if _tile_live.charging == "" and _tile_live.climate == "" else \
-			["Charging %s" % (_tile_live.charging.to_lower() if _tile_live.charging != "" else STRINGS.unknown),
+			["Charge %s" % (_tile_live.charging.to_lower() if _tile_live.charging != "" else STRINGS.unknown),
 			"Climate %s" % (_tile_live.climate.to_lower() if _tile_live.climate != "" else STRINGS.unknown)]
 		items.scheduled = [{text = " · ".join(words) if not words.is_empty() else STRINGS.not_available}]
 		items.v2l = [{text = _tile_live.v2l}] if _tile_live.v2l != "" else []
@@ -768,8 +768,9 @@ func _place() -> void:
 		if _charge_card.visible:
 			# Over the car, under the car's state, where "Battery" was: the charge's story stays at
 			# the car and the road stays clear. Else beside the charge, else any room off the road.
-			_charge_card.stacked = squeeze == 1
-			_charge_card.fit(room_bottom - floor_y - gap if squeeze == 0 else -1.0)
+			_charge_card.stacked = false
+			_charge_card.fit(room_bottom - floor_y - gap)
+			var most := _charge_card.lines
 			var cs := _charge_card.get_combined_minimum_size()
 			var top := floor_y + gap
 			for r in placed:
@@ -777,27 +778,21 @@ func _place() -> void:
 					top = maxf(top, r.end.y + gap * 0.5)
 			var cx := bat.position.x + bat.size.x + gap * 2.0 if side > 0 else bat.position.x - gap * 2.0 - cs.x
 			var spots := [Vector2(edge if side > 0 else w - edge - cs.x, top), Vector2(cx, floor_y + gap * 0.3)]
-			var at = _find_clear(cs, spots, placed, bounds, road, w * 0.3)
 			# Short of room: the number in a face with a shorter line, then without the time it is
-			# done.
-			if at == null and squeeze == 0:
-				_charge_card.stacked = true
+			# done; failing that (large text, a crowded page) off the labels if not the road, then
+			# the headline alone. [shorter face, lines, off the road, reach]
+			var tries := [[false, 3, true, w * 0.3], [true, 3, true, w * 0.3], [true, 2, true, INF]] if squeeze == 0 \
+				else [[true, 2, true, INF], [true, 2, false, INF], [true, 1, false, INF]]
+			var at = null
+			for tr in tries:
+				_charge_card.stacked = tr[0]
+				_charge_card.lines = mini(tr[1], most)
+				_charge_card._fill()
 				cs = _charge_card.get_combined_minimum_size()
-				at = _find_clear(cs, spots, placed, bounds, road, w * 0.3)
-				if at == null:
-					_charge_card.stacked = false
-			if at == null:
-				_charge_card.fit(-1.0)
-				cs = _charge_card.get_combined_minimum_size()
-				at = _find_clear(cs, spots, placed, bounds, road)
+				at = _find_clear(cs, spots, placed, bounds, road if tr[2] else PackedVector2Array(), tr[3])
+				if at != null:
+					break
 			card_ok = at != null
-			# Large text on a short page: clear of the labels, if not of the road.
-			if at == null and squeeze == 1:
-				at = _find_clear(cs, spots, placed, bounds, PackedVector2Array())
-				if at == null:
-					_charge_card.stacked = false
-					cs = _charge_card.get_combined_minimum_size()
-					at = _find_clear(cs, spots, placed, bounds, PackedVector2Array())
 			if at == null:
 				at = Vector2(clampf(spots[0].x, bounds.position.x, maxf(bounds.position.x, bounds.end.x - cs.x)),
 					clampf(spots[0].y, bounds.position.y, maxf(bounds.position.y, bounds.end.y - cs.y)))

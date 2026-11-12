@@ -99,6 +99,13 @@ func _style() -> void:
 			if look.get("item", {}).has("size"):
 				l.add_theme_font_size_override("font_size", int(look.item.size))
 			l.set_meta("item", true)
+			# Takes the tile's width, not its own: an unclipped line would widen the tile's text
+			# past its edge and cut the title off too. `fit` breaks or trims it.
+			l.set_meta("text", str(it.text))
+			l.clip_text = true
+			l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			_items.add_child(l)
 	_items.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.8))
 	_row.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.8))
@@ -127,10 +134,38 @@ func fit(width: float) -> float:
 		th = _title.get_theme_font("font").get_multiline_string_size(
 			_title.text, HORIZONTAL_ALIGNMENT_CENTER, avail, _title.get_theme_font_size("font_size"), 2).y
 	_title.custom_minimum_size.y = th
-	var body := th + (_items.get_combined_minimum_size().y if _items.visible else 0.0)
+	var ih := 0.0
+	if _items.visible:
+		var labels := _items.get_children().filter(func(n): return n is Label)
+		var fixed := 0.0
+		for n in _items.get_children():
+			if not n is Label:
+				fixed += (n as Control).custom_minimum_size.x
+		fixed += _items.get_theme_constant("separation") * maxi(0, _items.get_child_count() - 1)
+		var each := (avail - fixed) / maxf(1.0, labels.size())
+		for n in _items.get_children():
+			var h: float = (n as Control).custom_minimum_size.y
+			if n is Label:
+				h = _fit_item(n, each, true)
+			ih = maxf(ih, h)
+	var body := th + ih
 	var need: float = maxf(_icon.custom_minimum_size.y if _icon.visible else 0.0, body) + gap * 1.4
 	custom_minimum_size.y = maxf(ThemeManager.px.touch * (1.0 if skin_key != "" else 1.3), need)
 	return custom_minimum_size.y
+
+
+## An item's text on one line where it fits `width`; else, with `two` and parts (" · "), one
+## part a line, each trimmed with an ellipsis if it must be. Returns its height.
+func _fit_item(l: Label, width: float, two: bool) -> float:
+	var font := l.get_theme_font("font")
+	var px := l.get_theme_font_size("font_size")
+	var text: String = l.get_meta("text", l.text)
+	var lines := PackedStringArray([text])
+	if font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, px).x > width and two and " · " in text:
+		lines = text.split(" · ")
+	l.text = "\n".join(lines)
+	l.custom_minimum_size.y = font.get_height(px) * lines.size()
+	return l.custom_minimum_size.y
 
 
 ## The box in each state: the pack's image when the tile has a skin, else a surface over the

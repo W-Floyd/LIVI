@@ -356,6 +356,10 @@ func _measure(arg: Dictionary) -> String:
 	var started := [0]
 	var count_process := func(): if started[0] > 0: process_list.append((Time.get_ticks_usec() - started[0]) / 1000.0)
 	RenderingServer.frame_pre_draw.connect(count_process)
+	# Nodes made while measuring: a page remaking what it shows has to make it again.
+	var added := [0]
+	var count_added := func(_n): added[0] += 1
+	get_tree().node_added.connect(count_added)
 	var last := t0
 	for i in n:
 		if scroll:
@@ -375,6 +379,7 @@ func _measure(arg: Dictionary) -> String:
 		last = now
 	await RenderingServer.frame_pre_draw
 	RenderingServer.frame_pre_draw.disconnect(count_process)
+	get_tree().node_added.disconnect(count_added)
 	var wall := (Time.get_ticks_usec() - t0) / 1e6
 	RenderingServer.viewport_set_measure_render_time(rid, false)
 	frame_ms.sort()
@@ -396,6 +401,7 @@ func _measure(arg: Dictionary) -> String:
 		primitives_max = Array(prims).max(),
 		cpu_pct = 100.0 * (_cpu_seconds() - cpu0) / wall,
 		rss_mb = _rss_mb(),
+		nodes_added = added[0],
 	}
 	var stats: Dictionary = Wayland.stats()
 	for k in stats:

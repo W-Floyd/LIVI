@@ -63,6 +63,8 @@ var _dirty_s := 0.0
 ## Rows whose control is under their text, by section, id and label: kept across rebuilds, for
 ## the hysteresis.
 var _wrapped := {}
+var _sections_key := ""
+var _rows_structure := ""
 
 var _header: Control
 var _back: Button
@@ -181,7 +183,7 @@ func _style() -> void:
 		_apply.add_theme_stylebox_override(st, _flat_box(ThemeManager.c.accent))
 	for k in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color"]:
 		_apply.add_theme_color_override(k, ThemeManager.c.on_accent)
-	_refresh(true)
+	_refresh(true, true)
 	_place()
 
 
@@ -229,54 +231,199 @@ func _place() -> void:
 	queue_redraw()
 
 
-## Redraws from the core's view, unless nothing a row shows has changed. `force` redraws anyway.
-func _refresh(force := false) -> void:
+## Shows the core's view, unless nothing a row shows has changed. `force` looks again anyway, for
+## what the view does not carry (the look, Drive, an app's file); `rebuild` also remakes every
+## node, for a new theme.
+func _refresh(force := false, rebuild := false) -> void:
 	if not is_inside_tree():
 		return
 	var v = Core.settings_view()
 	_view = v if v is Dictionary else {}
 	var key := JSON.stringify([_view, section, _look_pick, _armed])
-	if key == _shown_json and not force:
+	if key == _shown_json and not force and not rebuild:
 		return
 	_shown_json = key
-	_build()
+	_build(rebuild)
 
 
-func _build() -> void:
+## Rows whose nodes match the list's are updated in place, a row whose shape changed is remade
+## alone, and the whole list only when its rows are others: telemetry changes a value a few times
+## a second, and remaking every row under a scroll or a finger costs the unit.
+func _build(rebuild := false) -> void:
 	var look := section is String
+	var head := [_apply.text, _apply.visible, _heading_label.text, _up.visible]
 	_apply.text = str(_view.get("applyText", "Apply"))
 	_apply.visible = bool(_view.get("apply", false))
 	_apply_note.visible = _apply.visible
-	_build_sections()
-	for c in _rows.list.get_children():
-		_rows.list.remove_child(c)
-		c.queue_free()
-	var g: float = ThemeManager.px.gap
-	_rows.list.add_theme_constant_override("separation", roundi(g * 0.6))
+	_build_sections(rebuild)
 	var titles: Array = _view.get("titles", [])
+	# A list of rows (LIVI's list, the look's, an app's) diffs; any other page is made whole.
+	var items = null
+	var whole := Callable()
 	if look:
 		_heading_label.text = str(_apps[section].get("title", "")) if _app_open() and _look_pick == "" \
 			else "Look" if _look_pick == "" else _look_row(_look_pick).label
 		_up.visible = _look_pick != ""
 		if _look_pick == "":
+			items = []
 			for r in _look_rows():
-				_rows.list.add_child(_group_heading(r.label) if r.kind == "heading" else _row(r, r.key))
+				items.append({key = "%s/%s" % [r.key, r.kind] if r.kind != "heading" else "heading/" + r.label, r = r, id = r.key})
 		elif _look_pick == RAIL:
-			_build_rail()
+			whole = _build_rail
 		else:
-			_add_picks(_look_row(_look_pick).options, func(i): _look_set(_look_pick, _look_row(_look_pick).options[i].value); _look_pick = ""; _refresh(true))
+			whole = func(): _add_picks(_look_row(_look_pick).options, func(i): _look_set(_look_pick, _look_row(_look_pick).options[i].value); _look_pick = ""; _refresh(true))
 	else:
 		_heading_label.text = str(titles[-1]) if not titles.is_empty() else ""
 		_up.visible = titles.size() > 1
-		_build_livi()
-	_place()
+		if str(_view.get("kind", "")) == "list":
+			items = _livi_items()
+		else:
+			whole = _build_livi
+	var structure := JSON.stringify([section, _look_pick, titles, _view.get("kind"), _view.get("dialog"),
+		items.map(func(it): return it.key) if items != null else null])
+	var remade := rebuild or items == null or structure != _rows_structure
+	_rows_structure = structure
+	if remade:
+		for c in _rows.list.get_children():
+			_rows.list.remove_child(c)
+			c.queue_free()
+		_rows.list.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.6))
+		if items == null:
+			whole.call()
+		else:
+			var d = _view.get("dialog")
+			if not look and d is Dictionary:
+				_rows.list.add_child(_dialog(d))
+			for it in items:
+				_rows.list.add_child(_item_node(it))
+	else:
+		var w := _fit_width()
+		var at: int = _rows.list.get_child_count() - items.size()
+		for k in items.size():
+			var it: Dictionary = items[k]
+			var b: Control = _rows.list.get_child(at + k)
+			if b.get_meta("data", "") == JSON.stringify(it.r) and _armed_tool(it.r, it.id) == b.get_meta("armed_tool", -1):
+				continue
+			if b.get_meta("shape", "") != _shape(it):
+				var nb := _item_node(it)
+				_rows.list.remove_child(b)
+				b.queue_free()
+				_rows.list.add_child(nb)
+				_rows.list.move_child(nb, at + k)
+				_fit_row(nb, w)
+			else:
+				_update_row(b, it)
+				_fit_row(b, w)
+	if str(_view.get("kind", "")) in ["text", "color"] and not look:
+		_type_text()
+	if remade or head != [_apply.text, _apply.visible, _heading_label.text, _up.visible]:
+		_place()
 
 
-func _build_sections() -> void:
-	for c in _sections.list.get_children():
-		_sections.list.remove_child(c)
-		c.queue_free()
-	_sections.list.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.5))
+## LIVI's list rows, keyed by index and kind.
+func _livi_items() -> Array:
+	var out := []
+	var rows: Array = _view.get("rows", [])
+	for i in rows.size():
+		var r: Dictionary = rows[i]
+		# Skipped, not removed: a row's index is what a touch sends back.
+		if r.get("hidden", false):
+			continue
+		# Drive.moving, not locked(): no passenger unlock or offroad mode lets this through.
+		if r.get("parkedOnly", false) and Drive.moving:
+			r = r.duplicate()
+			r.enabled = false
+			r.detail = "Available when parked"
+			if str(i) == _armed:
+				_armed = ""
+		if str(i) == _armed:
+			r = r.duplicate()
+			r.label = "Tap again: %s" % r.label
+			r.alert = true
+		out.append({key = "%d/%s" % [i, r.get("kind", "")], r = r, id = i})
+	return out
+
+
+func _item_node(it: Dictionary) -> Control:
+	var n: Control = _group_heading(it.r.label) if it.r.kind == "heading" else _row(it.r, it.id)
+	n.set_meta("shape", _shape(it))
+	n.set_meta("data", JSON.stringify(it.r))
+	n.set_meta("armed_tool", _armed_tool(it.r, it.id) if it.r.kind != "heading" else -1)
+	return n
+
+
+## What a row's nodes are made from: all but what `_update_row` sets in place.
+func _shape(it: Dictionary) -> String:
+	var r: Dictionary = it.r
+	if r.kind == "heading":
+		return JSON.stringify(r)
+	var s := r.duplicate(true)
+	# A picture's value is the picture.
+	for k in ["label", "detail", "checked", "level"] + ([] if r.kind == "picture" else ["value"]):
+		s.erase(k)
+	s.has_value = str(r.get("value", "")) != ""
+	s.has_detail = str(r.get("detail", "")) != ""
+	if s.get("slider") is Dictionary:
+		s.slider.erase("level")
+		s.slider.erase("text")
+	for o in s.get("options", []):
+		if o is Dictionary:
+			o.erase("selected")
+	s.armed_tool = _armed_tool(r, it.id)
+	return JSON.stringify([it.id, s])
+
+
+func _armed_tool(r: Dictionary, id: Variant) -> int:
+	var tools: Array = r.get("tools", [])
+	for j in tools.size():
+		if _armed == "%s/%d" % [id, j]:
+			return j
+	return -1
+
+
+## Sets what changed in a row of the same shape, keeping its nodes (and a finger on them).
+func _update_row(b: Control, it: Dictionary) -> void:
+	var r: Dictionary = it.r
+	b.set_meta("data", JSON.stringify(r))
+	if r.kind == "heading":
+		return
+	var n := str(r.get("label", "row")).validate_node_name()
+	if b.name != n:
+		b.name = n
+	var title: Label = b.get_meta("title")
+	if _armed_tool(r, it.id) < 0:
+		title.text = str(r.get("label", ""))
+	var need := _text_width(title)
+	if b.has_meta("detail"):
+		var d: Label = b.get_meta("detail")
+		d.text = str(r.get("detail", ""))
+		need = maxf(need, _text_width(d))
+	if b.has_meta("value"):
+		b.get_meta("value").text = str(r.get("value", ""))
+	if b.has_meta("switch"):
+		var sw: SwitchMark = b.get_meta("switch")
+		if sw.on != bool(r.get("checked", false)):
+			sw.on = not sw.on
+			sw.queue_redraw()
+	if b.has_meta("slider") and not _sliding:
+		b.get_meta("slider").set_value_no_signal(float(r.slider.get("level", 0.0)))
+		b.get_meta("slider_text").text = str(r.slider.get("text", ""))
+	if b.has_meta("progress"):
+		b.get_meta("progress").value = clampf(float(r.get("level", 0.0)), 0.0, 1.0)
+	if b.has_meta("choice"):
+		var opts: Array = r.get("options", [])
+		var bs: Array = b.get_meta("choice").get_children()
+		for i in mini(opts.size(), bs.size()):
+			bs[i].set_pressed_no_signal(bool(opts[i].get("selected", false)))
+	if b.has_meta("wrap_side"):
+		b.set_meta("wrap_need", need)
+		var key := "%s/%s/%s" % [section, it.id, r.get("label", "")]
+		if key != b.get_meta("wrap_key"):
+			_wrapped[key] = _wrapped.get(b.get_meta("wrap_key"), false)
+			b.set_meta("wrap_key", key)
+
+
+func _build_sections(rebuild := false) -> void:
 	# The shell's own first: LIVI's list runs past the panel's height.
 	var items: Array = [[LOOK, "Look", "brush"]]
 	for id in _apps:
@@ -286,6 +433,17 @@ func _build_sections() -> void:
 	for s in _view.get("sections", []):
 		items.append([i, str(s.get("label", "")), _section_icon(str(s.get("icon", "")))])
 		i += 1
+	var key := JSON.stringify(items)
+	if key == _sections_key and not rebuild:
+		for b in _sections.list.get_children():
+			var t = b.get_meta("target")
+			b.set_pressed_no_signal(typeof(t) == typeof(section) and t == section)
+		return
+	_sections_key = key
+	for c in _sections.list.get_children():
+		_sections.list.remove_child(c)
+		c.queue_free()
+	_sections.list.add_theme_constant_override("separation", roundi(ThemeManager.px.gap * 0.5))
 	for it in items:
 		var b := Button.new()
 		b.name = it[1].validate_node_name()
@@ -303,6 +461,7 @@ func _build_sections() -> void:
 		b.add_theme_stylebox_override("pressed", _flat_box(ThemeManager.c.accent))
 		b.add_theme_stylebox_override("hover_pressed", _flat_box(ThemeManager.c.accent))
 		var target = it[0]
+		b.set_meta("target", target)
 		b.pressed.connect(func(): if not _sections.dragged: open_section(target))
 		_sections.list.add_child(b)
 
@@ -318,28 +477,6 @@ func _section_icon(material_name: String) -> String:
 
 func _build_livi() -> void:
 	match str(_view.get("kind", "")):
-		"list":
-			var d = _view.get("dialog")
-			if d is Dictionary:
-				_rows.list.add_child(_dialog(d))
-			var rows: Array = _view.get("rows", [])
-			for i in rows.size():
-				var r: Dictionary = rows[i]
-				# Skipped, not removed: a row's index is what a touch sends back.
-				if r.get("hidden", false):
-					continue
-				# Drive.moving, not locked(): no passenger unlock or offroad mode lets this through.
-				if r.get("parkedOnly", false) and Drive.moving:
-					r = r.duplicate()
-					r.enabled = false
-					r.detail = "Available when parked"
-					if str(i) == _armed:
-						_armed = ""
-				if str(i) == _armed:
-					r = r.duplicate()
-					r.label = "Tap again: %s" % r.label
-					r.alert = true
-				_rows.list.add_child(_row(r, i))
 		"select":
 			var opts: Array = _view.get("options", [])
 			_add_picks(opts, func(i): if not bool(_view.get("readOnly", false)): Core.settings_pick(-1, i); _refresh(true))
@@ -352,7 +489,6 @@ func _build_livi() -> void:
 		"text", "color":
 			var r := {kind = "info", label = str(_view.get("value", "")), value = "", enabled = true}
 			_rows.list.add_child(_row(r, -1))
-			_type_text()
 		_:
 			_rows.list.add_child(_note("This page needs LIVI's own settings screen."))
 
@@ -389,10 +525,7 @@ func _row(r: Dictionary, id: Variant) -> Button:
 	b.add_theme_stylebox_override("pressed", down)
 	b.add_theme_stylebox_override("hover_pressed", down)
 
-	var armed_tool := -1
-	for j in tools.size():
-		if _armed == "%s/%d" % [id, j]:
-			armed_tool = j
+	var armed_tool := _armed_tool(r, id)
 	var title := str(r.get("label", ""))
 	if armed_tool >= 0:
 		title = "Tap again: %s" % str(tools[armed_tool].get("label", ""))
@@ -400,17 +533,22 @@ func _row(r: Dictionary, id: Variant) -> Button:
 	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.clip_text = true
+	b.set_meta("title", label)
 	var text_parts: Array = [label]
 	var value := str(r.get("value", ""))
 	var side: Control = null
 	if r.has("slider"):
 		side = _slider(r.slider, id)
+		b.set_meta("slider", side.get_node("Slider"))
+		b.set_meta("slider_text", side.get_child(1))
 	elif inline:
 		side = _segments(opts, id)
+		b.set_meta("choice", side)
 	elif r.has("number"):
 		side = _stepper(r.number, id)
 	elif kind == "switch":
 		side = SwitchMark.new(bool(r.get("checked", false)))
+		b.set_meta("switch", side)
 	elif kind == "button" and str(r.get("button", "")) != "":
 		var act := Button.new()
 		act.name = "Act"
@@ -422,6 +560,7 @@ func _row(r: Dictionary, id: Variant) -> Button:
 		side = act
 	elif kind == "progress":
 		side = _progress(float(r.get("level", 0.0)))
+		b.set_meta("progress", side)
 	# The value says what a control would; with a control, the row says it already.
 	if value != "" and side == null:
 		var v := UI.label(value, "body", "body", "dim")
@@ -431,10 +570,12 @@ func _row(r: Dictionary, id: Variant) -> Button:
 		v.size_flags_stretch_ratio = 0.8
 		v.clip_text = true
 		side = v
+		b.set_meta("value", v)
 	if str(r.get("detail", "")) != "":
 		var d := UI.label(str(r.detail), "body", "caption", "dim")
 		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		text_parts.append(d)
+		b.set_meta("detail", d)
 	var text := UI.vbox(text_parts, 0)
 	text.alignment = BoxContainer.ALIGNMENT_CENTER
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -498,26 +639,32 @@ func _row(r: Dictionary, id: Variant) -> Button:
 ## else under the text, the row's width. Follows the list's width, so a resize, the text size,
 ## the status bar's edge, the rail and the hand all come through `_place`.
 func _fit_rows() -> void:
-	var w: float = _rows.size.x - ThemeManager.px.gap * 2.4
-	if w <= 0.0:
-		return
+	var w := _fit_width()
 	for b in _rows.list.get_children():
-		if not b.has_meta("wrap_side"):
-			continue
-		var side: Control = b.get_meta("wrap_side")
-		var box: HBoxContainer = b.get_node("Box")
-		var need: float = b.get_meta("wrap_need") + _line_width(side) + ThemeManager.px.touch * WRAP_ROOM
-		var n := 1
-		for c in box.get_children():
-			if c is Control and c.visible and c != side and c != b.get_meta("wrap_text"):
-				need += c.get_combined_minimum_size().x
-				n += 1
-		need += box.get_theme_constant("separation") * n
-		var key: String = b.get_meta("wrap_key")
-		var was: bool = _wrapped.get(key, false)
-		var wrap: bool = need > (w - ThemeManager.px.touch if was else w)
-		_wrapped[key] = wrap
-		_set_wrapped(b, wrap)
+		_fit_row(b, w)
+
+
+func _fit_width() -> float:
+	return _rows.size.x - ThemeManager.px.gap * 2.4
+
+
+func _fit_row(b: Control, w: float) -> void:
+	if w <= 0.0 or not b.has_meta("wrap_side"):
+		return
+	var side: Control = b.get_meta("wrap_side")
+	var box: HBoxContainer = b.get_node("Box")
+	var need: float = b.get_meta("wrap_need") + _line_width(side) + ThemeManager.px.touch * WRAP_ROOM
+	var n := 1
+	for c in box.get_children():
+		if c is Control and c.visible and c != side and c != b.get_meta("wrap_text"):
+			need += c.get_combined_minimum_size().x
+			n += 1
+	need += box.get_theme_constant("separation") * n
+	var key: String = b.get_meta("wrap_key")
+	var was: bool = _wrapped.get(key, false)
+	var wrap: bool = need > (w - ThemeManager.px.touch if was else w)
+	_wrapped[key] = wrap
+	_set_wrapped(b, wrap)
 
 
 ## A control's width on one line: a choice's options side by side.

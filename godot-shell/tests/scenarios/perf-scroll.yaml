@@ -23,6 +23,18 @@ steps:
         # p95 16 ms; main thread 0.4 ms p95, 1 ms before home's cards waited off home; the
         # hidden app drew at the shell's frame rate before it was paused).
         vm: { frame_ms_p95: 32, process_ms_p95: 0.8, "client_fps:org.livi.test.anim": 1 }
+  # LIVI's Car rows show telemetry: a new value updates its row, not the page.
+  - tap: { node: Settings/Sections/List/Car }
+  - wait: { frames: 2 }
+  - measure:
+      name: settings-car-scroll
+      frames: 240
+      scroll: Settings/Rows
+      pulse: { path: telemetry/batteryLevelKwh, every: 10 }
+      expect:
+        # Measured: main thread 0.95 ms p95 (the core's view, read on each change), no node made;
+        # 2.0 ms p95, 25.6 ms max and 1164 nodes when each change remade the page.
+        vm: { frame_ms_p95: 32, process_ms_p95: 1.9, nodes_added: 0 }
   - page: apps
   - gdscript: |
       var apps := []

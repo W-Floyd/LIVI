@@ -138,6 +138,26 @@ steps:
   - set: { core: { telemetry: { preconditionState: armed, preconditionWhy: "the charger is 11 kW, not above 50" } } }
   - page: settings
   - tap: { node: Settings/Sections/List/Car }
+  # Telemetry updates a row in place; rows coming or going remake the list.
+  - gdscript: |
+      var list: Control = shell.get_node("Settings/Rows/List")
+      var soc: Control = list.get_node("State of Charge")
+      var first := list.get_child(0).get_instance_id()
+      Core.fake_set("telemetry/batteryLevelKwh", 38.7)
+      await runner.frames(30)
+      if not is_instance_valid(soc) or list.get_node_or_null("State of Charge") != soc:
+          return "the row was remade for a new value"
+      if list.get_child(0).get_instance_id() != first:
+          return "another row was remade"
+      if soc.get_meta("value").text != "50 %":
+          return "State of Charge shows %s" % soc.get_meta("value").text
+      Core.fake_set("telemetry/batteryCapacityKwh", null)
+      await runner.frames(30)
+      if list.has_node("Battery Capacity") or is_instance_valid(soc) and soc.is_inside_tree():
+          return "a row gone left the list as it was"
+      Core.fake_set("telemetry/batteryCapacityKwh", 77.4)
+      Core.fake_set("telemetry/batteryLevelKwh", 49.5)
+      await runner.frames(30)
   - gdscript: |
       var rows: DragScroll = shell.get_node("Settings/Rows")
       if not rows.list.has_node("Battery Preconditioning"):

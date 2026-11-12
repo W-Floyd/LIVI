@@ -18,8 +18,8 @@ Sources:
 
 | Setting (page id) | Read | Write |
 |---|---|---|
-| Charge limit AC/DC (`charge_limit_ac/dc`) | ✓ `chargeLimitAc/DcPct` (micom-livi, items 0x21/0x22), never yet seen on the wire | none: row read-only |
-| AC charging current (`ac_current`) | none | none |
+| Charge limit AC/DC (`charge_limit_ac/dc`) | ✓ `chargeLimitAc/DcPct` (micom-livi, items 0x21/0x22, 0x8C01) | ✓ `setEvCharge` → micom-livi `ev-charge-limits` (0x0C18), **only with `-ev-charge-writes`**, parked |
+| AC charging current (`ac_current`) | ✓ `acChargingCurrentPct` (micom-livi, item 0x51), on change only | ✓ as above, `ev-charging-current` (0x0C5B); charger ready only |
 | Departure 1/2 (`departure_1/2`) | ✓ `departure1/2` (micom-livi, 0x8C55 + 0x8C53 [0]) | ✓ `setEvSchedule` → micom-livi `ev-departures` (0x0C06), **only with `-ev-schedule-writes`**, parked |
 | Off-peak window, off-peak mode (`off_peak`, `off_peak_mode`) | ✓ `offPeak`, `scheduledChargingMode` (0x8C53) | ✓ as above, `ev-off-peak` (0x0C05); mode code 1 never |
 | Scheduled charging (`scheduled_charging`) | none (0x8C4A [3] not decoded) | none |
@@ -47,8 +47,8 @@ message, a micom-livi opt-in path, a core action, and `write = "core"` with a ca
 - Read items 0x21 (AC), 0x22 (DC), 0x31 (route); 0x8C01 [50], [51]; x0.5 %. **S, G**. Items not seen in **C**:
   item updates are on change only. Stock shows a readback of 75 % as 70 %. **E**
 - Range at limit: items 0x1f/0x20, seen 406-414 km. **C**
-- micomd's `-input` keeps the fields an input omits: LIVI must send the other limits and winter mode as `null`,
-  or a DC write resends its last AC value. go-micomd `ev-charge-limits`. **G**
+- go-micomd `ev-charge-limits` is `merge: false`: an input naming one limit sends stock's frame, never a limit
+  an earlier input set. **G**
 - Kia Connect (TMU, `HKMC_TAppService`) has the 6-byte `setTargetSOC` (AC and DC together, [2] = 0); no caller
   found. **S**
 - Unknown: ack beyond the item echo; persistence across ignition (likely VCU-held); whether a value outside
@@ -67,6 +67,18 @@ message, a micom-livi opt-in path, a core action, and `write = "core"` with a ca
 - go-micomd `ev-charging-current`. **G**
 - Unknown: raw readback from the car; 0x8C50 is only answered to the 0x0C50 startup read (not in **C**).
 - Risk: changing it mid-charge may stop the charge.
+
+### Charge edits (limits, AC current)
+- Path: the page's `setEvCharge` action (one setting) → core `evCharge.request` → GET /navigation
+  `evChargeRequest` → micom-livi sends that setting alone as stock does (`{"msg":"ev-charge-limits","ac_limit":80}`
+  → `00 00 c0 00 a0 ff ff`; `ev-charging-current` `reduced`, then `default` 120 ms later), nothing when the car
+  already reports the value, and reports `evChargeWrite` confirmed once item 0x21/0x22/0x51 matches, failed after
+  10 s. Core and page as the schedule edits.
+- Gates, all needed: micomd `-allow-inferred -allow-dangerous-msg ...,ev-charge-limits,ev-charging-current`,
+  micom-livi `-ev-charge-writes` (off by default), parked; the current also needs `chargerReady` (stock greys it).
+- Refused: a limit the car has not reported (else a value already held would never be confirmed), off 50-100 % in
+  tens, a current other than 100/90/60 %. The current is sent though unreported (the car reports it only on
+  change); if the car already held it, the edit fails "did not report it back" though nothing changed.
 
 ### Schedule edits (departures, off-peak, climate)
 - Path: the page's `setEvSchedule` action (only the changed fields) → core `evSchedule.request` → GET
@@ -161,8 +173,16 @@ Reads (no writes):
 
 Writes (one at a time; read back via the items above and the cluster):
 - [ ] 0x0C62 on/off pulse, parked READY and IGN-only: item 0x63 follows? persists across ignition?
-- [ ] 0x0C18 `00 00 c0 00 a0 ff ff` (AC 80 %, stock's frame): item 0x21 → 0xa0? DC (0x22) and winter (0x44)
-      untouched?
+- [ ] Charge edits, first write (user's OK first). Before: micom-livi without `-ev-charge-writes`; the Charging
+      page shows AC/DC limits read-only (from 0x8C01). Then micom-livi `-ev-charge-writes`, parked, IGN on,
+      unplugged or not charging:
+      1. AC limit to 80 %. Expect one `ev-charge-limits` line in micom-livi's log and micomd's record
+         `0x0C18 00 00 c0 00 a0 ff ff`; only item 0x21 changes (→ a0); DC (0x22) and winter mode (0x44) untouched;
+         the page "confirmed" (no failure row).
+      2. AC back to 100 %: `00 00 c0 00 c8 ff ff`, item 0x21 → c8.
+      3. Current 90 %: `0x0C5B 02` then `00`, item 0x51 → 2; then 100 %: `01`, `00`, item 0x51 → 1 (or 0).
+      4. IGN off/on: values kept? Stock HU / Kia Connect show the same?
+      Stop at the first unexpected byte.
 - [ ] 0x0C18 `00 00 c0 00 ff b4 ff` (DC 90 %); then AC `.. 64 ff ff` (50 %) below SoC while AC charging: does the
       charge stop as **M** says?
 - [ ] 0x0C18 off-step or out of range (AC 0x96 = 75 %, 0x5a = 45 %): refused or clamped?

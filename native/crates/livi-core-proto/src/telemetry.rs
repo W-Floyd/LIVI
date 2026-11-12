@@ -61,6 +61,7 @@
 //! | departure1, departure2, offPeak     | ✓    | ·            | ·               | ·             |
 //! | scheduledChargingMode, scheduled*   | ✓    | ·            | ·               | ·             |
 //! | evScheduleWrites, evScheduleWrite   | ✓    | ·            | ·               | ·             |
+//! | acChargingCurrentPct, evChargeWrite*| ✓    | ·            | ·               | ·             |
 //! | rangeMaxElectricKm                  | ✓    | ·            | ✓ (electric)    | ✓ (electric)  |
 //! | carType                             | ✓    | ✓            | ✓               | ✓             |
 //! | evConnectorTypes                    | ✓    | ✓            | ✓               | ✓             |
@@ -197,6 +198,8 @@ pub struct TelemetrySnapshot {
     /// Where AC and DC charging stop, 0 to 100.
     pub charge_limit_ac_pct: Option<f64>,
     pub charge_limit_dc_pct: Option<f64>,
+    /// The AC charging current the car holds: 100, 90 or 60 % of the charger's.
+    pub ac_charging_current_pct: Option<f64>,
     /// The range once charged to each limit.
     pub range_at_charge_limit_ac_km: Option<f64>,
     pub range_at_charge_limit_dc_km: Option<f64>,
@@ -239,6 +242,11 @@ pub struct TelemetrySnapshot {
     pub ev_schedule_writes: Option<bool>,
     /// How the car integration's last edit went.
     pub ev_schedule_write: Option<EvScheduleWrite>,
+    /// The car integration sends `SetEvCharge` changes (go-micomd's micom-livi
+    /// `-ev-charge-writes`); else the charge limits and AC current are read only.
+    pub ev_charge_writes: Option<bool>,
+    /// How the car integration's last charge change went.
+    pub ev_charge_write: Option<EvScheduleWrite>,
     /// The range on a full battery.
     pub range_max_electric_km: Option<f64>,
     /// A `CarType` name such as `HybridDiesel`, written into the settings when it differs.
@@ -342,7 +350,7 @@ pub struct OffPeak {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EvScheduleWrite {
-    /// The `evSchedule` request's id.
+    /// The `evSchedule` (or `evCharge`) request's id.
     pub id: u64,
     /// `sending`, then `confirmed` (the car reported it back) or `failed`.
     pub state: String,
@@ -511,6 +519,13 @@ mod tests {
             scheduled_charging_mode: Some("off_peak_only".into()),
             scheduled_climate_temp_code: Some(20),
             ev_schedule_writes: Some(true),
+            ac_charging_current_pct: Some(90.0),
+            ev_charge_writes: Some(true),
+            ev_charge_write: Some(EvScheduleWrite {
+                id: 4,
+                state: "failed".into(),
+                why: Some("the on-board charger is not ready".into()),
+            }),
             ev_schedule_write: Some(EvScheduleWrite {
                 id: 3,
                 state: "confirmed".into(),
@@ -565,6 +580,12 @@ mod tests {
             ("scheduledChargingMode", json!("off_peak_only")),
             ("scheduledClimateTempCode", json!(20)),
             ("evScheduleWrites", json!(true)),
+            ("acChargingCurrentPct", json!(90.0)),
+            ("evChargeWrites", json!(true)),
+            (
+                "evChargeWrite",
+                json!({ "id": 4, "state": "failed", "why": "the on-board charger is not ready" }),
+            ),
             (
                 "evScheduleWrite",
                 json!({ "id": 3, "state": "confirmed", "why": null }),

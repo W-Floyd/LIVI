@@ -23,6 +23,8 @@ pub struct State {
     pub precondition: Precondition,
     #[serde(default)]
     pub ev_schedule: EvSchedule,
+    #[serde(default)]
+    pub ev_charge: EvCharge,
     pub system: System,
     pub devices: Vec<DeviceView>,
     pub cameras: Vec<CameraView>,
@@ -49,6 +51,7 @@ impl State {
             "navigation" => self.navigation = read(value)?,
             "precondition" => self.precondition = read(value)?,
             "evSchedule" => self.ev_schedule = read(value)?,
+            "evCharge" => self.ev_charge = read(value)?,
             "system" => self.system = read(value)?,
             "devices" => self.devices = read(value)?,
             "cameras" => self.cameras = read(value)?,
@@ -440,6 +443,67 @@ pub struct OffPeakEdit {
     pub end_hour: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_minute: Option<u8>,
+}
+
+/// The user's change of the car's charge limits or AC charging current on its way to the car, as
+/// `EvSchedule`: GET /navigation `evChargeRequest`, telemetry `evChargeWrite`. Runtime only.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvCharge {
+    pub request: Option<EvChargeRequest>,
+    pub last: Option<EvScheduleOutcome>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvChargeRequest {
+    pub id: u64,
+    /// Unix seconds.
+    pub at: u64,
+    pub set: EvChargeEdit,
+}
+
+/// What to change, in %; each named setting goes to the car alone, the rest left as it has them.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EvChargeEdit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charge_limit_ac_pct: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charge_limit_dc_pct: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charging_current_pct: Option<u8>,
+}
+
+/// The AC charging current's choices, % of the charger's (stock's three).
+pub const EV_CHARGING_CURRENTS: [u8; 3] = [100, 90, 60];
+
+impl EvChargeEdit {
+    /// Why the car could not take it, if so: stock's page offers limits of 50 to 100 % in tens.
+    pub fn check(&self) -> Result<(), String> {
+        let mut bad = Vec::new();
+        for (what, l) in [
+            ("AC", self.charge_limit_ac_pct),
+            ("DC", self.charge_limit_dc_pct),
+        ] {
+            if let Some(l) = l.filter(|l| !(50..=100).contains(l) || l % 10 != 0) {
+                bad.push(format!("{what} limit {l} %: 50 to 100 in tens"));
+            }
+        }
+        if let Some(c) = self
+            .charging_current_pct
+            .filter(|c| !EV_CHARGING_CURRENTS.contains(c))
+        {
+            bad.push(format!("charging current {c} %: 100, 90 or 60"));
+        }
+        if *self == EvChargeEdit::default() {
+            bad.push("nothing to change".into());
+        }
+        match bad.is_empty() {
+            true => Ok(()),
+            false => Err(bad.join("; ")),
+        }
+    }
 }
 
 pub const EV_CHARGING_MODES: [&str; 3] = ["off", "prioritize_off_peak", "off_peak_only"];

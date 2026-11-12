@@ -405,6 +405,10 @@ fn navigation_api(s: &State) -> Value {
         "evScheduleRequest".into(),
         serde_json::to_value(&s.ev_schedule.request).unwrap_or(Value::Null),
     );
+    nav.insert(
+        "evChargeRequest".into(),
+        serde_json::to_value(&s.ev_charge.request).unwrap_or(Value::Null),
+    );
     Value::Object(nav)
 }
 
@@ -524,6 +528,7 @@ mod tests {
             navigation: Default::default(),
             precondition: Default::default(),
             ev_schedule: Default::default(),
+            ev_charge: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),
@@ -990,6 +995,7 @@ mod tests {
         assert_eq!(nav["active"], Value::Null);
         assert_eq!(nav["chargingStop"], Value::Null);
         assert_eq!(nav["evScheduleRequest"], Value::Null);
+        assert_eq!(nav["evChargeRequest"], Value::Null);
         assert_eq!(
             nav["precondition"],
             json!({ "mode": "auto", "manual": false, "manualUntil": null, "minKw": 50 }),
@@ -1002,6 +1008,14 @@ mod tests {
                 at: 1_762_700_000,
                 set: livi_core_proto::state::EvScheduleEdit {
                     climate: Some(true),
+                    ..Default::default()
+                },
+            });
+            s.ev_charge.request = Some(livi_core_proto::state::EvChargeRequest {
+                id: 2,
+                at: 1_762_700_000,
+                set: livi_core_proto::state::EvChargeEdit {
+                    charge_limit_ac_pct: Some(80),
                     ..Default::default()
                 },
             });
@@ -1021,10 +1035,14 @@ mod tests {
         assert_eq!(nav["active"], json!(true));
         assert_eq!(nav["maneuverType"], json!(2));
         assert_eq!(nav["remainDistance"], json!(300.0));
-        // micom-livi's scheduleRequest (go-micomd cmd/micom-livi).
+        // micom-livi's writeRequest (go-micomd cmd/micom-livi).
         assert_eq!(
             nav["evScheduleRequest"],
             json!({ "id": 3, "at": 1_762_700_000, "set": { "climate": true } })
+        );
+        assert_eq!(
+            nav["evChargeRequest"],
+            json!({ "id": 2, "at": 1_762_700_000, "set": { "chargeLimitAcPct": 80 } })
         );
         assert_eq!(
             nav["chargingStop"],

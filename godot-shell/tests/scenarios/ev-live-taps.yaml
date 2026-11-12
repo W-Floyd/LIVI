@@ -99,9 +99,9 @@ steps:
   - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Plus, disabled: true }
   - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Tag/Label, text: "Read only" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_dc/Lines/Line/Stepper/Value, text: 100 % }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Tag/Label, text: "Not available" }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Text/Detail, text: "Lower it if a charger stops." }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "LIVI cannot set these on the car yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Tag/Label, text: "Read only" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Text/Detail, text: "Not reported by the car yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "Read only: the car link does not set charging (micom-livi -ev-charge-writes)" }
   - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/max, disabled: true }
   - screenshot: ev-settings-charging
   - tap: { node: EvLive/EvSettings/Sections/List/schedule }
@@ -134,18 +134,14 @@ steps:
   - expect_node: { path: EvLive/EvSettings/Rows/List/v2l_limit/Lines/Line/Stepper/Value, text: – }
   # Once the car link has a path (EvSettingsLink.fake stands in): what each control sends. A set
   # goes leaf by leaf: the objects first.
-  - set: { core: { telemetry: { acChargingCurrent: max, v2lDischargeLimitPct: 30, utilityMode: false } } }
+  - set: { core: { telemetry: { v2lDischargeLimitPct: 30, utilityMode: false } } }
   - gdscript: |
       EvSettingsLink.fake = true
       shell.get_node("EvLive/EvSettings")._refresh(true)
       await runner.frames(2)
   - tap: { node: EvLive/EvSettings/Rows/List/v2l_limit/Lines/Line/Stepper/Minus }
   - tap: { node: EvLive/EvSettings/Rows/List/utility_mode/Lines/Line/Act }
-  - tap: { node: EvLive/EvSettings/Sections/List/charging }
-  - tap: { node: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Plus }
-  - tap: { node: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/min, with: touch }
-  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/min, button_pressed: false }
   - gdscript: |
-      var want := [["v2l_limit", 20.0], ["utility_mode", true], ["charge_limit_ac", 100.0], ["ac_current", "min"]]
+      var want := [["v2l_limit", 20.0], ["utility_mode", true]]
       if str(EvSettingsLink.written) != str(want):
           return "sent %s" % [EvSettingsLink.written]

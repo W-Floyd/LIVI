@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::input::Input;
 use crate::patch::PatchOp;
-use crate::state::{Area, EvScheduleEdit, Front, Screen, State};
+use crate::state::{Area, EvChargeEdit, EvScheduleEdit, Front, Screen, State};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -177,6 +177,11 @@ pub enum Action {
     /// (telemetry `evScheduleWrites`) and while parked.
     SetEvSchedule {
         set: EvScheduleEdit,
+    },
+    /// Changes the car's charge limits or AC charging current through its car integration, only
+    /// where it says it can (telemetry `evChargeWrites`) and while parked.
+    SetEvCharge {
+        set: EvChargeEdit,
     },
     Quit,
     Restart,

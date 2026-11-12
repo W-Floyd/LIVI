@@ -1,0 +1,74 @@
+name: ev-settings-charging
+# The EV settings' charge limits and AC charging current as the car reports them. Read only until
+# the car link sets them (micom-livi -ev-charge-writes) and while driving; then a step or choice
+# goes as SetEvCharge with that setting alone, shows as asked while the core's change stands, and
+# on failure says why and shows the car's own again. The current takes a change before the car
+# has reported it (it reports only on change), and only while the charger is ready, as stock.
+fixtures:
+  core: fixtures/ev6-main.json
+theme: { theme_name: calm, appearance: day }
+steps:
+  - page: ev_live
+  - set: { core: { telemetry: { chargeLimitAcPct: 90, chargeLimitDcPct: 100, chargerReady: true } } }
+  - tap: { node: EvLive/Settings }
+  - expect_node: { path: EvLive/EvSettings, visible: "true", section: charging }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "Read only: the car link does not set charging (micom-livi -ev-charge-writes)" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Tag/Label, text: "Read only" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Minus, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Tag/Label, text: "Read only" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/reduced, disabled: true }
+  # The car link sets them.
+  - set: { core: { telemetry: { evChargeWrites: true } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Minus, disabled: false }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Plus, disabled: false }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_dc/Lines/Line/Stepper/Plus, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Text/Detail, text: "Not reported by the car yet" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/reduced, disabled: false, button_pressed: false }
+  - gdscript: |
+      if shell.get_node("EvLive/EvSettings/Rows/List").has_node("Note"):
+          return "a note while every row takes a change"
+  - tap: { node: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Plus }
+  - expect_action: { SetEvCharge: { set: { chargeLimitAcPct: 100 } } }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Value, text: 90 % }
+  # The core's change stands: shown as asked, the rest locked.
+  - gdscript: |
+      Core.fake_set("evCharge/request", {id = 1, at = 1794213000, set = {chargeLimitAcPct = 100}})
+      await runner.frames(2)
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Value, text: 100 % }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Tag/Label, text: "Sending…" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "Sending to the car…" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/reduced, disabled: true }
+  # It was not reported back: the car's own again, and why.
+  - gdscript: |
+      Core.fake_set("evCharge", {request = null, last = {id = 1, ok = false, why = "the car did not report it back within 10s (Charge limit, AC)"}})
+      await runner.frames(2)
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Value, text: 90 % }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_failed/Lines/Line/Text/Detail, text: "The car did not report it back within 10s (Charge limit, AC). Shown as the car has it." }
+  - tap: { node: EvLive/EvSettings/Rows/List/charge_limit_dc/Lines/Line/Stepper/Minus }
+  - expect_action: { SetEvCharge: { set: { chargeLimitDcPct: 90 } } }
+  # The current: the choice goes as its %, the toggle showing the car's until it reports.
+  - gdscript: |
+      var rows: DragScroll = shell.get_node("EvLive/EvSettings/Rows")
+      rows.offset = rows.list.get_node("ac_current").position.y
+      await runner.frames(2)
+  - tap: { node: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/reduced, with: touch }
+  - expect_action: { SetEvCharge: { set: { chargingCurrentPct: 90 } } }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/reduced, button_pressed: false }
+  - set: { core: { telemetry: { acChargingCurrentPct: 60 } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/min, button_pressed: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Text/Detail, text: "Lower it if a charger stops." }
+  # Stock greys the current until the on-board charger is ready.
+  - set: { core: { telemetry: { chargerReady: false } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Tag/Label, text: "Read only" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/max, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "Read only until the charger is ready" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Plus, disabled: false }
+  # Driving locks them.
+  - set: { core: { telemetry: { chargerReady: true, drivingRegulation: true, gear: D } } }
+  - wait: { frames: 2 }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/Note, text: "Read only while driving" }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/charge_limit_ac/Lines/Line/Stepper/Plus, disabled: true }
+  - expect_node: { path: EvLive/EvSettings/Rows/List/ac_current/Lines/Line/Choice/max, disabled: true }

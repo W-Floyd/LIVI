@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Additional terms: see NOTICE
 
-//! The user's edits of the car's EV schedules. LIVI only states the edit at GET /navigation; the
-//! car integration sends it and reports back in telemetry (`evScheduleWrite`), which ends it.
+//! The user's edits of the car's EV schedules, and changes of its charge limits and AC charging
+//! current. LIVI only states the edit at GET /navigation; the car integration sends it and
+//! reports back in telemetry (`evScheduleWrite`, `evChargeWrite`), which ends it.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use livi_core_proto::state::{EvSchedule, EvScheduleEdit, EvScheduleOutcome, EvScheduleRequest};
+use livi_core_proto::state::{
+    EvCharge, EvChargeEdit, EvChargeRequest, EvSchedule, EvScheduleEdit, EvScheduleOutcome,
+    EvScheduleRequest,
+};
 use serde_json::{Map, Value};
 
 use crate::server::Core;
@@ -25,18 +29,53 @@ pub fn request(
     set: EvScheduleEdit,
     now: u64,
 ) -> Result<EvScheduleRequest, String> {
-    if telemetry.get("evScheduleWrites") != Some(&Value::Bool(true)) {
-        return Err("the car link does not set the schedules".into());
+    gate(
+        telemetry,
+        "evScheduleWrites",
+        "the schedules",
+        s.request.is_some(),
+    )?;
+    set.check()?;
+    let id = s.last.as_ref().map_or(0, |l| l.id) + 1;
+    Ok(EvScheduleRequest { id, at: now, set })
+}
+
+/// The request for a charge change `set` made now, or why none can be made.
+pub fn charge_request(
+    s: &EvCharge,
+    telemetry: &Map<String, Value>,
+    set: EvChargeEdit,
+    now: u64,
+) -> Result<EvChargeRequest, String> {
+    gate(
+        telemetry,
+        "evChargeWrites",
+        "the charge settings",
+        s.request.is_some(),
+    )?;
+    set.check()?;
+    let id = s.last.as_ref().map_or(0, |l| l.id) + 1;
+    Ok(EvChargeRequest { id, at: now, set })
+}
+
+/// Why no change can go now: the car link does not send these (`writes`), the car is not
+/// parked, or one is still on its way.
+fn gate(
+    telemetry: &Map<String, Value>,
+    writes: &str,
+    what: &str,
+    pending: bool,
+) -> Result<(), String> {
+    if telemetry.get(writes) != Some(&Value::Bool(true)) {
+        return Err(format!("the car link does not set {what}"));
     }
     if let Some(why) = not_parked(telemetry) {
         return Err(why);
     }
-    if s.request.is_some() {
+    if pending {
         return Err("an edit is still on its way to the car".into());
     }
-    set.check()?;
-    let id = s.last.as_ref().map_or(0, |l| l.id) + 1;
-    Ok(EvScheduleRequest { id, at: now, set })
+    Ok(())
 }
 
 /// Out of Park by the car's own lockout or its gear.
@@ -50,26 +89,18 @@ fn not_parked(telemetry: &Map<String, Value>) -> Option<String> {
     }
 }
 
-/// The request's end, if the car integration's report or the time says so.
-fn ended(req: &EvScheduleRequest, report: Option<&Value>, now: u64) -> Option<EvScheduleOutcome> {
-    let report = report.filter(|r| r["id"].as_u64() == Some(req.id));
+/// The end of request `id` made at `at`, if the car integration's report or the time says so.
+fn ended(id: u64, at: u64, report: Option<&Value>, now: u64) -> Option<EvScheduleOutcome> {
+    let report = report.filter(|r| r["id"].as_u64() == Some(id));
     let why = report
         .and_then(|r| r["why"].as_str())
         .unwrap_or_default()
         .to_string();
     match report.and_then(|r| r["state"].as_str()) {
-        Some("confirmed") => Some(EvScheduleOutcome {
-            id: req.id,
-            ok: true,
-            why,
-        }),
-        Some("failed") => Some(EvScheduleOutcome {
-            id: req.id,
-            ok: false,
-            why,
-        }),
-        _ if now >= req.at + ANSWER_WITHIN => Some(EvScheduleOutcome {
-            id: req.id,
+        Some("confirmed") => Some(EvScheduleOutcome { id, ok: true, why }),
+        Some("failed") => Some(EvScheduleOutcome { id, ok: false, why }),
+        _ if now >= at + ANSWER_WITHIN => Some(EvScheduleOutcome {
+            id,
             ok: false,
             why: "the car link did not answer".into(),
         }),
@@ -80,28 +111,44 @@ fn ended(req: &EvScheduleRequest, report: Option<&Value>, now: u64) -> Option<Ev
 pub async fn follow(core: Arc<Core>) {
     let mut state = core.hub.watch();
     loop {
-        let at = {
+        let due = {
             let s = state.borrow_and_update();
-            s.ev_schedule.request.as_ref().map(|r| r.at)
+            let at = [
+                s.ev_schedule.request.as_ref().map(|r| r.at),
+                s.ev_charge.request.as_ref().map(|r| r.at),
+            ];
+            at.into_iter().flatten().min()
         };
-        if at.is_some() {
+        if due.is_some() {
             core.hub.update(|s| {
-                let Some(req) = &s.ev_schedule.request else {
-                    return;
-                };
-                if let Some(out) = ended(req, s.telemetry.get("evScheduleWrite"), now_s()) {
-                    match out.ok {
-                        true => println!("[core] ev schedule edit {} confirmed", out.id),
-                        false => println!("[core] ev schedule edit {} failed: {}", out.id, out.why),
-                    }
+                let now = now_s();
+                let sched = s
+                    .ev_schedule
+                    .request
+                    .as_ref()
+                    .and_then(|r| ended(r.id, r.at, s.telemetry.get("evScheduleWrite"), now));
+                if let Some(out) = sched {
+                    log("schedule edit", &out);
                     s.ev_schedule = EvSchedule {
+                        request: None,
+                        last: Some(out),
+                    };
+                }
+                let charge = s
+                    .ev_charge
+                    .request
+                    .as_ref()
+                    .and_then(|r| ended(r.id, r.at, s.telemetry.get("evChargeWrite"), now));
+                if let Some(out) = charge {
+                    log("charge change", &out);
+                    s.ev_charge = EvCharge {
                         request: None,
                         last: Some(out),
                     };
                 }
             });
         }
-        let wait = at.map(|a| Duration::from_secs((a + ANSWER_WITHIN).saturating_sub(now_s())));
+        let wait = due.map(|a| Duration::from_secs((a + ANSWER_WITHIN).saturating_sub(now_s())));
         tokio::select! {
             changed = state.changed() => {
                 if changed.is_err() {
@@ -110,6 +157,13 @@ pub async fn follow(core: Arc<Core>) {
             }
             _ = tokio::time::sleep(wait.unwrap_or(Duration::MAX)), if wait.is_some() => {}
         }
+    }
+}
+
+fn log(what: &str, out: &EvScheduleOutcome) {
+    match out.ok {
+        true => println!("[core] ev {what} {} confirmed", out.id),
+        false => println!("[core] ev {what} {} failed: {}", out.id, out.why),
     }
 }
 
@@ -220,6 +274,97 @@ mod tests {
     }
 
     #[test]
+    fn a_charge_change_goes_only_where_the_car_link_takes_it_parked_and_on_stocks_steps() {
+        let ac = |pct| EvChargeEdit {
+            charge_limit_ac_pct: Some(pct),
+            ..Default::default()
+        };
+        let current = |pct| EvChargeEdit {
+            charging_current_pct: Some(pct),
+            ..Default::default()
+        };
+        let pending = EvCharge {
+            request: Some(EvChargeRequest {
+                id: 2,
+                at: 1,
+                set: ac(80),
+            }),
+            last: None,
+        };
+        let after = EvCharge {
+            request: None,
+            last: Some(EvScheduleOutcome {
+                id: 2,
+                ok: true,
+                why: String::new(),
+            }),
+        };
+        let writes = json!({ "evChargeWrites": true, "drivingRegulation": false, "gear": "P" });
+        for (s, t, set, want) in [
+            (&EvCharge::default(), writes.clone(), ac(80), Ok(1)),
+            (&after, writes.clone(), current(60), Ok(3)),
+            (
+                &EvCharge::default(),
+                writes.clone(),
+                EvChargeEdit {
+                    charge_limit_dc_pct: Some(100),
+                    charging_current_pct: Some(90),
+                    ..Default::default()
+                },
+                Ok(1),
+            ),
+            // The schedules' word is not the charge settings'.
+            (
+                &EvCharge::default(),
+                json!({ "evScheduleWrites": true }),
+                ac(80),
+                Err("does not set the charge settings"),
+            ),
+            (
+                &EvCharge::default(),
+                json!({ "evChargeWrites": true, "gear": "R" }),
+                ac(80),
+                Err("in R"),
+            ),
+            (&pending, writes.clone(), ac(90), Err("still on its way")),
+            (
+                &EvCharge::default(),
+                writes.clone(),
+                ac(75),
+                Err("AC limit 75 %: 50 to 100 in tens"),
+            ),
+            (
+                &EvCharge::default(),
+                writes.clone(),
+                EvChargeEdit {
+                    charge_limit_dc_pct: Some(40),
+                    ..Default::default()
+                },
+                Err("DC limit 40 %"),
+            ),
+            (
+                &EvCharge::default(),
+                writes.clone(),
+                current(80),
+                Err("charging current 80 %: 100, 90 or 60"),
+            ),
+            (
+                &EvCharge::default(),
+                writes.clone(),
+                EvChargeEdit::default(),
+                Err("nothing to change"),
+            ),
+        ] {
+            let got = charge_request(s, &tel(t.clone()), set.clone(), 100);
+            match (&got, want) {
+                (Ok(r), Ok(id)) => assert_eq!((r.id, r.at, &r.set), (id, 100, &set), "{t}"),
+                (Err(e), Err(w)) => assert!(e.contains(w), "{t}: {e}, want {w}"),
+                _ => panic!("{t} {set:?}: {got:?}, want {want:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn an_edit_ends_with_the_car_links_word_or_its_silence() {
         let req = EvScheduleRequest {
             id: 2,
@@ -260,7 +405,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                ended(&req, report.as_ref(), now),
+                ended(req.id, req.at, report.as_ref(), now),
                 want,
                 "{report:?} at {now}"
             );

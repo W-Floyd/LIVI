@@ -17,10 +17,10 @@ const LIMIT := {min = 50.0, max = 100.0, step = 10.0}
 const V2L_LIMIT := {min = 20.0, max = 80.0, step = 10.0}
 ## The schedules' minute fields are 3 bits (0x8C0F, 0x8C55): tens of minutes.
 const MINUTE_STEP := 10
-const READS := ["telemetry", "config", "precondition", "evSchedule"]
+const READS := ["telemetry", "config", "precondition", "evSchedule", "evCharge"]
 ## Telemetry the rows show beyond the settings' own fields.
 const ALSO := ["batteryConditioning", "batteryConditioningError", "preconditionState", "preconditionWhy",
-	"evScheduleWrites"]
+	"evScheduleWrites", "evChargeWrites", "chargerReady"]
 
 var section := "charging"
 
@@ -153,7 +153,7 @@ func _refresh(force := false) -> void:
 	for k in ALSO:
 		if all.has(k):
 			_t[k] = all[k]
-	var key := JSON.stringify([_t, section, EvSettingsLink.fake, _requesting(), Core.get_value("/evSchedule"), Drive.moving,
+	var key := JSON.stringify([_t, section, EvSettingsLink.fake, _requesting(), Core.get_value("/evSchedule"), Core.get_value("/evCharge"), Drive.moving,
 		Core.get_value("/config/batteryPreconditioning"), Core.get_value("/config/batteryPreconditioningManualMinutes")])
 	if key == _shown and not force:
 		return
@@ -193,17 +193,15 @@ func _build() -> void:
 	var add := func(c: Control): _rows.list.add_child(c)
 	match section:
 		"charging":
+			_add_failed(add, "charge")
 			add.call(_group("Charge limit"))
 			add.call(_number_row("charge_limit_ac", "AC charger", LIMIT, _pct))
 			add.call(_number_row("charge_limit_dc", "DC charger", LIMIT, _pct))
 			add.call(_group("AC charging current"))
-			add.call(_choice_row("ac_current", "Charging current", EvSettingsLink.AC_CURRENT, ["Maximum", "Reduced", "Minimum"],
+			add.call(_choice_row("ac_current", "Charging current", EvSettingsLink.AC_CURRENT, ["100 %", "90 %", "60 %"],
 				"Lower it if a charger stops."))
 		"schedule":
-			var failed := EvSettingsLink.failed()
-			if failed != "":
-				add.call(_row("schedule_failed", "The car did not take the last change",
-					"%s%s. Shown as the car has it." % [failed.substr(0, 1).to_upper(), failed.substr(1)], null))
+			_add_failed(add, "schedule")
 			add.call(_group("Next departure"))
 			add.call(_departure_row("departure_1", "Departure 1"))
 			add.call(_departure_row("departure_2", "Departure 2"))
@@ -234,9 +232,17 @@ func _build() -> void:
 
 # ---- rows ----
 
+## Why the car did not take the last change of `kind`, as a row over the section's.
+func _add_failed(add: Callable, kind: String) -> void:
+	var failed := EvSettingsLink.failed(kind)
+	if failed != "":
+		add.call(_row("%s_failed" % kind, "The car did not take the last change",
+			"%s%s. Shown as the car has it." % [failed.substr(0, 1).to_upper(), failed.substr(1)], null))
+
+
 ## A row's own detail, or that the car has not reported it.
 func _why(id: String, detail := "") -> String:
-	return "Not reported by the car yet" if EvSettingsLink.state(id, _t) == "unreported" else detail
+	return "Not reported by the car yet" if not EvSettingsLink.reported(id, _t) else detail
 
 
 ## A row's tag when it takes no change; why goes in the section's note, once for every row it
@@ -328,7 +334,7 @@ func _group(text: String) -> Label:
 
 
 func _number_row(id: String, label: String, r: Dictionary, fmt: Callable, detail := "") -> Control:
-	var v = EvSettingsLink.value(id, _t)
+	var v = _with_pending(id)
 	var step: float = r.step
 	var on := _live(id) and v != null
 	var at := float(v) if v != null else 0.0
@@ -636,15 +642,14 @@ func _pct(v: Variant) -> String:
 ## A setting as shown: the car's value, with the edit on its way to the car over it.
 func _with_pending(id: String) -> Variant:
 	var v = EvSettingsLink.value(id, _t)
-	var p = EvSettingsLink.pending()
-	var key: String = EvSettingsLink.SCHEDULE_KEYS.get(id, "")
-	if not (p is Dictionary and key != "" and p.has(key)):
+	var p := EvSettingsLink.pending_value(id)
+	if p.is_empty():
 		return v
-	if v is Dictionary and p[key] is Dictionary:
+	if v is Dictionary and p[0] is Dictionary:
 		var n: Dictionary = v.duplicate(true)
-		n.merge(p[key], true)
+		n.merge(p[0], true)
 		return n
-	return p[key]
+	return p[0]
 
 
 func _requesting() -> bool:

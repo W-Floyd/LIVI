@@ -368,6 +368,25 @@ impl Core {
                 self.hub.update(|s| s.ev_schedule.request = Some(req));
                 Ok(())
             }
+            Action::SetEvCharge { set } => {
+                let req = {
+                    let state = self.hub.watch();
+                    let s = state.borrow();
+                    crate::vehicle::ev_schedule::charge_request(
+                        &s.ev_charge,
+                        &s.telemetry,
+                        set,
+                        crate::vehicle::precondition::now_s(),
+                    )?
+                };
+                println!(
+                    "[core] ev charge change {}: {}",
+                    req.id,
+                    serde_json::to_string(&req.set).unwrap_or_default()
+                );
+                self.hub.update(|s| s.ev_charge.request = Some(req));
+                Ok(())
+            }
         }
     }
 }
@@ -586,6 +605,7 @@ mod tests {
             navigation: Default::default(),
             precondition: Default::default(),
             ev_schedule: Default::default(),
+            ev_charge: Default::default(),
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),

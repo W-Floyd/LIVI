@@ -120,6 +120,7 @@ pub async fn run(
         navigation: Default::default(),
         precondition: Default::default(),
         ev_schedule: Default::default(),
+        ev_charge: Default::default(),
         system: livi_core_proto::state::System {
             start_page: start,
             ..Default::default()

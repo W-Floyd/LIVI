@@ -21,6 +21,8 @@ use livi_video::fanout::Fanout;
 use livi_video::nal::CpCodec;
 
 mod audio;
+#[cfg(any(test, not(any(target_os = "macos", target_os = "android"))))]
+mod building;
 pub mod feed;
 pub mod gst;
 mod mend;

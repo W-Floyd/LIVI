@@ -14,44 +14,47 @@ struct PlaneLog {
     pushed: Vec<Vec<u8>>,
     gamma: Option<[f64; 5]>,
     failed: bool,
+    pushed_unstarted: usize,
 }
 
 #[derive(Default, Clone)]
-struct FakePlane(Rc<RefCell<PlaneLog>>);
+struct FakePlane(Arc<std::sync::Mutex<PlaneLog>>);
 
 impl FakePlane {
     fn started(&self) -> usize {
-        self.0.borrow().started
+        self.0.lock().unwrap().started
     }
 
     fn pushed(&self) -> Vec<Vec<u8>> {
-        self.0.borrow().pushed.clone()
+        self.0.lock().unwrap().pushed.clone()
     }
 
     fn gamma(&self) -> Option<[f64; 5]> {
-        self.0.borrow().gamma
+        self.0.lock().unwrap().gamma
     }
 }
 
 impl Plane for FakePlane {
     fn start(&self) {
-        self.0.borrow_mut().started += 1;
+        self.0.lock().unwrap().started += 1;
     }
 
     fn push(&self, nal: &[u8]) {
-        self.0.borrow_mut().pushed.push(nal.to_vec());
+        let mut log = self.0.lock().unwrap();
+        log.pushed_unstarted += usize::from(log.started == 0);
+        log.pushed.push(nal.to_vec());
     }
 
     fn flush(&self) {
-        self.0.borrow_mut().pushed.clear();
+        self.0.lock().unwrap().pushed.clear();
     }
 
     fn set_gamma(&self, gamma: f64, contrast: f64, r: f64, g: f64, b: f64) {
-        self.0.borrow_mut().gamma = Some([gamma, contrast, r, g, b]);
+        self.0.lock().unwrap().gamma = Some([gamma, contrast, r, g, b]);
     }
 
     fn failed(&self) -> bool {
-        self.0.borrow().failed
+        self.0.lock().unwrap().failed
     }
 }
 
@@ -2131,7 +2134,7 @@ mod mend_tests {
 
     #[test]
     fn a_plane_is_rebuilt_only_when_its_pipeline_or_its_display_is_gone() {
-        let fail = |f: &mut Fixture| f.newest().0.borrow_mut().failed = true;
+        let fail = |f: &mut Fixture| f.newest().0.lock().unwrap().failed = true;
         let display = |to: u64| move |f: &mut Fixture| f.world.0.borrow_mut().display = to;
         type Event = Box<dyn Fn(&mut Fixture)>;
         let cases: [(&str, u64, Event, bool); 6] = [
@@ -2185,7 +2188,7 @@ mod mend_tests {
             for n in 0..deltas {
                 f.fed(&nal(DELTA, (n % 200) as u8 + 10), feedproto::KIND_VIDEO);
             }
-            f.newest().0.borrow_mut().failed = true;
+            f.newest().0.lock().unwrap().failed = true;
             f.host.mend_planes(Instant::now());
             let primed = f.newest().pushed();
             f.fed(&nal(DELTA, 3), feedproto::KIND_VIDEO);
@@ -2224,7 +2227,7 @@ mod mend_tests {
         for (i, (at, fail, refuse, built)) in steps.into_iter().enumerate() {
             f.world.0.borrow_mut().refuse_plane = refuse;
             if fail {
-                f.newest().0.borrow_mut().failed = true;
+                f.newest().0.lock().unwrap().failed = true;
             }
             f.host.mend_planes(t0 + at);
             assert_eq!(f.planes(), built, "step {i}");
@@ -2240,7 +2243,7 @@ mod mend_tests {
             let mut at = Instant::now();
             for _ in 0..3 * give_up {
                 if let Some(p) = f.world.0.borrow().planes.last() {
-                    p.0.borrow_mut().failed = true;
+                    p.0.lock().unwrap().failed = true;
                 }
                 f.world.0.borrow_mut().refuse_plane = refuse;
                 f.host.mend_planes(at);
@@ -2273,12 +2276,204 @@ mod mend_tests {
             ),
         ] {
             let mut f = Fixture::playing(1);
-            f.newest().0.borrow_mut().failed = true;
+            f.newest().0.lock().unwrap().failed = true;
             f.send(op, MAIN_PLANE, &body);
             f.world.0.borrow_mut().display = 2;
             f.host.mend_planes(Instant::now());
             assert_eq!(f.planes(), 1, "op {op}");
             assert_eq!(f.rebuilt(), 0, "op {op}");
         }
+    }
+}
+
+mod building_tests {
+    use super::*;
+    use crate::building::{Builder, Building};
+    use std::collections::VecDeque;
+    use std::sync::mpsc::{Receiver, Sender, channel};
+    use std::time::{Duration, Instant};
+
+    /// The fake world, with plane builds on a worker that each wait for a gate when given one.
+    struct Slow {
+        fake: Fake,
+        builder: Rc<Builder>,
+        gates: Rc<RefCell<VecDeque<Option<Receiver<()>>>>>,
+    }
+
+    impl Outside for Slow {
+        type Plane = Building<FakePlane>;
+        type UrlPlayer = FakeUrlPlayer;
+        type Ears = SharedSink;
+        type Speaker = FakeSpeaker;
+        type AudioEars = SharedAudioSink;
+        type Uplink = FakeUplink;
+        type Tap = FakeTap;
+        type Camera = ();
+        type FeedEars = SharedMediaSink;
+
+        fn create_plane(&self, id: u32, codec: VideoCodec, data: &[u8]) -> Option<Self::Plane> {
+            let plane = self.fake.create_plane(id, codec, data)?;
+            let gate = self.gates.borrow_mut().pop_front().flatten();
+            Some(self.builder.build(id, move || {
+                if let Some(gate) = gate {
+                    let _ = gate.recv();
+                }
+                Some(plane)
+            }))
+        }
+
+        fn play_url(&self, id: u32, url: &str, device: &str) -> Option<FakeUrlPlayer> {
+            self.fake.play_url(id, url, device)
+        }
+
+        fn open_camera(&self, id: u32, order: &CameraOrder) -> Option<()> {
+            self.fake.open_camera(id, order)
+        }
+
+        fn watch_cameras(&self, report: Box<dyn Fn(Vec<CameraSeen>) + Send>) {
+            self.fake.watch_cameras(report);
+        }
+
+        fn listen(&self, key: [u8; 32], sink: Box<dyn ScreenSink>) -> Option<(SharedSink, u16)> {
+            self.fake.listen(key, sink)
+        }
+
+        fn create_speaker(&self, cfg: &AudioConfig) -> Option<FakeSpeaker> {
+            self.fake.create_speaker(cfg)
+        }
+
+        fn open_uplink(&self, cfg: UplinkConfig) -> Option<FakeUplink> {
+            self.fake.open_uplink(cfg)
+        }
+
+        fn open_tap(&self, cfg: TapConfig) -> Option<FakeTap> {
+            self.fake.open_tap(cfg)
+        }
+
+        fn listen_audio(
+            &self,
+            key: [u8; 32],
+            sink: Box<dyn AudioSink + Send>,
+        ) -> Option<(SharedAudioSink, u16, u16)> {
+            self.fake.listen_audio(key, sink)
+        }
+
+        fn open_feed(&self, path: &str, sink: Box<dyn MediaSink>) -> Option<SharedMediaSink> {
+            self.fake.open_feed(path, sink)
+        }
+    }
+
+    struct Rig {
+        host: Host<Slow>,
+        world: Fake,
+        sent: Sent,
+        gates: Rc<RefCell<VecDeque<Option<Receiver<()>>>>>,
+    }
+
+    impl Rig {
+        fn new() -> Self {
+            let world = Fake::default();
+            let sent = Sent::default();
+            let gates = Rc::new(RefCell::new(VecDeque::new()));
+            let slow = Slow {
+                fake: world.clone(),
+                builder: Rc::new(Builder::new()),
+                gates: gates.clone(),
+            };
+            Self {
+                host: Host::new(slow, Arc::new(sent.clone())),
+                world,
+                sent,
+                gates,
+            }
+        }
+
+        /// Creates a plane whose build holds until the returned sender goes.
+        fn create_held(&mut self, id: u32) -> Sender<()> {
+            let (open, gate) = channel();
+            self.gates.borrow_mut().push_back(Some(gate));
+            self.create(id);
+            open
+        }
+
+        fn create(&mut self, id: u32) {
+            self.send(
+                OP_CREATE,
+                id,
+                &livi_host_proto::plane_body(VideoCodec::H264, &[]),
+            );
+        }
+
+        fn send(&mut self, op: u8, id: u32, rest: &[u8]) {
+            self.host.feed(&frame(op, id, rest));
+        }
+
+        fn plane(&self, i: usize) -> FakePlane {
+            self.world.0.borrow().planes[i].clone()
+        }
+
+        fn wait_started(&self, i: usize) {
+            let until = Instant::now() + Duration::from_secs(5);
+            while self.plane(i).started() == 0 {
+                assert!(Instant::now() < until, "plane {i} never started");
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    #[test]
+    fn a_plane_still_building_holds_up_no_other_op() {
+        let mut r = Rig::new();
+        let open = r.create_held(MAIN_PLANE);
+
+        let asked = Instant::now();
+        r.send(OP_FEED_OPEN, 9, b"/run/feed");
+        assert!(asked.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            r.sent.0.lock().unwrap().clone(),
+            vec![(REPLY_FEED, 9, b"/run/feed".to_vec())]
+        );
+        assert_eq!(r.plane(0).started(), 0, "still building");
+        drop(open);
+        r.wait_started(0);
+    }
+
+    #[test]
+    fn ops_sent_while_a_plane_builds_reach_it_in_order_once_started() {
+        let mut r = Rig::new();
+        let open = r.create_held(MAIN_PLANE);
+        r.send(OP_DATA, MAIN_PLANE, &[1]);
+        r.send(OP_GAMMA, MAIN_PLANE, &gamma_body([2.0, 1.0, 1.0, 1.0, 1.0]));
+        r.send(OP_DATA, MAIN_PLANE, &[2]);
+        drop(open);
+        r.wait_started(0);
+        r.send(OP_DATA, MAIN_PLANE, &[3]);
+
+        let until = Instant::now() + Duration::from_secs(5);
+        while r.plane(0).pushed().len() < 3 {
+            assert!(Instant::now() < until);
+            std::thread::yield_now();
+        }
+        let log = r.plane(0);
+        assert_eq!(log.pushed(), vec![vec![1], vec![2], vec![3]]);
+        assert_eq!(log.0.lock().unwrap().pushed_unstarted, 0);
+        assert_eq!(log.gamma(), Some([2.0, 1.0, 1.0, 1.0, 1.0]));
+        assert!(!r.host.planes.borrow()[&MAIN_PLANE].failed());
+    }
+
+    #[test]
+    fn a_plane_stopped_while_building_never_starts_and_the_next_build_waits_for_it() {
+        let mut r = Rig::new();
+        let open = r.create_held(MAIN_PLANE);
+        r.send(OP_DATA, MAIN_PLANE, &[1]);
+        r.send(OP_STOP, MAIN_PLANE, &[]);
+        r.gates.borrow_mut().push_back(None);
+        r.create(MAIN_PLANE);
+        assert_eq!(r.plane(1).started(), 0, "queued behind the first build");
+
+        drop(open);
+        r.wait_started(1);
+        assert_eq!(r.plane(0).started(), 0);
+        assert!(r.plane(0).pushed().is_empty());
     }
 }

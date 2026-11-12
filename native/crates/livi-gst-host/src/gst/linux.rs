@@ -4,14 +4,23 @@
 
 use livi_video_player::{CameraPlayer, Player, UrlPlayer};
 
+use std::sync::OnceLock;
+
+use crate::building::{Builder, Building};
 use crate::{CameraOrder, VideoCodec};
 
-pub type Plane = Player;
+pub type Plane = Building<Player>;
 pub type Url = UrlPlayer;
 pub type Camera = CameraPlayer;
 
-pub fn create_plane(_id: u32, codec: VideoCodec, codec_data: &[u8]) -> Option<Plane> {
-    Player::new(codec, 0, codec_data)
+pub fn create_plane(id: u32, codec: VideoCodec, codec_data: &[u8]) -> Option<Plane> {
+    static BUILDER: OnceLock<Builder> = OnceLock::new();
+    let codec_data = codec_data.to_vec();
+    Some(
+        BUILDER
+            .get_or_init(Builder::new)
+            .build(id, move || Player::new(codec, 0, &codec_data)),
+    )
 }
 
 pub fn open_camera(_id: u32, order: &CameraOrder) -> Option<Camera> {

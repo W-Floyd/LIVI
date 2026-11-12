@@ -45,90 +45,100 @@ steps:
           return "shown: the slot %s" % slot
   - expect_node: { path: Page/Body/Slot, visible: true }
   - screenshot: { name: home-phone-toggle-shown, tolerance: 8 }
-  # Drags from each width: [from, to, snapped]. The phone's widths are the snaps (s0 < s1 < s2, the
-  # half the default) or none; a release between them takes the nearest, beyond them the last.
+  # Drags from each width: [from, to, snapped], in each home layout. The phone's widths are the
+  # snaps (s0 <= s1 <= s2, s1 the default, nearest a half) or none; a release between them takes
+  # the nearest, beyond them the last. The picture first: the cards never take more than a third
+  # of the body (side by side a half), nor less than their column.
   # A tap, a drag inside the slop or up the handle changes nothing; a double tap goes back to the
   # default, hidden too. The phone is asked once per release that changes the slot, with its size,
   # and never mid-drag.
   - gdscript: &drags |
-      var snaps: Array = shell._snaps()
-      if snaps.size() != 3 or snaps[0] < ThemeManager.px.side - 0.5:
-          return "snaps %s" % [snaps]
-      var full: float = shell.get_node("Page/Body").size.x
-      var v := {hidden = 0.0, s0 = snaps[0], s1 = snaps[1], s2 = snaps[2], mid01 = (snaps[0] + snaps[1]) / 2.0 - 10.0,
-          past12 = snaps[1] + 30.0, near0 = snaps[0] * 0.4, far0 = snaps[0] * 0.6, beyond = full + 200.0, under = -200.0}
       var slot: Control = shell.get_node("Page/Body/Slot")
-      var areas := func():
-          return Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea")
-      for row in [["s2", "s0", "s0"], ["s0", "s1", "s1"], ["s1", "s2", "s2"], ["s2", "hidden", "hidden"], ["hidden", "past12", "s1"],
-              ["s1", "mid01", "s0"], ["s0", "near0", "hidden"], ["hidden", "far0", "s0"], ["s0", "beyond", "s2"], ["s2", "under", "hidden"],
-              ["hidden", "tap", "hidden"], ["s1", "tap", "s1"], ["s1", "tiny", "s1"], ["s1", "up", "s1"],
-              ["s0", "double", "s1"], ["s2", "double", "s1"], ["s1", "double", "s1"], ["hidden", "double", "s1"],
-              ["s0", "slow", "s0"], ["s2", "apart", "s2"], ["hidden", "slow", "hidden"], ["hidden", "apart", "hidden"]]:
-          ThemeManager.set_look({home_phone = row[0] != "hidden", home_split = v[row[0]] / full if row[0] != "hidden" else ThemeManager.home_split})
-          # Past the last row's taps.
-          await runner.frames(30)
-          var before: float = slot.size.x
-          if absf(before - v[row[0]]) > 0.5:
-              return "%s: the slot is %s from %s" % [row, before, v[row[0]]]
-          Core.fake_clear()
-          var at: Vector2 = shell.get_node("Page/PhoneHandle/Pill").get_global_rect().get_center()
-          # Away from the slot's edge grows the phone.
-          var out := -1.0 if ThemeManager.side_left() else 1.0
-          var d := Vector2.ZERO
-          # Two taps: a double tap; 40 frames (0.67 s) apart, or the second a few mm off, two taps.
-          if row[1] in ["double", "slow", "apart"]:
-              for pressed in [true, false]:
-                  var t := InputEventMouseButton.new()
-                  t.position = at
-                  t.button_index = MOUSE_BUTTON_LEFT
-                  t.pressed = pressed
-                  t.button_mask = MOUSE_BUTTON_MASK_LEFT if pressed else 0
-                  runner._vp.push_input(t)
-                  await runner.frames(1)
-              await runner.frames(40 if row[1] == "slow" else 4)
-              if row[1] == "apart":
-                  at.y += ThemeManager.px.touch * 0.45
-          match row[1]:
-              "tap", "double", "slow", "apart":
-                  pass
-              "tiny":
-                  d.x = ThemeManager.px.touch_gap * 0.5
-              "up":
-                  d.y = -ThemeManager.px.touch * 1.5
-              _:
-                  d.x = (v[row[1]] - before) * out
-          for i in 9:
-              var m := InputEventMouseMotion.new()
-              m.position = at + d * (i / 8.0)
-              m.button_mask = MOUSE_BUTTON_MASK_LEFT if i > 0 else 0
-              runner._vp.push_input(m)
-              if i == 0:
-                  var b := InputEventMouseButton.new()
-                  b.position = m.position
-                  b.button_index = MOUSE_BUTTON_LEFT
-                  b.pressed = true
-                  b.button_mask = MOUSE_BUTTON_MASK_LEFT
-                  runner._vp.push_input(b)
-              await runner.frames(1)
-          await runner.frames(2)
-          if not areas.call().is_empty():
-              return "%s: asked mid-drag %s" % [row, areas.call()]
-          var u := InputEventMouseButton.new()
-          u.position = at + d
-          u.button_index = MOUSE_BUTTON_LEFT
-          runner._vp.push_input(u)
-          await runner.frames(3)
-          var want: float = v[row[2]]
-          if ThemeManager.home_phone != (row[2] != "hidden") or absf(slot.size.x - want) > 0.5:
-              return "%s (%s): shown %s, the slot %s, not %s" % [row, ThemeManager.hand, ThemeManager.home_phone, slot.size.x, want]
-          if row[2] != "hidden" and absf(shell._phone_width() - want) > 0.5:
-              return "%s: the look keeps %s of %s" % [row, ThemeManager.home_split, full]
-          var got: Array = areas.call()
-          var asked := 0 if row[2] == "hidden" or absf(want - before) < 0.5 else 1
-          if got.size() != asked or (asked == 1 and absf(got[0].action.width - want) > 1.0):
-              return "%s: asked %s, not %d of width %s" % [row, got.map(func(m): return m.action), asked, want]
-      ThemeManager.set_look({home_phone = true, home_split = 0.0})
+      for layout in ["cards", "split"]:
+        ThemeManager.set_look({home_layout = layout})
+        await runner.frames(4)
+        var snaps: Array = shell._snaps()
+        var full: float = shell.get_node("Page/Body").size.x
+        var most: float = maxf(ThemeManager.px.side, roundf(full * (0.5 if layout == "split" else 1.0 / 3.0)))
+        if snaps.is_empty() or snaps.any(func(w): return w < ThemeManager.px.side - 0.5 or full - w > most + 0.5 or full - w < ThemeManager.px.side - 0.5):
+            return "%s: snaps %s of %s" % [layout, snaps, full]
+        var half: float = snaps[0]
+        for w in snaps:
+            if absf(w - full / 2.0) < absf(half - full / 2.0):
+                half = w
+        var v := {hidden = 0.0, s0 = snaps[0], s1 = half, s2 = snaps.back(), mid01 = (snaps[0] + half) / 2.0 - 10.0,
+            past12 = half + 30.0, near0 = snaps[0] * 0.4, far0 = snaps[0] * 0.6, beyond = full + 200.0, under = -200.0}
+        var areas := func():
+            return Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "projectionArea")
+        for row in [["s2", "s0", "s0"], ["s0", "s1", "s1"], ["s1", "s2", "s2"], ["s2", "hidden", "hidden"], ["hidden", "past12", "s1"],
+                ["s1", "mid01", "s0"], ["s0", "near0", "hidden"], ["hidden", "far0", "s0"], ["s0", "beyond", "s2"], ["s2", "under", "hidden"],
+                ["hidden", "tap", "hidden"], ["s1", "tap", "s1"], ["s1", "tiny", "s1"], ["s1", "up", "s1"],
+                ["s0", "double", "s1"], ["s2", "double", "s1"], ["s1", "double", "s1"], ["hidden", "double", "s1"],
+                ["s0", "slow", "s0"], ["s2", "apart", "s2"], ["hidden", "slow", "hidden"], ["hidden", "apart", "hidden"]]:
+            ThemeManager.set_look({home_phone = row[0] != "hidden", home_split = v[row[0]] / full if row[0] != "hidden" else ThemeManager.home_split})
+            # Past the last row's taps.
+            await runner.frames(30)
+            var before: float = slot.size.x
+            if absf(before - v[row[0]]) > 0.5:
+                return "%s: the slot is %s from %s" % [row, before, v[row[0]]]
+            Core.fake_clear()
+            var at: Vector2 = shell.get_node("Page/PhoneHandle/Pill").get_global_rect().get_center()
+            # Away from the slot's edge grows the phone.
+            var out := -1.0 if ThemeManager.side_left() else 1.0
+            var d := Vector2.ZERO
+            # Two taps: a double tap; 40 frames (0.67 s) apart, or the second a few mm off, two taps.
+            if row[1] in ["double", "slow", "apart"]:
+                for pressed in [true, false]:
+                    var t := InputEventMouseButton.new()
+                    t.position = at
+                    t.button_index = MOUSE_BUTTON_LEFT
+                    t.pressed = pressed
+                    t.button_mask = MOUSE_BUTTON_MASK_LEFT if pressed else 0
+                    runner._vp.push_input(t)
+                    await runner.frames(1)
+                await runner.frames(40 if row[1] == "slow" else 4)
+                if row[1] == "apart":
+                    at.y += ThemeManager.px.touch * 0.45
+            match row[1]:
+                "tap", "double", "slow", "apart":
+                    pass
+                "tiny":
+                    d.x = ThemeManager.px.touch_gap * 0.5
+                "up":
+                    d.y = -ThemeManager.px.touch * 1.5
+                _:
+                    d.x = (v[row[1]] - before) * out
+            for i in 9:
+                var m := InputEventMouseMotion.new()
+                m.position = at + d * (i / 8.0)
+                m.button_mask = MOUSE_BUTTON_MASK_LEFT if i > 0 else 0
+                runner._vp.push_input(m)
+                if i == 0:
+                    var b := InputEventMouseButton.new()
+                    b.position = m.position
+                    b.button_index = MOUSE_BUTTON_LEFT
+                    b.pressed = true
+                    b.button_mask = MOUSE_BUTTON_MASK_LEFT
+                    runner._vp.push_input(b)
+                await runner.frames(1)
+            await runner.frames(2)
+            if not areas.call().is_empty():
+                return "%s: asked mid-drag %s" % [row, areas.call()]
+            var u := InputEventMouseButton.new()
+            u.position = at + d
+            u.button_index = MOUSE_BUTTON_LEFT
+            runner._vp.push_input(u)
+            await runner.frames(3)
+            var want: float = v[row[2]]
+            if ThemeManager.home_phone != (row[2] != "hidden") or absf(slot.size.x - want) > 0.5:
+                return "%s (%s): shown %s, the slot %s, not %s" % [row, ThemeManager.hand, ThemeManager.home_phone, slot.size.x, want]
+            if row[2] != "hidden" and absf(shell._phone_width() - want) > 0.5:
+                return "%s: the look keeps %s of %s" % [row, ThemeManager.home_split, full]
+            var got: Array = areas.call()
+            var asked := 0 if row[2] == "hidden" or absf(want - before) < 0.5 else 1
+            if got.size() != asked or (asked == 1 and absf(got[0].action.width - want) > 1.0):
+                return "%s: asked %s, not %d of width %s" % [row, got.map(func(m): return m.action), asked, want]
+      ThemeManager.set_look({home_phone = true, home_split = 0.0, home_layout = "cards"})
       await runner.frames(2)
   - gdscript: *clear
   - theme: { home_phone: false }
@@ -160,7 +170,7 @@ steps:
       # Defaults animate.
       await runner.frames(40)
       var slot: Control = shell.get_node("Page/Body/Slot")
-      var half: float = shell._snaps()[1]
+      var half: float = shell._phone_width()
       if absf(slot.size.x - half) > 0.5:
           return "defaults: the slot %s, not %s" % [slot.size.x, half]
       ThemeManager.load_look(file)

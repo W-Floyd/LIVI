@@ -736,17 +736,26 @@ func _update_split() -> void:
 
 ## The phone's widths home snaps to: about a third, a half and two thirds of the body, none
 ## narrower than the cards' column nor leaving the cards less than it. Android Auto takes any
-## area (a phone that refuses one is letterboxed), so the cards set the limits.
+## area (a phone that refuses one is letterboxed), so the cards set the limits. The picture comes
+## first: the cards take no more than SIDE_SHARE of the body (side by side SIDE_SHARE_SPLIT),
+## never less than their column, so the cards layout keeps to one column beside it.
 func _snaps() -> Array[float]:
 	var full := _rect_beside_status().size.x
-	var lo: float = ThemeManager.px.side
-	var hi := maxf(lo, full - lo)
+	var side: float = ThemeManager.px.side
+	var share := SIDE_SHARE_SPLIT if ThemeManager.home_layout == "split" else SIDE_SHARE
+	var lo := maxf(side, full - maxf(side, roundf(full * share)))
+	var hi := maxf(lo, full - side)
 	var out: Array[float] = []
 	for f in [1.0 / 3.0, 0.5, 2.0 / 3.0]:
 		var w := roundf(clampf(full * f, lo, hi))
 		if out.is_empty() or w - out.back() >= ThemeManager.px.touch:
 			out.append(w)
 	return out
+
+
+## The most of home's body the cards take beside the picture, in each layout.
+const SIDE_SHARE := 1.0 / 3.0
+const SIDE_SHARE_SPLIT := 0.5
 
 
 ## The phone's width while shown: the snap nearest the look's share, by default a half.

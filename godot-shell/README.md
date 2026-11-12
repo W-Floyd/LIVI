@@ -264,22 +264,24 @@ is `huVolume`, as the hard keys. The core has no shuffle or repeat. Scenario `me
 
 Home's media card (`MiniPlayer`) leads home while something plays (`HomeCards.tall`): with the
 phone hidden it takes the large slot on the driver's side and the other cards stack beside it at
-their own heights, centred; beside the phone, a column with room for two (`TALL_SHARE`,
-`TALL_TOUCH`, `REST_TOUCH`; the 680 px snap) gives it a column of its own on the driver's side (the
-card most touched), the rest stacked from the top, as narrow as their widest card, else it fills
-what the stacked cards leave, never shorter than the tallest of them (a row the battery card
-carries aside). It is never left out: where the cards don't fit (`Shell._fit`), Precondition moves
-into the battery card as its bottom row (`HomeCards.foot`, `StatTile.foot`), then goes to one line
-there (`ToggleRow.compact`), then beside the Phone | <app> pill (its icon and Auto where its words
-don't fit), then the battery card compact (`StatTile.compact`), then the media card to one row
-without prev; only then do cards go, Precondition first; with nothing playing, the compact media
-card goes first. It lays itself out by that room (`HomeCards.child_rect`, shown or not): `wide`
-(cover the card's height beside title, artist, album, a position bar and larger controls, as the
-Media page), `tall` (cover over them), one row, or the controls in a row under the text when it
-would keep fewer than `MIN_CHARS` beside them. Nothing playing: a compact "Nothing playing / Open
-Media" card. The cover is drawn square at every size (`ArtView.square`); beside the text its top is
-the title's and the controls start at the text's edge, under it they are centred. Scenario
-`media-player`.
+their own heights, centred. Beside the phone the picture comes first: the cards take no more than a
+third of the body (`Shell.SIDE_SHARE`; side by side a half, `SIDE_SHARE_SPLIT`), never less than
+their column, so the divider's snaps (`Shell._snaps`) are only the widths that leave them that; a
+column with room for two (`TALL_SHARE`, `TALL_TOUCH`, `REST_TOUCH`; a larger panel) gives it a
+column of its own on the driver's side (the card most touched), the rest stacked from the top, as
+narrow as their widest card, else it fills what the stacked cards leave, never shorter than the
+tallest of them (a row the battery card carries aside). It is never left out: where the cards don't
+fit (`Shell._fit`), Precondition moves into the battery card as its bottom row (`HomeCards.foot`,
+`StatTile.foot`), then goes to one line there (`ToggleRow.compact`), then beside the Phone | <app>
+pill (its icon and Auto where its words don't fit), then the battery card compact
+(`StatTile.compact`), then the media card to one row without prev; only then do cards go,
+Precondition first; with nothing playing, the compact media card goes first. It lays itself out by
+that room (`HomeCards.child_rect`, shown or not): `wide` (cover the card's height beside title,
+artist, album, a position bar and larger controls, as the Media page), `tall` (cover over them),
+one row, or the controls in a row under the text when it would keep fewer than `MIN_CHARS` beside
+them. Nothing playing: a compact "Nothing playing / Open Media" card. The cover is drawn square at
+every size (`ArtView.square`); beside the text its top is the title's and the controls start at the
+text's edge, under it they are centred. Scenario `media-player`.
 
 Look's Home layout (`home_layout`) Side by side (`HomeCards.side_by_side`) puts the battery card in
 a narrow column the panel's height away from the driver: the charge over a bar that fills upward,

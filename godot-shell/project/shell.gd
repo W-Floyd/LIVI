@@ -37,6 +37,8 @@ var left_out: Array[String] = []
 var _left_out_said := ""
 ## What the last fit was of (`_fit`); emptied by a restyle.
 var _fit_key := []
+## Fits run, for tests.
+var fits := 0
 
 ## A scene theme's 3D layer, while one is in use.
 var _scene: SceneSkin
@@ -489,6 +491,7 @@ func open_page(page: String) -> String:
 			_split_tween.kill()
 		_split_tween = null
 		_dragging = false
+		_projection.window.hold = false
 		_resplit()
 	_projection.visible = _app_page or (home and _split < 1.0)
 	# Every page change: leaving the full-panel pages puts the picture back in home's slot. The
@@ -812,9 +815,11 @@ func _set_side(w: float) -> void:
 	_side.custom_minimum_size.x = w
 	_split = clampf(inverse_lerp(least, full, w), 0.0, 1.0) if full > least else 1.0
 	var cards: HomeCards = _side.get_node("Panel")
-	cards.wide = _split
 	var m: float = _side.get_theme_constant("margin_left") * 2.0
-	cards.column = maxf(0.0, lerpf(minf(w, least), ThemeManager.px.side, _split) - m)
+	# A drag shows the column or the dashboard, never a blend, whose cards cross mid-way; the
+	# column fills the side, its edge with the picture's.
+	cards.wide = roundf(_split) if _dragging else _split
+	cards.column = maxf(0.0, (w if _dragging and cards.wide == 0.0 else lerpf(minf(w, least), ThemeManager.px.side, _split)) - m)
 	_place_handle()
 	_place_source()
 	if app_keyboard:
@@ -832,9 +837,10 @@ func _on_handle_drag(dx: float) -> void:
 			_split_tween = null
 		if _page_name == "home":
 			_projection.visible = true
+		_projection.window.hold = true
 	var full := _rect_beside_status().size.x
 	var w := _drag_w0 + (dx if ThemeManager.side_left() else -dx)
-	_set_side(clampf(w, full - _snaps().back(), full))
+	_set_side(clampf(roundf(w), full - _snaps().back(), full))
 
 
 ## Released: to the nearest snap, or none (the slot's edge), kept in the look.
@@ -873,6 +879,7 @@ func _split_settled() -> void:
 	if _split_to == 1.0:
 		_area_asked = Rect2i()
 	_place_next_frame()
+	_projection.window.release_hold()
 
 
 ## The handle's pill centred in the side's margin toward the slot (the gutter, as wide as the
@@ -891,8 +898,8 @@ func _place_handle() -> void:
 	var tw := maxf(pw, roundf(m * 0.45))
 	var w := roundf(lerpf(pw, tw, t))
 	var gutter := side.end.x - m if left else side.position.x
-	var edge := content.end.x - tw if left else content.position.x
-	var x := roundf(lerpf(gutter + (m - pw) / 2.0, edge + (tw - w if left else 0.0), t))
+	# From the slot's edge: a tab as the slot closes, under the finger all the way.
+	var x := roundf(gutter + lerpf((m - pw) / 2.0, m - w if left else 0.0, t))
 	var h := roundf(touch * 0.8)
 	var pill := Rect2(x, roundf(content.get_center().y - h / 2.0), w, h)
 	_handle.pill.tab = t
@@ -1133,6 +1140,9 @@ func _fit() -> void:
 	if not _body.is_visible_in_tree():
 		_fit_due = true
 		return
+	# A drag only places the cards at their looks; the release fits them (`_slide`).
+	if _dragging:
+		return
 	_fit_due = false
 	var panel: HomeCards = _side.get_node("Panel")
 	var dashboard := _split_to == 1.0
@@ -1151,6 +1161,7 @@ func _fit() -> void:
 	if key == _fit_key:
 		return
 	_fit_key = key
+	fits += 1
 	for n in PRIORITY:
 		panel.get_node(n).visible = wanted[n]
 	left_out.clear()

@@ -1,0 +1,154 @@
+name: perf-divider
+# Dragging home's divider across its range, the phone's picture beside the cards and something
+# playing. Every frame of the drag the picture, the pill and the cards move together: the picture
+# is the slot, the pill between its edge and the cards and under the finger, the cards' near edge
+# a margin from the picture's, no card over another, and the window's last picture filling the
+# slot rather than letterboxed. A drag only places things: the cards keep their looks until the
+# release fits them, and nothing is asked of the phone until then.
+clock: 2026-11-09T08:30:00
+fixtures:
+  core: fixtures/media.json
+  apps: fixtures/apps
+  clients:
+    - { role: app, app_id: livi-video-main, pattern: grid, size: 1920x1080, buffer: nv12, video: true }
+theme: { theme_name: calm, appearance: day, reduced_motion: true }
+steps:
+  - set: { core: { config: { projectionWidth: 1920, projectionHeight: 720 }, dab: { receiver: null }, nowPlaying: { title: A Remarkably Long Song Title That Goes On, artist: The Extraordinarily Named Ensemble } } }
+  - wait: { window: livi-video-main }
+  - wait: { frames: 4 }
+  # Past the spare keyboard's build, two seconds in, which is not the drag's.
+  - gdscript: |
+      while not shell.has_node("SpareKeyboard"):
+          await runner.frames(1)
+      await runner.frames(4)
+  # From the default snap across the whole range and back, four moves a frame.
+  - measure:
+      name: divider-cards
+      frames: 120
+      drag: { node: Page/PhoneHandle/Pill, dx: 900, moves: 4 }
+      expect:
+        # Measured: main thread 2.0 ms p95, no fit; 8.6-9.7 ms p95 and 88 fits when each move
+        # fitted the cards. The first half is past the widest phone: nothing moves.
+        vm: { process_ms_p95: 4.0, fits: 0, projection_areas: 0 }
+  - gdscript: |
+      ThemeManager.set_look({home_layout = "split", home_phone = true, home_split = 0.0})
+      await runner.frames(30)
+  - measure:
+      name: divider-split
+      frames: 120
+      drag: { node: Page/PhoneHandle/Pill, dx: 900, moves: 4 }
+      expect:
+        # Measured: 0.8-0.9 ms p50, 1.1-1.3 ms p95; 4.6-4.8 ms p50, 9.7-10.7 ms p95 and 108 fits
+        # before.
+        vm: { process_ms_p95: 2.6, fits: 0, projection_areas: 0 }
+  - gdscript: |
+      var slot: Control = shell.get_node("Page/Body/Slot")
+      var side: Control = shell.get_node("Page/Body/Side")
+      var panel: Control = side.get_node("Panel")
+      var pill: Control = shell.get_node("Page/PhoneHandle/Pill")
+      var view: WindowView = shell._projection.window
+      var m := float(side.get_theme_constant("margin_left"))
+      # The first of each kind of failure.
+      var bad := {}
+      for hand in ["lhd", "rhd"]:
+        for layout in ["cards", "split"]:
+          ThemeManager.set_look({hand = hand, home_layout = layout, home_phone = true, home_split = 0.0})
+          await runner.frames(30)
+          var left := ThemeManager.side_left()
+          var at: Vector2 = pill.get_global_rect().get_center()
+          var label := "%s, %s" % [hand, layout]
+          var fits0: int = shell.fits
+          var n := 48
+          for i in n + 1:
+              if i == 0:
+                  runner._drag_input(at, true, true)
+                  await runner.frames(1)
+                  continue
+              # Several moves a frame, as a slow frame gathers them.
+              for j in 3:
+                  runner._drag_input(at + Vector2(900.0 * sin(TAU * (i - 1.0 + (j + 1.0) / 3.0) / n), 0.0), true)
+              await runner.frames(1)
+              var finger: float = at.x + 900.0 * sin(TAU * i / n)
+              var s := slot.get_global_rect()
+              var sd := side.get_global_rect()
+              var pl := pill.get_global_rect()
+              var tag := "%s, frame %d (finger %d)" % [label, i, roundi(finger)]
+              if not shell._projection.get_global_rect().is_equal_approx(s) and s.size.x >= 1.0:
+                  bad.get_or_add("picture", "%s: the picture %s, the slot %s" % [tag, shell._projection.get_global_rect(), s])
+              var edge := s.position.x if left else s.end.x
+              var near := sd.end.x - m if left else sd.position.x + m
+              # The pill between the picture's edge and the cards'.
+              if (pl.position.x < minf(edge, near) - 0.5) or (pl.end.x > maxf(edge, near) + 0.5):
+                  bad.get_or_add("pill", "%s: the pill %s, not between the picture's edge %s and the cards' %s" % [tag, pl, edge, near])
+              # Within the gutter's half of the finger (the pill becomes a tab as the slot closes),
+              # unless the drag is past either end.
+              var full: float = shell.get_node("Page/Body").size.x
+              var clamped: bool = sd.size.x <= full - shell._snaps().back() + 0.5 or sd.size.x >= full - 0.5
+              if not clamped and absf(pl.get_center().x - finger) > m / 2.0 + 1.0:
+                  bad.get_or_add("finger", "%s: the pill at %s, not under the finger" % [tag, pl.get_center().x])
+              var cards := []
+              for c in panel.get_children():
+                  if c.visible and not c.top_level and c != panel.foot:
+                      cards.append(c.get_global_rect())
+              for a in cards.size():
+                  for b in range(a + 1, cards.size()):
+                      if cards[a].grow(-0.5).intersects(cards[b].grow(-0.5)):
+                          bad.get_or_add("overlap", "%s: cards %s and %s overlap" % [tag, cards[a], cards[b]])
+              var got: float = cards.map(func(r): return r.end.x).max() if left else cards.map(func(r): return r.position.x).min()
+              if absf(got - near) > 0.5:
+                  bad.get_or_add("edge", "%s: the cards' near edge %s, not %s" % [tag, got, near])
+              # The window's last picture fills the slot, cropped, while the window is not its size.
+              if view.texture and s.size.x >= 1.0 and not view.picture_rect().grow(0.5).encloses(Rect2(Vector2.ZERO, view.size)):
+                  bad.get_or_add("letterbox", "%s: the picture letterboxed: %s in %s" % [tag, view.picture_rect(), view.size])
+          runner._drag_input(at, false, true)
+          await runner.frames(30)
+          # The release's own.
+          if shell.fits - fits0 > 1:
+              return "%s: %d fits over the drag" % [label, shell.fits - fits0]
+          if not ThemeManager.home_phone or absf(slot.size.x - shell._phone_width()) > 0.5:
+              return "%s: released back at the start, the slot %s, not %s" % [label, slot.size.x, shell._phone_width()]
+      ThemeManager.set_look({hand = "lhd", home_layout = "cards", home_phone = true, home_split = 0.0})
+      await runner.frames(30)
+      return "; ".join(bad.values())
+  # The navigation app in the slot: its last picture fills the slot through the drag, it is not
+  # configured until the release, and once it has the slot's shape again it is drawn as it is.
+  - gdscript: |
+      shell.launcher.refresh()
+      for a in shell.launcher.apps:
+          if a.id == "org.livi.test.grid":
+              a.argv[a.argv.find("--size") + 1] = "0x0"
+              a.argv.append_array(["--events", runner._client_events("org.livi.test.grid")])
+      DirAccess.make_dir_recursive_absolute(runner._client_events("org.livi.test.grid").get_base_dir())
+      ThemeManager.set_look({nav_app = "org.livi.test.grid", home_source = "nav"})
+      await runner.frames(3)
+  - wait: { window: org.livi.test.grid }
+  - gdscript: |
+      var w: int = Wayland.find_window("org.livi.test.grid")
+      var view: WindowView = shell._projection.window
+      var configures := func() -> int:
+          return Array(FileAccess.get_file_as_string(runner._client_events("org.livi.test.grid")).split("\n")).filter(func(l): return l.begins_with("configure ")).size()
+      # Within a pixel: the app's buffer is in its own scale's pixels.
+      var whole := func() -> bool:
+          var d: Vector2 = (view.picture_rect().size - view.size).abs()
+          return maxf(d.x, d.y) <= 1.0
+      for i in 120:
+          if view.window_id == w and view.texture and whole.call():
+              break
+          await runner.frames(1)
+      if view.window_id != w or not whole.call():
+          return "the navigation app %s in the slot, its picture %s in %s" % [view.window_id, view.picture_rect(), view.size]
+      var before: int = configures.call()
+      var at: Vector2 = shell.get_node("Page/PhoneHandle/Pill").get_global_rect().get_center()
+      runner._drag_input(at, true, true)
+      await runner.frames(1)
+      for i in 24:
+          runner._drag_input(at + Vector2(-400.0 * sin(PI * (i + 1) / 24.0), 0.0), true)
+          await runner.frames(1)
+          if not view.picture_rect().grow(0.5).encloses(Rect2(Vector2.ZERO, view.size)):
+              return "frame %d: the picture letterboxed: %s in %s" % [i, view.picture_rect(), view.size]
+      if configures.call() != before:
+          return "configured mid-drag"
+      runner._drag_input(at, false, true)
+      await runner.frames(3)
+      if view.hold or not whole.call() or configures.call() != before:
+          return "released at the same width: held %s, the picture %s in %s, %d configures" % [view.hold, view.picture_rect(), view.size, configures.call() - before]

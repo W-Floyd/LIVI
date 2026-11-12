@@ -1718,6 +1718,100 @@ fn samples_handed_over_reach_the_pipeline_once_the_stream_is_active() {
 }
 
 #[test]
+fn fed_samples_keep_their_order_against_the_stream_ops_however_late_the_main_loop_is() {
+    let level = |v: f64| v.to_le_bytes().to_vec();
+    let fed = fed_body();
+    let ops = |stop: bool| -> Vec<(u8, Vec<u8>)> {
+        let mut v = vec![
+            (OP_AUDIO_OPEN, fed.clone()),
+            (OP_AUDIO_DATA, vec![0]),
+            (OP_AUDIO_ACTIVE, vec![1]),
+            (OP_AUDIO_DATA, vec![1]),
+            (OP_AUDIO_VOLUME, level(0.5)),
+            (OP_AUDIO_DATA, vec![2]),
+            (OP_AUDIO_ACTIVE, vec![0]),
+            (OP_AUDIO_DATA, vec![3]),
+            (OP_AUDIO_ACTIVE, vec![1]),
+        ];
+        if stop {
+            v.push((OP_AUDIO_STOP, vec![]));
+        }
+        v.push((OP_AUDIO_DATA, vec![4]));
+        v
+    };
+    let all: Vec<Vec<u8>> = vec![vec![1], vec![2], vec![4]];
+    // (case, ops, main loop held from this op on, heard while held, heard and level once it ran)
+    type Row = (
+        &'static str,
+        Vec<(u8, Vec<u8>)>,
+        Option<usize>,
+        Vec<Vec<u8>>,
+        (Vec<Vec<u8>>, Option<f64>),
+    );
+    let cases: [Row; 5] = [
+        (
+            "never held",
+            ops(false),
+            None,
+            all.clone(),
+            (all.clone(), Some(0.5)),
+        ),
+        (
+            "held once the pipeline is built",
+            ops(false),
+            Some(1),
+            all.clone(),
+            (all.clone(), Some(0.5)),
+        ),
+        (
+            "held before the pipeline is built",
+            ops(false),
+            Some(0),
+            vec![],
+            (all.clone(), Some(0.5)),
+        ),
+        (
+            "stopped while held",
+            ops(true),
+            Some(1),
+            vec![vec![1], vec![2]],
+            (vec![vec![1], vec![2]], Some(0.5)),
+        ),
+        (
+            "stopped before the pipeline is built",
+            ops(true),
+            Some(0),
+            vec![],
+            (vec![], None),
+        ),
+    ];
+    for (case, ops, held_from, while_held, (after, volume)) in cases {
+        let mut f = Fixture::new();
+        let mut inlet = f.host.inlet();
+        let heard = |f: &Fixture| {
+            let w = f.world.0.borrow();
+            let s = w.speakers.first().cloned();
+            drop(w);
+            s.map(|s| (s.pushed(), s.volume())).unwrap_or_default()
+        };
+        let mut queued = Vec::new();
+        for (i, (op, body)) in ops.iter().enumerate() {
+            queued.extend(inlet.take(&frame(*op, MUSIC, body)));
+            if held_from.is_none_or(|from| i < from) {
+                for m in queued.drain(..) {
+                    f.host.take(m);
+                }
+            }
+        }
+        assert_eq!(heard(&f).0, while_held, "{case}: while held");
+        for m in queued.drain(..) {
+            f.host.take(m);
+        }
+        assert_eq!(heard(&f), (after, volume), "{case}: once it ran");
+    }
+}
+
+#[test]
 fn the_volume_reaches_the_pipeline() {
     let mut f = Fixture::new();
     f.send(OP_AUDIO_OPEN, MUSIC, &audio_body(0, false, ""));

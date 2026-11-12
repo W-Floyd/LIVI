@@ -12,8 +12,9 @@ use livi_audio::stream::{AudioSink, Codec as AudioCodec};
 use livi_audio::uplink::UplinkCodec;
 pub use livi_host_proto::UrlStatus;
 use livi_host_proto::{
-    CLUSTER_PLANE_MAX, CLUSTER_PLANE_MIN, CLUSTER_RECV_ID, Framer, cameras_body, feed as feedproto,
-    feeder_of, parse_camera_body, parse_plane_body, parse_url_body, url_status_body,
+    CLUSTER_PLANE_MAX, CLUSTER_PLANE_MIN, CLUSTER_RECV_ID, Message, cameras_body,
+    feed as feedproto, feeder_of, parse_camera_body, parse_plane_body, parse_url_body,
+    url_status_body,
 };
 pub use livi_host_proto::{CameraOrder, CameraSeen, VideoCodec};
 use livi_screen_stream::ScreenSink;
@@ -25,6 +26,7 @@ mod audio;
 mod building;
 pub mod feed;
 pub mod gst;
+mod lanes;
 mod mend;
 pub mod process;
 #[cfg(target_os = "android")]
@@ -33,6 +35,8 @@ mod spectrum;
 pub mod ui_plane;
 mod video;
 
+pub use lanes::Inlet;
+use lanes::Lanes;
 use livi_host_proto::ops::*;
 use spectrum::Spectrum;
 
@@ -236,12 +240,11 @@ impl<S> Output<S> {
         self.now.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn replace(&self, speaker: S) {
-        let old = std::mem::replace(
+    fn replace(&self, speaker: S) -> Arc<S> {
+        std::mem::replace(
             &mut *self.now.lock().unwrap_or_else(|e| e.into_inner()),
             Arc::new(speaker),
-        );
-        drop(old);
+        )
     }
 }
 
@@ -268,7 +271,6 @@ impl<O: Outside> AudioSink for AudioFeed<O> {
 struct AudioStream<S, E> {
     speaker: Arc<Output<S>>,
     cfg: AudioConfig,
-    level: Option<f64>,
     active: Arc<AtomicBool>,
     told_delay_ms: Option<u32>,
     smoothed_delay_ms: Option<f64>,
@@ -371,7 +373,8 @@ impl<O: Outside> MediaSink for MediaFeed<O> {
 
 pub struct Host<O: Outside> {
     outside: O,
-    framer: Framer,
+    lanes: Arc<Lanes<O::Speaker>>,
+    inlet: Inlet<O::Speaker>,
     planes: Planes<O::Plane>,
     plane_specs: HashMap<u32, (VideoCodec, Vec<u8>)>,
     mends: HashMap<u32, mend::Mend>,
@@ -395,10 +398,12 @@ pub struct Host<O: Outside> {
 
 impl<O: Outside> Host<O> {
     pub fn new(outside: O, wire: Arc<dyn Wire>) -> Self {
+        let lanes = Lanes::new();
         Self {
             display: outside.display(),
             outside,
-            framer: Framer::new(),
+            inlet: Inlet::new(lanes.clone()),
+            lanes,
             planes: Rc::new(RefCell::new(HashMap::new())),
             plane_specs: HashMap::new(),
             mends: HashMap::new(),
@@ -421,10 +426,19 @@ impl<O: Outside> Host<O> {
     }
 
     pub fn feed(&mut self, chunk: &[u8]) {
-        self.framer.push(chunk);
-        while let Some(m) = self.framer.next_message() {
-            self.dispatch(m.op, m.id, &m.rest);
+        for m in self.inlet.take(chunk) {
+            self.take(m);
         }
+    }
+
+    /// Another reader of the core's socket, for a thread of its own; what it
+    /// returns goes to [`Host::take`] in order.
+    pub fn inlet(&self) -> Inlet<O::Speaker> {
+        Inlet::new(self.lanes.clone())
+    }
+
+    pub fn take(&mut self, m: Message) {
+        self.dispatch(m.op, m.id, &m.rest);
     }
 
     fn dispatch(&mut self, op: u8, id: u32, rest: &[u8]) {
@@ -470,20 +484,6 @@ impl<O: Outside> Host<O> {
             }
             OP_SET_ACTIVE => self.set_active_feeder(id, rest),
             OP_AUDIO_OPEN => self.open_audio(id, rest),
-            OP_AUDIO_VOLUME => {
-                if rest.len() >= size_of::<f64>()
-                    && let Some(a) = self.audio.borrow_mut().get_mut(&id)
-                {
-                    let level = f64::from_le_bytes(rest[..8].try_into().unwrap());
-                    let ms = if rest.len() >= 12 {
-                        u32::from_le_bytes(rest[8..12].try_into().unwrap()).into()
-                    } else {
-                        0
-                    };
-                    a.level = Some(level);
-                    a.speaker.get().set_volume(level, ms);
-                }
-            }
             OP_AUDIO_OUTPUT => self.set_audio_output(rest),
             OP_AUDIO_STOP => {
                 self.audio.borrow_mut().remove(&id);
@@ -495,19 +495,6 @@ impl<O: Outside> Host<O> {
             OP_TAP_OPEN => self.open_tap(id, rest),
             OP_TAP_STOP => {
                 self.taps.remove(&id);
-            }
-            OP_AUDIO_DATA => {
-                if let Some(a) = self.audio.borrow().get(&id)
-                    && a.active.load(Ordering::Relaxed)
-                {
-                    a.speaker.get().push_samples(rest);
-                }
-            }
-            OP_AUDIO_ACTIVE => {
-                if let Some(a) = self.audio.borrow().get(&id) {
-                    a.active
-                        .store(rest.first().is_some_and(|b| b & 1 != 0), Ordering::Relaxed);
-                }
             }
             OP_VISUALIZER => self.set_visualizer_enabled(rest.first().is_some_and(|b| b & 1 != 0)),
             OP_AUDIO_BACKLOG => self.set_audio_backlog(rest),

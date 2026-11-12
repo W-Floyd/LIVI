@@ -5,13 +5,14 @@
 use core::ffi::{c_char, c_int, c_void};
 use std::cell::RefCell;
 use std::ffi::CString;
-use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
+use std::io::{BufRead, ErrorKind, Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicPtr, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, Weak, mpsc};
+use std::time::{Duration, Instant};
 
 use glib::{ControlFlow, IOCondition, SourceId};
 
@@ -22,6 +23,8 @@ const STATS_SECONDS: u32 = 5;
 const VISUALIZER_INTERVAL_MS: u64 = 20;
 const URL_STATUS_INTERVAL_MS: u64 = 500;
 const CHUNK: usize = 65536;
+const TICK_MS: u64 = 100;
+const STALL_MS: u64 = 500;
 
 struct SocketWire {
     sock: Arc<UnixStream>,
@@ -38,6 +41,7 @@ impl Wire for SocketWire {
 
 pub fn run(sock_path: &str, crash_log: &str) {
     glib::set_prgname(Some("livi-video"));
+    stamp_stderr();
     livi_video_player::ensure_init();
     arm_crash_handler(crash_log);
 
@@ -75,25 +79,72 @@ fn attach(sock: UnixStream, hung_up: impl Fn() + 'static) -> Vec<SourceId> {
     });
     let host = Rc::new(RefCell::new(Host::new(Gst, wire)));
 
-    let fd = sock.as_raw_fd();
+    // The socket is read on a thread of its own, which plays fed audio there
+    // and then; the rest reaches the main loop through `ops` in order, the
+    // wake pair only nudging it. None marks the core's hang-up.
+    let (ops, queued) = mpsc::channel();
+    let (woken, wake) = UnixStream::pair().expect("wake pair");
+    let _ = woken.set_nonblocking(true);
+    let _ = wake.set_nonblocking(true);
+    let mut inlet = host.borrow().inlet();
+    std::thread::Builder::new()
+        .name("gst-host-in".into())
+        .spawn(move || {
+            let mut chunk = vec![0u8; CHUNK];
+            let mut from: &UnixStream = &sock;
+            loop {
+                let n = match from.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => n,
+                    Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                };
+                let taken = inlet.take(&chunk[..n]);
+                if taken.is_empty() {
+                    continue;
+                }
+                for m in taken {
+                    if ops.send(Some(m)).is_err() {
+                        return;
+                    }
+                }
+                let _ = (&wake).write(&[1]);
+            }
+            let _ = ops.send(None);
+            let _ = (&wake).write(&[1]);
+        })
+        .expect("socket reader thread");
+
     let reading = host.clone();
     let mut sources = vec![glib_unix::unix_fd_add_local(
-        fd,
+        woken.as_raw_fd(),
         IOCondition::IN | IOCondition::HUP | IOCondition::ERR,
-        move |_, cond| {
-            if cond.intersects(IOCondition::HUP | IOCondition::ERR) {
-                hung_up();
-                return ControlFlow::Continue;
-            }
-            let mut chunk = [0u8; CHUNK];
-            let mut from: &UnixStream = &sock;
-            match from.read(&mut chunk) {
-                Ok(0) | Err(_) => hung_up(),
-                Ok(n) => reading.borrow_mut().feed(&chunk[..n]),
+        move |_, _| {
+            let mut drain = [0u8; 256];
+            while (&woken).read(&mut drain).is_ok_and(|n| n > 0) {}
+            while let Ok(m) = queued.try_recv() {
+                match m {
+                    Some(m) => reading.borrow_mut().take(m),
+                    None => {
+                        hung_up();
+                        break;
+                    }
+                }
             }
             ControlFlow::Continue
         },
     )];
+
+    let beat = Arc::new(AtomicU64::new(0));
+    let since = Instant::now();
+    watch_loop(Arc::downgrade(&beat), since);
+    sources.push(glib::timeout_add_local(
+        Duration::from_millis(TICK_MS),
+        move || {
+            beat.store(since.elapsed().as_millis() as u64, Ordering::Relaxed);
+            ControlFlow::Continue
+        },
+    ));
 
     let visualizer_host = host.clone();
     sources.push(glib::timeout_add_local(
@@ -126,7 +177,84 @@ fn attach(sock: UnixStream, hung_up: impl Fn() + 'static) -> Vec<SourceId> {
     sources
 }
 
+/// Logs main-loop stalls past [`STALL_MS`], each once as it starts and again
+/// with its length once the loop runs; ends when the beat's source is removed.
+fn watch_loop(beat: Weak<AtomicU64>, since: Instant) {
+    let _ = std::thread::Builder::new()
+        .name("gst-host-watch".into())
+        .spawn(move || {
+            let mut stalled_at: Option<u64> = None;
+            loop {
+                std::thread::sleep(Duration::from_millis(TICK_MS));
+                let Some(beat) = beat.upgrade() else { return };
+                let last = beat.load(Ordering::Relaxed);
+                let gap = (since.elapsed().as_millis() as u64).saturating_sub(last);
+                match stalled_at {
+                    None if gap > STALL_MS => {
+                        stalled_at = Some(last);
+                        eprintln!("[gst-host] main loop stalled, {gap} ms so far");
+                    }
+                    Some(from) if gap <= STALL_MS => {
+                        stalled_at = None;
+                        eprintln!(
+                            "[gst-host] main loop ran again after {} ms",
+                            last.saturating_sub(from)
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        });
+}
+
 static CRASH_PATH: AtomicPtr<c_char> = AtomicPtr::new(core::ptr::null_mut());
+static LOG_FD: AtomicI32 = AtomicI32::new(libc::STDERR_FILENO);
+
+/// Prefixes every stderr line, the C libraries' too, with the wall-clock time,
+/// to date it against the journal. Lines already stamped pass as they are.
+fn stamp_stderr() {
+    let mut ends = [0 as c_int; 2];
+    if unsafe { libc::pipe(ends.as_mut_ptr()) } != 0 {
+        return;
+    }
+    let [from, to] = ends;
+    let log = unsafe { libc::fcntl(libc::STDERR_FILENO, libc::F_DUPFD_CLOEXEC, 3) };
+    if log < 0 || unsafe { libc::dup2(to, libc::STDERR_FILENO) } < 0 {
+        unsafe {
+            libc::close(from);
+            libc::close(to);
+            if log >= 0 {
+                libc::close(log);
+            }
+        }
+        return;
+    }
+    unsafe {
+        libc::close(to);
+        libc::fcntl(from, libc::F_SETFD, libc::FD_CLOEXEC);
+    }
+    LOG_FD.store(log, Ordering::Relaxed);
+    let lines = std::io::BufReader::new(unsafe { std::fs::File::from_raw_fd(from) });
+    let _ = std::thread::Builder::new()
+        .name("gst-host-log".into())
+        .spawn(move || {
+            let mut out = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(log) });
+            for line in lines.split(b'\n').map_while(Result::ok) {
+                let line = String::from_utf8_lossy(&line);
+                let line = if is_stamped(&line) {
+                    format!("{line}\n")
+                } else {
+                    format!("{}\n", livi_video_player::stamped(&line))
+                };
+                let _ = out.write_all(line.as_bytes());
+            }
+        });
+}
+
+fn is_stamped(line: &str) -> bool {
+    let b = line.as_bytes();
+    b.len() >= 14 && b[0] == b'[' && b[3] == b':' && b[6] == b':' && b[9] == b'.' && b[13] == b']'
+}
 
 const SIG_DFL: usize = 0;
 
@@ -155,7 +283,7 @@ extern "C" fn on_crash(sig: c_int) {
         let _ = libc::write(fd, HEADER.as_ptr().cast(), HEADER.len());
         backtrace_symbols_fd(frames.as_ptr(), depth, fd);
     };
-    dump(libc::STDERR_FILENO);
+    dump(LOG_FD.load(Ordering::Relaxed));
 
     let path = CRASH_PATH.load(Ordering::Relaxed);
     if !path.is_null() {

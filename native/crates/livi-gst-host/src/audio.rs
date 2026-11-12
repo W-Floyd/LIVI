@@ -43,6 +43,7 @@ impl<O: Outside> Host<O> {
 
         let Some(speaker) = self.outside.create_speaker(&cfg) else {
             eprintln!("livi: create audio 0x{id:x} FAILED");
+            self.lanes.forget(id);
             return;
         };
         if self.visualizer_enabled {
@@ -54,7 +55,9 @@ impl<O: Outside> Host<O> {
         let speaker = Output::new(speaker);
 
         let fed = rest[11] & 2 != 0;
-        let active = Arc::new(AtomicBool::new(false));
+        let Some(active) = self.lanes.install(id, &speaker) else {
+            return;
+        };
         let feed = AudioFeed::<O> {
             speaker: speaker.clone(),
             wire: self.wire.clone(),
@@ -66,7 +69,10 @@ impl<O: Outside> Host<O> {
         } else {
             match self.outside.listen_audio(cfg.key, Box::new(feed)) {
                 Some((ears, data, control)) => (Some(ears), data, control),
-                None => return,
+                None => {
+                    self.lanes.forget(id);
+                    return;
+                }
             }
         };
 
@@ -75,7 +81,6 @@ impl<O: Outside> Host<O> {
             AudioStream {
                 speaker,
                 cfg,
-                level: None,
                 active,
                 told_delay_ms: None,
                 smoothed_delay_ms: None,
@@ -97,24 +102,17 @@ impl<O: Outside> Host<O> {
                 continue;
             }
             let before = std::mem::replace(&mut a.cfg.device, device.clone());
-            let Some(speaker) = self.fresh_speaker(&a.cfg, a.level) else {
+            let Some(speaker) = self.fresh_speaker(&a.cfg) else {
                 eprintln!("livi: audio 0x{id:x} cannot move to {device:?}, it stays");
                 a.cfg.device = before;
                 continue;
             };
-            a.speaker.replace(speaker);
+            drop(self.lanes.replace(*id, &a.speaker, speaker));
         }
     }
 
-    pub(super) fn fresh_speaker(
-        &self,
-        cfg: &AudioConfig,
-        level: Option<f64>,
-    ) -> Option<O::Speaker> {
+    pub(super) fn fresh_speaker(&self, cfg: &AudioConfig) -> Option<O::Speaker> {
         let speaker = self.outside.create_speaker(cfg)?;
-        if let Some(level) = level {
-            speaker.set_volume(level, 0);
-        }
         if self.visualizer_enabled {
             speaker.set_visualizer_enabled(true);
         }

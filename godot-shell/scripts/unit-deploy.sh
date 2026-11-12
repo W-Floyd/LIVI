@@ -15,9 +15,10 @@
 #   all     micomd, core, shell
 #
 # shell and core build from a clean worktree of this checkout's HEAD (LIVI_DEPLOY_CACHE, default
-# ~/.cache/livi-unit-deploy), so uncommitted changes never ship. micomd: PMAPORTS_DIR is a
-# pmaports checkout holding device/testing/{micomd,device-mobis-g5w}; when the go-micomd commit
-# the APKBUILD names is on no remote branch of GO_MICOMD_DIR, the build takes it from there.
+# ~/.cache/livi-unit-deploy), so uncommitted changes never ship; its cargo targets are this
+# checkout's, so it holds no second build. micomd: PMAPORTS_DIR is a pmaports checkout holding
+# device/testing/{micomd,device-mobis-g5w}; when the go-micomd commit the APKBUILD names is on no
+# remote branch of GO_MICOMD_DIR, the build takes it from there.
 # Host defaults to $LIVI_UNIT or user@mobis-g5w.local; sudo reads LIVI_UNIT_SUDO_PASS, else asks.
 set -eu
 gs=$(cd "$(dirname "$0")/.." && pwd)
@@ -154,6 +155,11 @@ if has core || has shell; then
         git -C "$repo" worktree prune
         git -C "$repo" worktree add -q --detach "$wt" "$head"
     fi
+    for d in godot-shell/ext native; do
+        mkdir -p "$repo/$d/target"
+        [ -L "$wt/$d/target" ] || rm -rf "$wt/$d/target"
+        ln -sfn "$repo/$d/target" "$wt/$d/target"
+    done
     out=$wt/godot-shell/packaging/out/armv7
     # A build is current while nothing it reads changed since the commit it was made at.
     built=$(cat "$out/.built" 2>/dev/null || :)

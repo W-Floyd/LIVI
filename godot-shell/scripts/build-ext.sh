@@ -4,6 +4,7 @@
 #
 # A build is kept per source hash (~/.cache/livi-ext): a copy of the tree at another path with the
 # same sources takes it instead of building again (cargo rebuilds a path crate per checkout path).
+# Builds go to CARGO_TARGET_DIR when set (vm.sh shares one between copies), else ext/target.
 set -eu
 cd "$(dirname "$0")/../ext"
 profile=debug
@@ -24,11 +25,17 @@ hash=$(find Cargo.toml Cargo.lock build.rs src ../../native/Cargo.lock ../../nat
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/livi-ext/$profile-$hash
 if [ -f "$cache/$lib" ] && [ -f "$cache/$client" ]; then
     echo "extension: built from these sources before ($cache)"
+    touch "$cache" # its age is what vm.sh and clean.sh prune by
 else
+    t=${CARGO_TARGET_DIR:-target}
+    mkdir -p "$t"
+    # A shared target's output is any copy's: held from the build until it is copied.
+    if command -v flock >/dev/null; then exec 9>"$t/.build-ext.lock" && flock 9; fi
     cargo build ${1:+"$1"}
     mkdir -p "$cache.tmp.$$"
-    cp "target/$profile/$lib" "target/$profile/$client" "$cache.tmp.$$/"
+    cp "$t/$profile/$lib" "$t/$profile/$client" "$cache.tmp.$$/"
     rm -rf "$cache" && mv "$cache.tmp.$$" "$cache"
+    exec 9>&-
 fi
 mkdir -p "../project/bin/$dir"
 # The test client beside it: target/ may be shared between copies, each building its own.

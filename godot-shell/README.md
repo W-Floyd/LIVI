@@ -22,11 +22,17 @@ scripts/vm.sh scripts/test.sh --record          # also record flows to MP4, for 
 ```
 
 `vm.sh` syncs `godot-shell/` and `native/` into the VM, runs the command, and copies `out/`
-(`report.html`, metrics, and shots where they failed or were asked for) and `tests/goldens/`
-back. Scenarios render in a 1920×720 SubViewport under a headless weston with llvmpipe, at
-`--fixed-fps 60` and a fixed clock, with the extension built in release. `check-gd.sh` runs
+(`report.html`, metrics, and shots where they failed or were asked for) and the goldens the run
+wrote back, so a run from another copy never reverts goldens written here meanwhile. Scenarios
+render in a 1920×720 SubViewport under a headless weston with llvmpipe, at `--fixed-fps 60` and a
+fixed clock, with the extension built in release. `check-gd.sh` runs
 first and prints GDScript errors as `res://file:line`; a script that still fails to load in
 the run stops it at once.
+
+Each `VM_DEST` is a copy in the VM's home sharing one cargo target (`~/.cache/livi-target`);
+`vm.sh` removes copies unused for 3 days and the target's debug build past 8 GB.
+`scripts/clean.sh` reclaims the rest: the VM's and every worktree's debug targets, old extension
+builds, and Docker's build cache older than 72 h (never its volumes).
 
 Goldens are lossless WebP, a third of PNG's size. Captures are compared in memory and written
 (as PNG) only on a mismatch, `--update-goldens`, `--shots-only` or `compare: false`.

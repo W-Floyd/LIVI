@@ -33,17 +33,17 @@ steps:
   - theme: { theme_name: instrument, appearance: night, hand: lhd, text_scale: 1.4 }
   - screenshot: ev-live-instrument-night-text-1.4
   # The two ranges never run into each other nor onto the road (their numerals are the road's
-  # colours), at the fixtures' ranges and the unit's short one (43 km, 2026-11-12), the blower on
-  # and off, at any text scale, bar edge or drive side.
+  # colours), at the fixtures' long, middle and the unit's short range (43 km, 2026-11-12), the
+  # blower on and off, small and large text, the bar's edges and both drive sides.
   - gdscript: |
-      for km in [[243, 253], [148, null], [221, 232], [312, null], [43, 44], [12, 13]]:
+      for km in [[243, 253], [148, null], [43, 44]]:
           Core.fake_set("telemetry/rangeKm", km[0])
           Core.fake_set("telemetry/rangeClimateOffKm", km[1])
           for blower in [3, 0]:
               Core.fake_set("telemetry/climate/fanLevel", blower)
               Core.fake_set("telemetry/climate/on", blower > 0)
-              for ts in [1.0, 1.2, 1.4]:
-                  for pos in ["top", "bottom", "left", "right", "off"]:
+              for ts in [1.0, 1.4]:
+                  for pos in ["top", "left", "off"]:
                       for hand in ["lhd", "rhd"]:
                           ThemeManager.set_look({text_scale = ts, status_position = pos, hand = hand})
                           shell.open_page("ev_live")

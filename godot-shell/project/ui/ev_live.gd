@@ -315,6 +315,8 @@ func _restyle() -> void:
 	for v in _spec.get("views", []):
 		_views[v.id] = v
 	UI.restyle(self)
+	# Its own restyle may come after this one: lay out with its new size.
+	_charge_card._restyle()
 	_title.text = _str("title")
 	_title.visible = true
 	_override(_title, "layout_main_title")
@@ -419,14 +421,21 @@ func _item(view_id: String, text_id: String, fallback_icon: String, fallback_tex
 func _set_tiles() -> void:
 	var tel = Core.get_value("/telemetry")
 	_tile_live = tile_texts(tel if tel is Dictionary else {}, Clock.local())
+	var skin := ThemeManager.pack != null and not _spec.is_empty()
 	var items := {
 		next_departure = _item("", "mainview_nextDeparture_value_soff", "", STRINGS.not_available, _tile_live.departure),
 		scheduled = _item("mainview_schedule_charging_icon", "mainview_text_scheduled_charging_mode_status", "plug", STRINGS.unknown, _tile_live.charging)
 			+ _item("mainview_schedule_climate_icon", "mainview_text_scheduled_climate_mode_status", "fan", STRINGS.unknown, _tile_live.climate),
 		v2l = _badges(),
 	}
+	# The shell's own tiles say it in words: a plug and a fan beside "Off" read as nothing.
+	if not skin:
+		var words := [] if _tile_live.charging == "" and _tile_live.climate == "" else \
+			["Charging %s" % (_tile_live.charging.to_lower() if _tile_live.charging != "" else STRINGS.unknown),
+			"Climate %s" % (_tile_live.climate.to_lower() if _tile_live.climate != "" else STRINGS.unknown)]
+		items.scheduled = [{text = " · ".join(words) if not words.is_empty() else STRINGS.not_available}]
+		items.v2l = [{text = _tile_live.v2l}] if _tile_live.v2l != "" else []
 	var icons := {next_departure = "plug", scheduled = "clock", v2l = "v2l"}
-	var skin := ThemeManager.pack != null and not _spec.is_empty()
 	for id in TILES:
 		var t: EvTile = _tiles[id]
 		var spec: Dictionary = TILE_VIEWS[id]
@@ -449,6 +458,7 @@ static func tile_texts(t: Dictionary, now_local: float) -> Dictionary:
 		departure = next_departure(t, now_local),
 		charging = STRINGS.state_off if mode == "off" else STRINGS.state_on if mode in ChargeCard.WAITING_MODES else "",
 		climate = STRINGS.state_on if climate == true else STRINGS.state_off if climate == false else "",
+		v2l = "Limit %d %%" % roundi(float(t.v2lDischargeLimitPct)) if t.get("v2lDischargeLimitPct") is float or t.get("v2lDischargeLimitPct") is int else "",
 	}
 
 
@@ -579,7 +589,8 @@ func _bind() -> void:
 	var t = Core.get_value("/telemetry")
 	_car_status.side = -1.0 if ThemeManager.hand == "rhd" else 1.0
 	_car_status.show_for(t if t is Dictionary else {})
-	_charge_card.show_for(t if t is Dictionary else {})
+	# While charging, the block over the car says what "Battery" would.
+	_l(_battery, "battery_name").visible = not _charge_card.show_for(t if t is Dictionary else {})
 	if tile_texts(t if t is Dictionary else {}, Clock.local()) != _tile_live:
 		_set_tiles()
 		_layout()
@@ -740,77 +751,124 @@ func _place() -> void:
 			in_row = true
 			continue
 		keep -= 1
-	if _charge_card.visible:
-		_charge_card.fit(room_bottom - floor_y - gap)
-		_charge_card.size = _charge_card.get_combined_minimum_size()
-		var cx := (w - _charge_card.size.x) / 2.0
-		# Clear of the car's state, on its side of the page.
-		if _car_status.visible:
-			cx = maxf(cx, _car_status.position.x + _car_status.size.x + gap * 2.0) if side > 0 \
-				else minf(cx, _car_status.position.x - gap * 2.0 - _charge_card.size.x)
-		_charge_card.position = Vector2(cx, floor_y + gap).round()
-		placed.append(Rect2(_charge_card.position, _charge_card.size))
 	placed.append(Rect2(bat.position, bat.size))
-	# The charger: its block over the pin, the pin a third in from the side the road runs from.
-	var ch: Control = _charger.box
-	ch.visible = _show_charger
-	(_charger.rows[0].get_child(0) as TextureRect).flip_h = side < 0
-	ch.position = Vector2(a.pin.x - ch.size.x * (0.29 if side > 0 else 0.71), (a.pin as Vector2).y - ch.size.y)
-	_fit_in(ch, bounds)
-	if _show_charger:
-		_clear(ch, placed, bounds)
-		placed.append(Rect2(ch.position, ch.size))
-	# The ranges keep off the road: their numerals are the road's colours.
+	# The ranges and the charging block keep off the road: the car, the road and its end are the
+	# page's story.
 	var road: PackedVector2Array = _scene.road_polygon()
 	for i in road.size():
 		road[i] -= get_global_rect().position
+	# Where the ranges find no room beside the charging block, it keeps its headline and number
+	# only, in the shorter face.
+	var base_placed := placed.duplicate()
 	var off: Control = _off.box
-	off.visible = _show_off
 	var on: Control = _on.box
-	on.visible = _show_on
-	var off_spots := func(sz: Vector2) -> Array:
-		var x: float = a.off.x + gap * LABEL_GAP * side - (sz.x if side < 0 else 0.0)
-		var span := _road_span(road, x, x + sz.x)
-		return [Vector2(x, maxf((a.off as Vector2).y, span.y) + gap * 0.7),
-			Vector2(x, minf((a.off_far as Vector2).y, span.x) - gap - sz.y)]
-	var tip := maxf(maxf(a.on.x, a.on_far.x), maxf(a.off.x, a.off_far.x)) if side > 0 \
-		else minf(minf(a.on.x, a.on_far.x), minf(a.off.x, a.off_far.x))
-	# Under the end with a leader; above the far end; just under the road; past its end.
-	var on_spots := func(sz: Vector2) -> Array:
-		var x: float = a.on.x + gap * LABEL_GAP * side - (sz.x if side > 0 else 0.0)
-		var span := _road_span(road, x, x + sz.x)
-		return [Vector2(x, maxf((a.on as Vector2).y + gap * 6.5, span.y + gap * 0.7)),
-			Vector2(x, minf((a.on_far as Vector2).y - gap * 1.5, span.x - gap) - sz.y),
-			Vector2(x, span.y + gap * 0.7),
-			Vector2(tip + gap * LABEL_GAP * side - (0.0 if side > 0 else sz.x),
-				((a.on as Vector2).y + (a.on_far as Vector2).y - sz.y) / 2.0)]
-	var ranges := []
-	if _show_off:
-		ranges.append([_off, off_spots])
-	if _show_on:
-		ranges.append([_on, on_spots])
-	var before := placed.duplicate()
-	# The far range first, as it was; where the near one then finds no room, the other way round;
-	# where the far one still has none, it goes (the road's paler end still shows it).
-	for attempt in 2:
-		var ok := true
-		for r in ranges:
-			var fits := _place_range(r[0], r[1], placed, bounds, road)
-			ok = ok and fits
-			if not fits and attempt == 1 and r[0] == _off:
-				off.visible = false
-				continue
-			placed.append(Rect2((r[0].box as Control).position, (r[0].box as Control).size))
-		if ok or ranges.size() < 2 or attempt == 1:
+	for squeeze in 2:
+		placed = base_placed.duplicate()
+		var card_ok := true
+		if _charge_card.visible:
+			# Over the car, under the car's state, where "Battery" was: the charge's story stays at
+			# the car and the road stays clear. Else beside the charge, else any room off the road.
+			_charge_card.stacked = squeeze == 1
+			_charge_card.fit(room_bottom - floor_y - gap if squeeze == 0 else -1.0)
+			var cs := _charge_card.get_combined_minimum_size()
+			var top := floor_y + gap
+			for r in placed:
+				if r.position.y < floor_y + gap * 4.0:
+					top = maxf(top, r.end.y + gap * 0.5)
+			var cx := bat.position.x + bat.size.x + gap * 2.0 if side > 0 else bat.position.x - gap * 2.0 - cs.x
+			var spots := [Vector2(edge if side > 0 else w - edge - cs.x, top), Vector2(cx, floor_y + gap * 0.3)]
+			var at = _find_clear(cs, spots, placed, bounds, road, w * 0.3)
+			# Short of room: the number in a face with a shorter line, then without the time it is
+			# done.
+			if at == null and squeeze == 0:
+				_charge_card.stacked = true
+				cs = _charge_card.get_combined_minimum_size()
+				at = _find_clear(cs, spots, placed, bounds, road, w * 0.3)
+				if at == null:
+					_charge_card.stacked = false
+			if at == null:
+				_charge_card.fit(-1.0)
+				cs = _charge_card.get_combined_minimum_size()
+				at = _find_clear(cs, spots, placed, bounds, road)
+			card_ok = at != null
+			# Large text on a short page: clear of the labels, if not of the road.
+			if at == null and squeeze == 1:
+				at = _find_clear(cs, spots, placed, bounds, PackedVector2Array())
+				if at == null:
+					_charge_card.stacked = false
+					cs = _charge_card.get_combined_minimum_size()
+					at = _find_clear(cs, spots, placed, bounds, PackedVector2Array())
+			if at == null:
+				at = Vector2(clampf(spots[0].x, bounds.position.x, maxf(bounds.position.x, bounds.end.x - cs.x)),
+					clampf(spots[0].y, bounds.position.y, maxf(bounds.position.y, bounds.end.y - cs.y)))
+			_charge_card.size = cs
+			_charge_card.position = (at as Vector2).round()
+			placed.append(Rect2(_charge_card.position, _charge_card.size))
+		# The charger: its block over the pin, the pin a third in from the side the road runs from.
+		var ch: Control = _charger.box
+		ch.visible = _show_charger
+		(_charger.rows[0].get_child(0) as TextureRect).flip_h = side < 0
+		ch.position = Vector2(a.pin.x - ch.size.x * (0.29 if side > 0 else 0.71), (a.pin as Vector2).y - ch.size.y)
+		_fit_in(ch, bounds)
+		if _show_charger:
+			_clear(ch, placed, bounds)
+			placed.append(Rect2(ch.position, ch.size))
+		off.visible = _show_off
+		on.visible = _show_on
+		var off_spots := func(sz: Vector2) -> Array:
+			var x: float = a.off.x + gap * LABEL_GAP * side - (sz.x if side < 0 else 0.0)
+			var span := _road_span(road, x, x + sz.x)
+			return [Vector2(x, maxf((a.off as Vector2).y, span.y) + gap * 0.7),
+				Vector2(x, minf((a.off_far as Vector2).y, span.x) - gap - sz.y)]
+		var tip := maxf(maxf(a.on.x, a.on_far.x), maxf(a.off.x, a.off_far.x)) if side > 0 \
+			else minf(minf(a.on.x, a.on_far.x), minf(a.off.x, a.off_far.x))
+		# Against the end it labels: just above it, past it, just under it; else the nearest room,
+		# a leader tying it on.
+		var on_spots := func(sz: Vector2) -> Array:
+			var x: float = a.on.x + gap * LABEL_GAP * side - (sz.x if side > 0 else 0.0)
+			var span := _road_span(road, x, x + sz.x)
+			return [Vector2(x, minf((a.on_far as Vector2).y, span.x) - gap * 0.7 - sz.y),
+				Vector2(tip + gap * LABEL_GAP * side - (0.0 if side > 0 else sz.x),
+					((a.on as Vector2).y + (a.on_far as Vector2).y - sz.y) / 2.0),
+				Vector2(x, maxf((a.on as Vector2).y, span.y) + gap * 0.7)]
+		var ranges := []
+		if _show_off:
+			ranges.append([_off, off_spots])
+		if _show_on:
+			ranges.append([_on, on_spots])
+		var before := placed.duplicate()
+		# The far range first, as it was; where the near one then finds no room, the other way round;
+		# where the far one still has none, it goes (the road's paler end still shows it).
+		var ranges_ok := true
+		for attempt in 2:
+			var ok := true
+			for r in ranges:
+				# Alone, it may go onto the road before it covers another label.
+				var fits := _place_range(r[0], r[1], placed, bounds, road, ranges.size() == 1)
+				ok = ok and fits
+				if not fits and attempt == 1 and r[0] == _off:
+					off.visible = false
+					continue
+				placed.append(Rect2((r[0].box as Control).position, (r[0].box as Control).size))
+			ranges_ok = ok
+			if ok or ranges.size() < 2 or attempt == 1:
+				break
+			placed = before.duplicate()
+			ranges.reverse()
+			for l in _range_base:
+				l.add_theme_font_size_override("font_size", _range_base[l])
+			var v := _l(_on, "on_value")
+			v.add_theme_font_size_override("font_size", now[v])
+			for b in [_on, _off]:
+				_compact(b, false)
+		if (ranges_ok and card_ok) or not _charge_card.visible or squeeze == 1:
 			break
-		placed = before.duplicate()
-		ranges.reverse()
 		for l in _range_base:
 			l.add_theme_font_size_override("font_size", _range_base[l])
-		var v := _l(_on, "on_value")
-		v.add_theme_font_size_override("font_size", now[v])
-		for b in [_on, _off]:
-			_compact(b, false)
+		var nv := _l(_on, "on_value")
+		nv.add_theme_font_size_override("font_size", now[nv])
+		for b2 in [_on, _off]:
+			_compact(b2, false)
 	var above: bool = on.position.y + on.size.y <= (a.on_far as Vector2).y
 	# The leader runs from the road end to the nearest point of the label.
 	var end: Vector2 = a.on_far if above else a.on
@@ -889,6 +947,8 @@ func _find_clear(size: Vector2, spots: Array, placed: Array[Rect2], bounds: Rect
 	for p in spots:
 		if is_finite(p.y) and _free(Rect2(p, size), placed, bounds, road):
 			return p
+	if reach <= 0.0:
+		return null
 	var want: Vector2 = spots[0]
 	var step: float = ThemeManager.px.gap * 1.5
 	var best := Vector2.INF
@@ -907,31 +967,48 @@ func _find_clear(size: Vector2, spots: Array, placed: Array[Rect2], bounds: Rect
 
 
 ## Puts a range's label where `spots` (its size to candidate positions) finds room, or near the
-## first; where none has, its number gives way, then its rows go side by side, its number giving
-## way again, to 60 %; then anywhere free; else it is left at the first spot, inside `bounds`.
+## first; where none has, its rows go side by side, then its number gives way, to 60 %; then
+## anywhere free; then, with `onto_road`, anywhere clear of the labels; else it is left at the first spot, inside
+## `bounds`.
 func _place_range(block: Dictionary, spots: Callable, placed: Array[Rect2], bounds: Rect2,
-		road: PackedVector2Array) -> bool:
+		road: PackedVector2Array, onto_road := false) -> bool:
 	var box: Control = block.box
 	var nums: Array[Label] = []
 	for n in box.find_children("*_value", "Label", true, false) + box.find_children("*_unit", "Label", true, false):
 		nums.append(n)
 	var base := nums.map(func(l: Label) -> int: return l.get_theme_font_size("font_size"))
 	var first := Vector2.ZERO
-	var levels := [[false, 1.0], [false, 0.9], [false, 0.8], [true, 1.0], [true, 0.85], [true, 0.7], [true, 0.6]]
-	for k in levels.size():
+	var levels := [[false, 1.0], [true, 1.0], [false, 0.9], [true, 0.9], [true, 0.8], [true, 0.7], [true, 0.6]]
+	var set_level := func(k: int) -> void:
 		_compact(block, levels[k][0])
 		for i in nums.size():
 			nums[i].add_theme_font_size_override("font_size", maxi(8, roundi(base[i] * levels[k][1])))
 		box.size = box.get_combined_minimum_size()
-		var cands: Array = spots.call(box.size)
-		if k == 0:
-			first = cands[0]
-		var at = _find_clear(box.size, cands, placed, bounds, road, size.x * 0.2)
-		if at == null and k == levels.size() - 1:
-			at = _find_clear(box.size, cands, placed, bounds, road)
-		if at != null:
-			box.position = at
-			return true
+	set_level.call(0)
+	first = spots.call(box.size)[0]
+	# Each of its own spots at every size, in their order; then the room near the first; then
+	# anywhere.
+	for j in spots.call(box.size).size():
+		for k in levels.size():
+			set_level.call(k)
+			var p: Vector2 = spots.call(box.size)[j]
+			if is_finite(p.y) and _free(Rect2(p, box.size), placed, bounds, road):
+				box.position = p
+				return true
+	for reach in [size.x * 0.2, INF]:
+		for k in levels.size():
+			if reach == INF and k < levels.size() - 1:
+				continue
+			set_level.call(k)
+			var at = _find_clear(box.size, spots.call(box.size), placed, bounds, road, reach)
+			if at != null:
+				box.position = at
+				return true
+	# Large text on a crowded page: clear of the other labels, on the road with its halo.
+	var over = _find_clear(box.size, spots.call(box.size), placed, bounds, PackedVector2Array()) if onto_road else null
+	if over != null:
+		box.position = over
+		return true
 	_compact(block, false)
 	for i in nums.size():
 		nums[i].add_theme_font_size_override("font_size", base[i])

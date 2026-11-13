@@ -100,6 +100,8 @@ steps:
   # The shell's look: set at once, and Day or Night holds against the core's night mode.
   - tap: { node: Settings/Sections/List/Look }
   - tap: { node: Settings/Rows/List/Day or night/Box/Choice/Night }
+  # What the screen shows reaches the core, for the car's cluster.
+  - expect_action: { SetAppearance: { appearance: night } }
   - set: { core: { config: { mainUiNightMode: false } } }
   - wait: { frames: 20 }
   - tap: { node: Settings/Rows/List/Steering wheel/Box/Choice/Right }
@@ -125,6 +127,7 @@ steps:
       rows.reveal(rows.list.get_node("Day or night"))
   - wait: { frames: 2 }
   - tap: { node: Settings/Rows/List/Day or night/Box/Choice/Auto }
+  - expect_action: { SetAppearance: { appearance: day } }
   - gdscript: |
       if ThemeManager.appearance != "day":
           return "auto does not follow the core's day"

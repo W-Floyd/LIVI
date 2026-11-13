@@ -58,6 +58,9 @@ func _ready() -> void:
 	Wayland.window_unmapped.connect(_on_unmapped)
 	ThemeManager.changed.connect(_rescale)
 	ThemeManager.changed.connect(_send_look)
+	ThemeManager.changed.connect(_tell_core_look)
+	Core.welcome.connect(func(_v): _tell_core_look())
+	_tell_core_look()
 	_portal = OS.get_environment("LIVI_SHELL_PORTAL") != "off"
 	if _portal:
 		AppearancePortal.start(ThemeManager.appearance == "night", ThemeManager.c.accent, ThemeManager.reduced_motion)
@@ -374,6 +377,13 @@ func _rescale() -> void:
 func _send_look() -> void:
 	if _portal:
 		AppearancePortal.set_look(ThemeManager.appearance == "night", ThemeManager.c.accent, ThemeManager.reduced_motion)
+
+
+## Day or night as shown, for the car's own displays (the instrument cluster follows it through
+## the car integration). Again on each connection: the core forgets it when the shell's goes.
+func _tell_core_look() -> void:
+	if Core.get_value("/appearance") != ThemeManager.appearance:
+		Core.act({kind = "setAppearance", appearance = ThemeManager.appearance})
 
 
 ## Running windows for the switcher, most recent first: `{window, app, name, icon}`.

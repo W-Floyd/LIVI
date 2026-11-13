@@ -387,6 +387,13 @@ impl Core {
                 self.hub.update(|s| s.ev_charge.request = Some(req));
                 Ok(())
             }
+            Action::SetAppearance { appearance } => {
+                if self.hub.watch().borrow().appearance != Some(appearance) {
+                    println!("[core] the shell shows {appearance:?}");
+                    self.hub.update(|s| s.appearance = Some(appearance));
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -429,6 +436,20 @@ async fn next_spectrum(viewer: &mut Option<Viewer>) -> Frame {
 }
 
 async fn client(core: Arc<Core>, stream: UnixStream) -> io::Result<()> {
+    let mut told_appearance = false;
+    let result = session(&core, stream, &mut told_appearance).await;
+    // A shell gone, crashed or not, no longer speaks for what is on screen.
+    if told_appearance {
+        core.hub.update(|s| s.appearance = None);
+    }
+    result
+}
+
+async fn session(
+    core: &Arc<Core>,
+    stream: UnixStream,
+    told_appearance: &mut bool,
+) -> io::Result<()> {
     let peer = stream.peer_cred()?.uid();
     if peer != core.uid {
         println!("[core] refused a client of uid {peer}");
@@ -458,7 +479,7 @@ async fn client(core: Arc<Core>, stream: UnixStream) -> io::Result<()> {
     }
     println!("[core] {client} connected");
     let mut pages = core.open_page.subscribe();
-    let mut patches = welcome(&core, &mut wr).await?;
+    let mut patches = welcome(core, &mut wr).await?;
     let mut viewer: Option<Viewer> = None;
     let mut link_speed_viewer: Option<LinkSpeedViewer> = None;
 
@@ -472,8 +493,9 @@ async fn client(core: Arc<Core>, stream: UnixStream) -> io::Result<()> {
                 dec.push(&buf[..n]);
                 while let Some(msg) = dec.next_message::<ToCore>() {
                     match msg {
-                        Ok(ToCore::Resync) => patches = welcome(&core, &mut wr).await?,
+                        Ok(ToCore::Resync) => patches = welcome(core, &mut wr).await?,
                         Ok(ToCore::Action { id, action }) => {
+                            *told_appearance |= matches!(action, Action::SetAppearance { .. });
                             let error = core.act(action).await.err();
                             send(&mut wr, &FromCore::Reply { id, error }).await?;
                         }
@@ -501,7 +523,7 @@ async fn client(core: Arc<Core>, stream: UnixStream) -> io::Result<()> {
             }
             patch = patches.recv() => match patch {
                 Ok(frame) => wr.write_all(&frame).await?,
-                Err(broadcast::error::RecvError::Lagged(_)) => patches = welcome(&core, &mut wr).await?,
+                Err(broadcast::error::RecvError::Lagged(_)) => patches = welcome(core, &mut wr).await?,
                 Err(broadcast::error::RecvError::Closed) => break,
             },
             frame = next_spectrum(&mut viewer) => wr.write_all(&frame).await?,
@@ -606,6 +628,7 @@ mod tests {
             precondition: Default::default(),
             ev_schedule: Default::default(),
             ev_charge: Default::default(),
+            appearance: None,
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),
@@ -625,6 +648,49 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         tokio::spawn(serve(core.clone(), listener));
         (core, path, asks, dongle, update)
+    }
+
+    #[tokio::test]
+    async fn the_shells_appearance_lasts_as_long_as_its_connection() {
+        use livi_core_proto::state::Appearance;
+
+        let dir = TempDir::new();
+        let (core, path) = start(&dir);
+        let mut shell = Peer::hello(&path).await;
+        let other = Peer::hello(&path).await;
+        shell
+            .send(&ToCore::Action {
+                id: 1,
+                action: Action::SetAppearance {
+                    appearance: Appearance::Night,
+                },
+            })
+            .await;
+        assert_eq!(
+            shell.recv().await,
+            Some(FromCore::Reply { id: 1, error: None })
+        );
+        assert_eq!(
+            core.hub.watch().borrow().appearance,
+            Some(Appearance::Night)
+        );
+        drop(other);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(
+            core.hub.watch().borrow().appearance,
+            Some(Appearance::Night),
+            "another client leaving keeps it"
+        );
+        drop(shell);
+        let mut cleared = false;
+        for _ in 0..200 {
+            if core.hub.watch().borrow().appearance.is_none() {
+                cleared = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(cleared, "the shell gone: the car's look again");
     }
 
     #[tokio::test]

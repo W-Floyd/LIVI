@@ -25,6 +25,10 @@ pub struct State {
     pub ev_schedule: EvSchedule,
     #[serde(default)]
     pub ev_charge: EvCharge,
+    /// Day or night as the shell shows it, for the car's own displays to match (GET /navigation
+    /// `appearance`). Runtime only: none while no shell has said, or since it left.
+    #[serde(default)]
+    pub appearance: Option<Appearance>,
     pub system: System,
     pub devices: Vec<DeviceView>,
     pub cameras: Vec<CameraView>,
@@ -52,6 +56,7 @@ impl State {
             "precondition" => self.precondition = read(value)?,
             "evSchedule" => self.ev_schedule = read(value)?,
             "evCharge" => self.ev_charge = read(value)?,
+            "appearance" => self.appearance = read(value)?,
             "system" => self.system = read(value)?,
             "devices" => self.devices = read(value)?,
             "cameras" => self.cameras = read(value)?,
@@ -473,6 +478,13 @@ pub struct EvChargeEdit {
     pub charge_limit_dc_pct: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub charging_current_pct: Option<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Appearance {
+    Day,
+    Night,
 }
 
 /// The AC charging current's choices, % of the charger's (stock's three).

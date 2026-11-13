@@ -409,6 +409,10 @@ fn navigation_api(s: &State) -> Value {
         "evChargeRequest".into(),
         serde_json::to_value(&s.ev_charge.request).unwrap_or(Value::Null),
     );
+    nav.insert(
+        "appearance".into(),
+        serde_json::to_value(s.appearance).unwrap_or(Value::Null),
+    );
     Value::Object(nav)
 }
 
@@ -529,6 +533,7 @@ mod tests {
             precondition: Default::default(),
             ev_schedule: Default::default(),
             ev_charge: Default::default(),
+            appearance: None,
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),
@@ -996,6 +1001,7 @@ mod tests {
         assert_eq!(nav["chargingStop"], Value::Null);
         assert_eq!(nav["evScheduleRequest"], Value::Null);
         assert_eq!(nav["evChargeRequest"], Value::Null);
+        assert_eq!(nav["appearance"], Value::Null, "none until the shell says");
         assert_eq!(
             nav["precondition"],
             json!({ "mode": "auto", "manual": false, "manualUntil": null, "minKw": 50 }),
@@ -1019,6 +1025,7 @@ mod tests {
                     ..Default::default()
                 },
             });
+            s.appearance = Some(livi_core_proto::state::Appearance::Night);
             s.navigation.active = Some(true);
             s.navigation.maneuver_type = Some(2);
             s.navigation.remain_distance = Some(300.0);
@@ -1035,6 +1042,7 @@ mod tests {
         assert_eq!(nav["active"], json!(true));
         assert_eq!(nav["maneuverType"], json!(2));
         assert_eq!(nav["remainDistance"], json!(300.0));
+        assert_eq!(nav["appearance"], json!("night"));
         // micom-livi's writeRequest (go-micomd cmd/micom-livi).
         assert_eq!(
             nav["evScheduleRequest"],

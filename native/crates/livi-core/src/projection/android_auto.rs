@@ -619,6 +619,7 @@ mod tests {
             precondition: Default::default(),
             ev_schedule: Default::default(),
             ev_charge: Default::default(),
+            appearance: None,
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),

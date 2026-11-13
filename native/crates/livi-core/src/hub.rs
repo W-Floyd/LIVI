@@ -125,6 +125,7 @@ impl Hub {
 macro_rules! sections {
     ($then:ident) => {
         $then!(
+            appearance "appearance",
             cameras "cameras",
             cluster "cluster",
             config "config",
@@ -201,6 +202,7 @@ mod tests {
             precondition: Default::default(),
             ev_schedule: Default::default(),
             ev_charge: Default::default(),
+            appearance: None,
             system: Default::default(),
             devices: Default::default(),
             update: Default::default(),

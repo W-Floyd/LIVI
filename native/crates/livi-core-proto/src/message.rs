@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::input::Input;
 use crate::patch::PatchOp;
-use crate::state::{Area, EvChargeEdit, EvScheduleEdit, Front, Screen, State};
+use crate::state::{Appearance, Area, EvChargeEdit, EvScheduleEdit, Front, Screen, State};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -183,6 +183,10 @@ pub enum Action {
     SetEvCharge {
         set: EvChargeEdit,
     },
+    /// Day or night as the shell shows it now; its connection closing takes it back.
+    SetAppearance {
+        appearance: Appearance,
+    },
     Quit,
     Restart,
     /// The host itself, not the core: on a head unit whose bootloader always starts the stock
@@ -222,15 +226,31 @@ mod tests {
 
     #[test]
     fn action_on_the_wire() {
-        let msg = ToCore::Action {
-            id: 7,
-            action: Action::SetConfig {
-                patch: json!({ "huVolume": 1.0 }),
-            },
-        };
-        let wire = json!({ "type": "action", "id": 7, "action": { "kind": "setConfig", "patch": { "huVolume": 1.0 } } });
-        assert_eq!(serde_json::to_value(&msg).unwrap(), wire);
-        assert_eq!(serde_json::from_value::<ToCore>(wire).unwrap(), msg);
+        for (action, wire) in [
+            (
+                Action::SetConfig {
+                    patch: json!({ "huVolume": 1.0 }),
+                },
+                json!({ "kind": "setConfig", "patch": { "huVolume": 1.0 } }),
+            ),
+            (
+                Action::SetAppearance {
+                    appearance: crate::state::Appearance::Night,
+                },
+                json!({ "kind": "setAppearance", "appearance": "night" }),
+            ),
+        ] {
+            let msg = ToCore::Action { id: 7, action };
+            let wire = json!({ "type": "action", "id": 7, "action": wire });
+            assert_eq!(serde_json::to_value(&msg).unwrap(), wire);
+            assert_eq!(serde_json::from_value::<ToCore>(wire).unwrap(), msg);
+        }
+        assert!(
+            serde_json::from_value::<Action>(
+                json!({ "kind": "setAppearance", "appearance": "dusk" })
+            )
+            .is_err()
+        );
     }
 
     #[test]

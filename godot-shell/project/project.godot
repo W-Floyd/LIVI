@@ -6,6 +6,8 @@ config_version=5
 
 config/name="LIVI Shell"
 run/main_scene="res://boot.tscn"
+; Off outside debug builds: a release template would hold the [startup] marks back.
+run/flush_stdout_on_print=true
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [autoload]

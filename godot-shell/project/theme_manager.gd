@@ -289,6 +289,10 @@ func write_tokens() -> void:
 		var path := _fonts_dir.path_join(font.file)
 		if path.begins_with("res://"):
 			path = ProjectSettings.globalize_path(path)
+			# A template's res:// is its directory, globalized relative (export-release.sh puts
+			# the fonts there); apps run elsewhere.
+			if path.is_relative_path():
+				path = OS.get_executable_path().get_base_dir().path_join(path)
 		var entry := {}
 		if font.has("weight"):
 			entry.weight = int(font.weight)
@@ -421,7 +425,11 @@ func _font(f: Dictionary) -> Font:
 	var path := _fonts_dir.path_join(f.file)
 	if not _font_files.has(path):
 		var ff := FontFile.new()
-		ff.load_dynamic_font(path)
+		if FileAccess.file_exists(path):
+			ff.load_dynamic_font(path)
+		else:
+			# An exported pack holds the built-in fonts imported, not as files.
+			ff = load(path)
 		# A pack's fonts are hinted as the stock UI renders them, which is also what its
 		# references show; a built-in theme keeps Godot's default.
 		var hint: String = f.get("hinting", "normal" if pack else "")

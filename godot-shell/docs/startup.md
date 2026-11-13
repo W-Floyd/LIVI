@@ -13,7 +13,8 @@ with when the process started after boot. `project/startup.gd`, called from `cor
 | mark | when |
 |---|---|
 | `engine` | the first autoload's `_init` (Core): engine, display, EGL, extension and project settings up |
-| `main` | `boot.gd` `_ready`: autoloads loaded and ready, the main scene and the scripts it names compiled |
+| `autoloads` | the last autoload's `_init` (Drive): the autoloads compiled |
+| `main` | `boot.gd` `_ready`: the main scene and the scripts it names compiled |
 | `compositor` | the shell's Wayland socket listening |
 | `look` | the driver's saved look applied |
 | `shell` | home's nodes built and in the tree |
@@ -21,6 +22,7 @@ with when the process started after boot. `project/startup.gd`, called from `cor
 | `core` | the core's first welcome (its whole state) |
 | `home` | the first frame drawn after it: home with real data |
 | `touch` | the first touch or click (as late as the driver's first tap) |
+| `restored` | the first frame of the page open when the shell last stopped, if not home |
 
 With `LIVI_SHELL_TIMING=1` (in `/etc/livi-shell.conf`) shell.log also gets `[warm] built N ms,
 frames at ...`: the EV page's compile, build and first draws, 2 s after start, on the main thread.
@@ -117,18 +119,19 @@ those reads run at memory speed (~2 GB/s): cold here shows what is read, not wha
   looks next to the executable). `livi_shell.gdextension` needs no release entries: its
   `linux.arm32`/`linux.arm64` keys match the template's features.
 - stdout is buffered: `application/run/flush_stdout_on_print` is off outside debug builds, so the
-  `[startup]` lines (and every `print`) reach the journal late and in blocks. Needs
-  `run/flush_stdout_on_print=true` in `project.godot` (set for these measurements).
+  `[startup]` lines (and every `print`) reach the journal late and in blocks:
+  `run/flush_stdout_on_print=true` in `project.godot`.
 - The built-in fonts: `ThemeManager._font` reads `res://fonts/*.ttf` with
   `FontFile.load_dynamic_font`, but a pack holds only the imported font data, so every built-in
-  theme's fonts fail to load. Measured with `load(path)` as the fallback when the file is missing;
-  vendor packs' fonts (files under `~/.local/share`) are unaffected. `theme_manager.gd` also hands
-  hosted apps `globalize_path("res://fonts/...")`, a file that does not exist in a pack: apps lose
-  the shell's fonts unless the fonts are installed as files too.
+  theme's fonts would fail to load: `load(path)` is the fallback when the file is missing;
+  vendor packs' fonts (files under `~/.local/share`) are unaffected. Hosted apps get
+  `globalize_path("res://fonts/...")`, relative in a template: made absolute from the
+  executable's directory, where `export-release.sh` puts `fonts/`.
 - The scenario runner and the tuning server read `../tests` beside the project: they stay on the
   editor build (the VM), as now.
-- `unit-sync.sh` copies the project for the editor to run: with a template it would export
-  (~3 s in the VM) and push the pack (~1 MB) instead; the class cache rides in the pack.
+- `unit-deploy.sh release` exports in the VM (the editor of the template's version) and pushes
+  the pack (~1 MB), and the 56 MB template once (`unit-release.sh`); the class cache rides in the
+  pack.
 - Nothing at runtime needs the editor build: no `is_editor_hint`, and the runner's runtime
   `GDScript.new()` works in a template too.
 
@@ -158,13 +161,58 @@ weston with `livi-shell.sh`'s arguments, `--audio-driver Dummy`, `DRI_PRIME=0`, 
 `frame::encode`). Read the marks from stdout, `VmRSS` and `read_bytes` from `/proc/<pid>` at
 `home`; for cold starts, `sync; echo 3 >/proc/sys/vm/drop_caches` first.
 
+## On the unit (2026-11-12)
+
+Warm restarts (`systemctl restart livi-shell`), the editor build on `~/shellproj`, the launcher
+as packaged before `DRI_PRIME=0`. ms since the process started:
+
+| restored page | engine | main | compositor | shell | core | first_frame |
+|---|---|---|---|---|---|---|
+| home | 3790 | 8021 | 8076 | 8703 | 9260 | 9588 |
+| ev_live (6 starts) | 3660-4430 | 7854-8639 | 7908-8693 | 8394-9650 | 12963-14946 | 16681-18963 |
+
+- 0-0.3 s: cage up, Godot loaded. 0.3-1.5 s: Wayland and the session bus (the portal is
+  activated meanwhile). 1.5-2.7 s: the GPU probe and the desktop GL context panfrost refuses
+  ("switching to OpenGLES"). 2.7-3.7 s: the GLES context. 3.7-4.4 s: renderer and extension.
+- engine -> main, ~4.2 s: mostly GDScript compile of the ~290 KB of scripts home names. The EV
+  page's own ~200 KB: `[warm] built` is 4.0 s when it compiles them, 0.4 s when they are compiled.
+- With the EV page saved as the last page, `_restore_page`'s deferred open ran before home's first
+  frame: its compile and build (~4.5 s, the welcome waiting behind them: `core`) and its first
+  draws (~4 s) came before anything showed. Home first: 9.6 s.
+
+What changed for it:
+
+- `boot.gd` restores the page after home's first frame and the core's state, once its script has
+  compiled on a worker thread (`Shell.compile_ahead`, started at the first frame: started at
+  `main` it slowed home's build 25 -> 80 ms in the VM). The EV page, the app keyboard and the
+  other pages then compile there one after another; the 2 s warm-up and spare keyboard wait for
+  theirs instead of compiling on the main thread.
+- `AppKeyboard` (with `Keyboard`) and `SceneSkin` are loaded by path (`LATER_SCRIPTS`): ~33 KB less
+  to compile before the first frame.
+- `livi-shell.sh` asks for `opengl3_es`, and `unit-deploy.sh shell` installs the launcher and its
+  unit from HEAD (the unit's predated `DRI_PRIME=0` and the unit without the core ordering).
+- `unit-deploy.sh release`: the template and pack (`export-release.sh` in the VM, Alpine's armv7
+  `godot-templates`) in `~/shellrel`, `LIVI_SHELL_GODOT` pointing at it; `shell` goes back.
+  `flush_stdout_on_print` is on; the built-in fonts load imported when a pack has no file, and
+  sit beside the pack for hosted apps.
+
+VM, median of 5 warm starts (ms since the process started; editor rows on the project directory):
+
+| variant | restored | main | shell | first_frame | restored page drawn |
+|---|---|---|---|---|---|
+| editor, before | home | 430 | 455 | 487 | |
+| editor, before | ev_live | 435 | 465 | 906 | 906 |
+| editor, after | home | 410 | 439 | 474 | |
+| editor, after | ev_live | 403 | 432 | 467 | 932 |
+| template + pack, after | home | 279 | 304 | 338 | |
+| template + pack, after | ev_live | 285 | 311 | 347 | 687 |
+
 ## Remaining options, ranked
 
 | option | expected gain | cost |
 |---|---|---|
-| Release template + pack with compressed tokens: `scripts/export-release.sh` | measured: home 516 → 349 ms in the VM (-32 %); on the unit that share of the warm start plus ~0.3-0.5 s of eMMC reads cold | flush_stdout and the fonts (above) first; then the APKBUILD installs a copy of `godot-template-release` (armv7 `godot-templates`) as `/usr/lib/livi-shell/livi-shell` with the pack and the extension, and `unit-sync.sh` pushes a pack |
-| Defer `AppKeyboard` and `SceneSkin` in `shell.gd` as the pages are | ~35 ms in the VM, ~6 % of the remaining start | low: a few typed declarations in `shell.gd` |
-| Spread the 2 s work: the EV warm-up and the spare keyboard both start at 2.0 s on the main thread | shortens the stall a first tap can hit (see `[warm]`) | low; or compile EvLive's scripts with `ResourceLoader.load_threaded_request` |
+| Release template + pack in the package | as `unit-deploy.sh release` (above), for an installed unit | the APKBUILD installs a copy of `godot-template-release` (armv7 `godot-templates`) as `/usr/lib/livi-shell/livi-shell` with the pack, the extension and `fonts/` |
+| The EV page's first draws: 4 s, then 3 s, on the unit (`[warm] frames at`), with both shader caches present | up to 7 s of main thread after home, a tap waiting behind it | find what they compile or upload first (`--verbose`, `--gpu-profile`) |
 | Boot splash handoff: `application/boot_splash` as home's background colour, no logo, so cage's black and Godot's splash read as the shell coming up | perceived only | low |
 | Earlier in boot: `systemd-analyze critical-chain livi-shell.service` decides whether `systemd-user-sessions` or `seatd` ordering is worth moving | unknown until measured | low |
 

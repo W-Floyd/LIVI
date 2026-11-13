@@ -4,6 +4,9 @@ fixtures:
   core: fixtures/ev6-main.json
 theme: { theme_name: instrument, appearance: night }
 steps:
+  # As a start compiles it (boot.gd): on a worker thread, opening the page meanwhile waiting for it.
+  - gdscript: |
+      shell.compile_ahead("ev_live")
   - page: ev_live
   - measure:
       name: ev-live-normal

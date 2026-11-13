@@ -1,14 +1,13 @@
 #!/bin/sh
 # Exports the project as a pack for a release export template, with the extension beside it.
 #   scripts/export-release.sh [--arch arm64|arm32] [--scripts text|tokens|compressed] <dir>
-# -> <dir>/livi-shell.pck and <dir>/liblivi_godot_shell.so; with TEMPLATE (e.g. Alpine
-# godot-templates' /usr/bin/godot-template-release, of the same arch) also <dir>/livi-shell, a
-# copy of it. Alpine's templates take no --main-pack: they load <exe>.pck from beside the
-# executable, as resolved through symlinks, so the template is copied, not linked. The
+# -> <dir>/livi-shell.pck, <dir>/fonts/ and, when built, <dir>/liblivi_godot_shell.so; with
+# TEMPLATE (e.g. Alpine godot-templates' /usr/bin/godot-template-release, of the same arch) also
+# <dir>/livi-shell, a copy of it. Alpine's templates take no --main-pack: they load <exe>.pck from
+# beside the executable, as resolved through symlinks, so the template is copied, not linked. The
 # extension is found beside the executable too (the pack keeps res://bin/... paths that miss).
-# Needs the godot editor of the template's version on PATH. Not yet what the unit runs: the
-# template needs flush_stdout_on_print and the built-in fonts loadable from a pack first; see
-# docs/startup.md, which has the numbers.
+# The pack is the same for either arch. Needs the godot editor of the template's version on PATH.
+# docs/startup.md has the numbers; scripts/unit-deploy.sh release ships it to the unit.
 set -eu
 cd "$(dirname "$0")/.."
 arch=arm64
@@ -27,7 +26,7 @@ arm64) so=project/bin/linux-arm64/liblivi_godot_shell.so ;;
 arm32) so=packaging/out/armv7/liblivi_godot_shell.so ;;
 *) exit 2 ;;
 esac
-[ -f "$so" ] || { echo "no $so (scripts/build-ext.sh, packaging/scripts/build-armv7.sh)" >&2; exit 1; }
+[ -f "$so" ] || echo "no $so (scripts/build-ext.sh, packaging/scripts/build-armv7.sh): pack only" >&2
 mkdir -p "$1"
 out=$(cd "$1" && pwd)
 
@@ -57,6 +56,10 @@ log=$(mktemp)
 godot --headless --path project --export-pack linux "$out/livi-shell.pck" >"$log" 2>&1 ||
     { tail -20 "$log" >&2; rm -f "$log"; exit 1; }
 rm -f "$log"
-cp "$so" "$out/"
+[ ! -f "$so" ] || cp "$so" "$out/"
+# Hosted apps get the shell's fonts by path (theme_manager.gd write_tokens): res:// is this
+# directory in a template.
+mkdir -p "$out/fonts"
+cp project/fonts/*.ttf "$out/fonts/"
 [ -z "${TEMPLATE:-}" ] || cp "$TEMPLATE" "$out/livi-shell"
 ls -l "$out"

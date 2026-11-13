@@ -1,12 +1,15 @@
 #!/bin/sh
 # Builds what the head unit runs from HEAD and installs what differs, with one sudo prompt.
 #
-#   scripts/unit-deploy.sh [-n | -b] [shell|core|micomd|all] [host]     (default: all)
+#   scripts/unit-deploy.sh [-n | -b] [shell|release|core|micomd|all] [host]     (default: all)
 #
 #   -n  what would change, read-only: the unit's hashes and versions against HEAD, nothing built
 #   -b  build and compare, install nothing
 #
 #   shell   the project and the extension (scripts/unit-sync.sh), then restart livi-shell
+#   release the shell as a release template and pack instead (scripts/export-release.sh, exported
+#           in the VM; scripts/unit-release.sh), /etc/livi-shell.conf's LIVI_SHELL_GODOT set to it
+#           (shell clears it again); shell and release also install the launcher and its unit
 #   core    livi-core, livi-output, livi-helperd (packaging/scripts/build-armv7.sh), the ones
 #           whose sha256 differs from the unit's
 #   micomd  micomd + micom-livi when the unit's micomd is not the APKBUILD's go-micomd version,
@@ -25,14 +28,14 @@ gs=$(cd "$(dirname "$0")/.." && pwd)
 repo=$(cd "$gs/.." && pwd)
 . "$gs/scripts/dotenv.sh"
 
-usage() { sed -n '3,8p' "$0" >&2; exit 2; }
+usage() { sed -n '3,11p' "$0" >&2; exit 2; }
 mode=
 while getopts nb o; do
     case $o in n) mode=dry ;; b) mode=build ;; *) usage ;; esac
 done
 shift $((OPTIND - 1))
 what=all
-case ${1:-} in shell | core | micomd | all) what=$1; shift ;; -*) usage ;; esac
+case ${1:-} in shell | release | core | micomd | all) what=$1; shift ;; -*) usage ;; esac
 host="${1:-${LIVI_UNIT:-user@mobis-g5w.local}}"
 [ "$what" != all ] || what="micomd core shell"
 
@@ -145,7 +148,7 @@ fi
 
 # --- shell and core: from a clean worktree of HEAD ---------------------------------------------
 wt=$cache/src
-if has core || has shell; then
+if has core || has shell || has release; then
     echo "LIVI: $(git -C "$repo" log -1 --format='%h %s' | cut -c1-70), from $wt"
     dirty=$(git -C "$repo" status --porcelain -- native godot-shell/ext godot-shell/project | wc -l | tr -d ' ')
     [ "$dirty" = 0 ] || echo "  $dirty uncommitted change(s) under native/ and godot-shell/ are not deployed"
@@ -209,12 +212,48 @@ if has shell; then
     [ -n "$mode" ] || shell=1
 fi
 
+release=
+if has release; then
+    # The template is Alpine's (armv7), of the version of the VM's godot, which exports the pack.
+    tv=${GODOT_TEMPLATES:-4.7.2-r0}
+    tpl=$cache/godot-templates-$tv/usr/bin/godot-template-release
+    if [ "$mode" = dry ]; then
+        echo "  release: the unit runs $(unit "grep '^LIVI_SHELL_GODOT=' /etc/livi-shell.conf" || echo 'the editor build')"
+    elif [ -z "$current" ]; then
+        echo "  release: no armv7 extension of HEAD" >&2; exit 1
+    else
+        if [ ! -f "$tpl" ]; then
+            echo "  fetching godot-templates $tv (armv7, ~54 MB)"
+            mkdir -p "${tpl%/usr/*}"
+            curl -sfL "https://dl-cdn.alpinelinux.org/alpine/edge/testing/armv7/godot-templates-$tv.apk" |
+                tar -xzf - -C "${tpl%/usr/*}" usr/bin/godot-template-release
+        fi
+        echo "  exporting the pack in the VM, log: $cache/export.log"
+        VM_DEST=${VM_DEST:-deploy} logrun export "$wt/godot-shell/scripts/vm.sh" \
+            "v=\$(godot --version | cut -d. -f1-3); [ \"\$v\" = ${tv%-r*} ] || { echo \"VM godot \$v, template $tv\"; exit 1; }
+            scripts/build-ext.sh --release && scripts/export-release.sh out/release"
+        r=$wt/godot-shell/out/release
+        cp "$tpl" "$r/livi-shell"
+        cp "$out/liblivi_godot_shell.so" "$r/"
+        n=; [ -z "$mode" ] || n=-n
+        "$wt/godot-shell/scripts/unit-release.sh" $n "$r" "$host" >"$cache/unit-release.log" 2>&1 ||
+            { sed 's/^/    /' "$cache/unit-release.log"; exit 1; }
+        echo "  release: $(grep -cE '^(livi-shell|liblivi|fonts/)' "$cache/unit-release.log") file(s) ${n:+would be }synced (log: $cache/unit-release.log)"
+        [ -n "$mode" ] || release=$(unit 'echo $HOME')/shellrel/livi-shell
+    fi
+fi
+# The launcher and its unit, from HEAD: the shell's start depends on both.
+if has shell || has release; then
+    mkdir -p "$stage/pkg"
+    cp "$wt/godot-shell/packaging/alpine/livi-shell/livi-shell.sh" "$wt/godot-shell/packaging/alpine/livi-shell/livi-shell.service" "$stage/pkg/"
+fi
+
 [ -z "$mode" ] || exit 0
-[ -n "$apks$core$shell" ] || { echo "nothing to install"; exit 0; }
+[ -n "$apks$core$shell$release" ] || { echo "nothing to install"; exit 0; }
 
 # --- the root step: one sudo -------------------------------------------------------------------
 {
-    printf 'apks=%s\ncore=%s\nshell=%s\nR=%s\n' "'$apks'" "'$core'" "'$shell'" "$R"
+    printf 'apks=%s\ncore=%s\nshell=%s\nrelease=%s\nR=%s\n' "'$apks'" "'$core'" "'$shell'" "'$release'" "$R"
     cat <<'EOS'
 set -u
 d=$(cd "$(dirname "$0")" && pwd)
@@ -251,16 +290,31 @@ if [ -n "$apks" ]; then
     systemctl restart mobis-g5w-micom-livi.service
 fi
 
+if [ -d "$d/pkg" ]; then
+    cmp -s "$d/pkg/livi-shell.sh" /usr/bin/livi-shell ||
+        { install -m755 "$d/pkg/livi-shell.sh" /usr/bin/livi-shell && echo "installed /usr/bin/livi-shell"; }
+    u=/usr/lib/systemd/system/livi-shell.service
+    cmp -s "$d/pkg/livi-shell.service" $u ||
+        { install -m644 "$d/pkg/livi-shell.service" $u && systemctl daemon-reload && echo "installed $u"; }
+    c=/etc/livi-shell.conf
+    if [ -n "$release" ]; then
+        grep -qxF "LIVI_SHELL_GODOT=$release" $c ||
+            { sed -i '/^LIVI_SHELL_GODOT=/d' $c && echo "LIVI_SHELL_GODOT=$release" >>$c && echo "$c: LIVI_SHELL_GODOT=$release"; }
+    elif grep -q '^LIVI_SHELL_GODOT=.*/shellrel/' $c; then
+        sed -i '/^LIVI_SHELL_GODOT=.*\/shellrel\//d' $c && echo "$c: LIVI_SHELL_GODOT dropped: the project again"
+    fi
+fi
+
 if [ -n "$core" ]; then
     echo "== core:$core"
     systemctl stop livi-shell.service livi-shell-core.service
     for b in $core; do install -Dm755 "$d/core/$b" "$R/$b"; done
     systemctl start livi-shell-core.service livi-shell.service
-elif [ -n "$shell" ]; then
+elif [ -n "$shell$release" ]; then
     echo "== restart livi-shell"
     systemctl restart livi-shell.service
 fi
-if [ -n "$core$shell" ]; then
+if [ -n "$core$shell$release" ]; then
     i=0
     until j -u livi-shell | grep -q 'first_frame' || [ $i -ge 60 ]; do sleep 1; i=$((i + 1)); done
 fi
@@ -292,7 +346,7 @@ if [ -n "$apks" ]; then
     [ -z "$rep" ] || no "micom-livi repeats:
 $rep"
 fi
-if [ -n "$core$shell" ]; then
+if [ -n "$core$shell$release" ]; then
     s=$(j -u livi-shell)
     ff=$(printf '%s\n' "$s" | grep -E '\[startup\] first_frame' | tail -n 1)
     [ -n "$ff" ] && echo "$ff" || no "livi-shell: no first_frame in 60 s"

@@ -2,8 +2,10 @@ extends Node
 ## Runs the shell against livi-core, or the scenario runner with `-- --test <path>`, or the live tuning server with `-- --live`.
 
 const Startup := preload("res://startup.gd")
+const ShellScript := preload("res://shell.gd")
 ## Short at first: home waits for the core's state, and the core starts beside the shell.
 var _core_retry_s := 0.25
+var _welcomed := false
 
 
 func _ready() -> void:
@@ -19,6 +21,7 @@ func _ready() -> void:
 		add_child(load("res://live/live_server.gd").new())
 		return
 	Startup.mark("main")
+	var page := _saved_page()
 	# livi-core's video host is pointed at this socket (packaging/), so a unit names it.
 	var err: String = Wayland.listen(OS.get_environment("LIVI_SHELL_SOCKET"))
 	if err != "":
@@ -32,11 +35,18 @@ func _ready() -> void:
 	add_child(shell)
 	Startup.mark("shell")
 	_time_startup(shell)
+	_compile_after_first_frame(page)
 	# Once the home page is up: the live EV page's shaders, compiled while nobody waits.
 	get_tree().create_timer(2.0).timeout.connect(shell.warm_up)
 	if OS.get_environment("LIVI_SHELL_NAV") != "":
 		NavRail.attach(shell, func(page): _open(shell, page))
-	_restore_page(shell)
+	_restore_page(shell, page)
+
+
+## Not sooner: a compile on another thread slows home's build (in the VM 25 -> 80 ms).
+func _compile_after_first_frame(page: String) -> void:
+	await RenderingServer.frame_post_draw
+	ShellScript.compile_ahead(page if page in ShellScript.PAGE_SCRIPTS else "")
 
 
 ## The first frame; the first with the core's state on home (summed up in shell.log); the first
@@ -49,6 +59,7 @@ func _time_startup(shell: Control) -> void:
 
 
 func _on_first_welcome(_version: String, shell: Control) -> void:
+	_welcomed = true
 	Startup.mark("core")
 	await RenderingServer.frame_post_draw
 	Startup.mark("home")
@@ -94,21 +105,41 @@ func _retry_core() -> void:
 
 ## The page open when the shell last stopped, so a restart lands where the driver was. A hosted
 ## app's window ("app") did not survive the restart: its grid instead.
-func _restore_page(shell: Control) -> void:
+func _saved_page() -> String:
+	var f := FileAccess.open(_page_file(), FileAccess.READ)
+	if f == null:
+		return "home"
+	var page := f.get_as_text().strip_edges()
+	return "apps" if page == "app" else page if page != "" else "home"
+
+
+func _page_file() -> String:
 	var dir := OS.get_environment("XDG_STATE_HOME")
 	if dir == "":
 		dir = OS.get_environment("HOME").path_join(".local/state")
-	var path := dir.path_join("livi-shell/page")
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f:
-		var page := f.get_as_text().strip_edges()
-		f.close()
-		if page == "app":
-			page = "apps"
-		if page != "" and page != "home":
-			shell.open_page.call_deferred(page)
+	return dir.path_join("livi-shell/page")
+
+
+## Home first, with the core's state (the EV page needs it), and the page once its script is
+## compiled: on the unit the EV page's compile and first draws took 9 s before home showed.
+func _restore_page(shell: Control, page: String) -> void:
+	var path := _page_file()
 	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
-	shell.page_changed.connect(func(page):
+	shell.page_changed.connect(func(p):
 		var w := FileAccess.open(path, FileAccess.WRITE)
 		if w:
-			w.store_string(page))
+			w.store_string(p))
+	if page == "home":
+		return
+	await RenderingServer.frame_post_draw
+	if not _welcomed:
+		await Core.welcome
+	if page in ShellScript.PAGE_SCRIPTS:
+		await ShellScript.compiled(page)
+	# The driver went elsewhere meanwhile.
+	if shell._page_name != "home":
+		return
+	if shell.open_page(page) != "":
+		return
+	await RenderingServer.frame_post_draw
+	Startup.mark("restored")

@@ -36,6 +36,11 @@ var _telemetry: Variant = null
 var _ms := 0.0
 
 
+# The last autoload: from here to `main` is the main scene's compile.
+func _init() -> void:
+	preload("res://startup.gd").mark("autoloads")
+
+
 func _ready() -> void:
 	Core.changed.connect(func(sections): if sections.has("telemetry"): _update(true))
 	Core.welcome.connect(func(_v): _update(true))

@@ -40,14 +40,19 @@ var _fit_key := []
 ## Fits run, for tests.
 var fits := 0
 
-## A scene theme's 3D layer, while one is in use.
-var _scene: SceneSkin
+## A scene theme's 3D layer (a SceneSkin, see LATER_SCRIPTS), while one is in use.
+var _scene: Node3D
 
 ## A pack's page standing in for the home page, while one is open.
 var _page: Control
 ## The pages off home, loaded at their first use (`_page_script`): naming their classes here would
 ## compile them with the shell, before the first frame (docs/startup.md).
 const PAGE_SCRIPTS := {ev_live = "res://ui/ev_live.gd", settings = "res://ui/settings_page.gd", media = "res://ui/media_page.gd", apps = "res://ui/apps_page.gd", pack = "res://ui/pack_screen.gd"}
+## Not on home's first frame either, by path for the same reason.
+const LATER_SCRIPTS := {app_keyboard = "res://ui/app_keyboard.gd", scene_skin = "res://ui/scene_skin.gd"}
+## Compiled on a worker thread from the start (`compile_ahead`), first what a tap or the 2 s
+## warm-ups need: each takes seconds on the unit.
+const AHEAD := ["ev_live", "app_keyboard", "settings", "apps", "media"]
 ## The live EV page, kept while another page shows (`_live_page`). A Control: see PAGE_SCRIPTS.
 var _ev_live: Control
 ## Started by each look change while the live page is away (`warm_up`).
@@ -104,16 +109,16 @@ var _nav_retry: Timer
 const NAV_RETRY_S := [2.0, 4.0, 8.0, 16.0, 32.0, 60.0]
 const NAV_STABLE_S := 60.0
 const SPLIT_S := 0.35
-## The keyboard for a hosted app's field (AppKeyboard), over the driver's side of the app page
-## while the app wants text; the app is configured to the rest of the width meanwhile, so it lays
-## its field and results out beside the keys rather than under them.
-var app_keyboard: AppKeyboard
+## The keyboard for a hosted app's field (AppKeyboard, see LATER_SCRIPTS), over the driver's side
+## of the app page while the app wants text; the app is configured to the rest of the width
+## meanwhile, so it lays its field and results out beside the keys rather than under them.
+var app_keyboard: Control
 ## Of the shell's width: about a phone's width (at the default app scale) left for the app.
 const APP_KEYBOARD_SHARE := 0.55
 ## Brings the keyboard up for an app with no text input, to type to it as keys.
 var _keys_button: Button
 ## Built ahead for the next field (`_prepare_keyboard`).
-var _spare_keyboard: AppKeyboard
+var _spare_keyboard: Control
 ## Panel pixels a docked rail (NavRail) takes on the driver's side: every page lays out in the
 ## rest, the phone's area included, except the phone's own page, which keeps the whole panel.
 var rail_width := 0.0:
@@ -280,9 +285,10 @@ func _draw() -> void:
 func _style() -> void:
 	theme = ThemeManager.godot_theme
 	if ThemeManager.is_scene() and _scene == null:
-		_scene = SceneSkin.new()
+		_scene = _page_script("scene_skin").new()
 		_scene.name = "Scene"
-		_scene.surfaces = [_status, _stat, _precondition, _stop, _player, _handle.pill, _source]
+		var surfaces: Array[Control] = [_status, _stat, _precondition, _stop, _player, _handle.pill, _source]
+		_scene.surfaces = surfaces
 		add_child(_scene)
 		move_child(_scene, 0)
 	elif not ThemeManager.is_scene() and _scene != null:
@@ -720,6 +726,9 @@ func warm_up() -> void:
 		ThemeManager.changed.connect(func(): if not _ev_live.is_inside_tree(): _rewarm.start())
 	if _ev_live != null and _ev_live.is_inside_tree():
 		return
+	await compiled("ev_live")
+	if _ev_live != null and _ev_live.is_inside_tree():
+		return
 	var t0 := Time.get_ticks_msec()
 	var vp := SubViewport.new()
 	vp.size = Vector2i(size)
@@ -745,7 +754,33 @@ func _own_bar() -> bool:
 
 
 static func _page_script(id: String) -> GDScript:
-	return load(PAGE_SCRIPTS[id])
+	var path: String = PAGE_SCRIPTS.get(id, LATER_SCRIPTS.get(id))
+	# Takes compile_ahead's result, waiting for it if it is still compiling.
+	if ResourceLoader.load_threaded_get_status(path) != ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+		return ResourceLoader.load_threaded_get(path)
+	return load(path)
+
+
+## Compiles `first`'s script (a PAGE_SCRIPTS or LATER_SCRIPTS id; "" for none), then AHEAD's, on
+## a worker thread, one at a time: two compiles sharing a dependency would wait on each other.
+static func compile_ahead(first: String) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	for id in ([first] if first != "" else []) + AHEAD:
+		var path: String = PAGE_SCRIPTS.get(id, LATER_SCRIPTS.get(id, ""))
+		if path == "" or ResourceLoader.has_cached(path) or ResourceLoader.load_threaded_get_status(path) != ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+			continue
+		ResourceLoader.load_threaded_request(path)
+		while ResourceLoader.load_threaded_get_status(path) == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+			await tree.process_frame
+
+
+## Returns once `id`'s script is not compiling on compile_ahead's thread: `_page_script` would
+## wait for it on the main thread.
+static func compiled(id: String) -> void:
+	var path: String = PAGE_SCRIPTS.get(id, LATER_SCRIPTS.get(id, ""))
+	var tree := Engine.get_main_loop() as SceneTree
+	while ResourceLoader.load_threaded_get_status(path) == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+		await tree.process_frame
 
 
 ## `page is <id's class>`, without loading the class.
@@ -1505,7 +1540,7 @@ func open_keyboard(id: int, field: Dictionary) -> void:
 	if app_keyboard and app_keyboard.window_id == id and not app_keyboard.closing():
 		return
 	# The one built ahead, hidden, if it is there: a keyboard's buttons take a frame or more.
-	var k := _spare_keyboard if is_instance_valid(_spare_keyboard) else AppKeyboard.new()
+	var k := _spare_keyboard if is_instance_valid(_spare_keyboard) else _page_script("app_keyboard").new() as Control
 	_spare_keyboard = null
 	k.closed.connect(_on_keyboard_closed.bind(k))
 	if k.get_parent() == self:
@@ -1536,9 +1571,10 @@ func open_keyboard(id: int, field: Dictionary) -> void:
 
 ## A keyboard built and kept hidden for the next field, so it shows the frame it is asked for.
 func _prepare_keyboard() -> void:
+	await compiled("app_keyboard")
 	if is_instance_valid(_spare_keyboard) or not is_inside_tree():
 		return
-	var k := AppKeyboard.new()
+	var k: Control = _page_script("app_keyboard").new()
 	k.name = "SpareKeyboard"
 	k.visible = false
 	k.set_process(false)
@@ -1548,7 +1584,7 @@ func _prepare_keyboard() -> void:
 	_spare_keyboard = k
 
 
-func _on_keyboard_closed(_submitted: bool, k: AppKeyboard) -> void:
+func _on_keyboard_closed(_submitted: bool, k: Control) -> void:
 	# Its name is the next one's, while it slides out.
 	k.name = "ClosingKeyboard"
 	if app_keyboard == k:
@@ -1597,7 +1633,7 @@ func _on_keys_button() -> void:
 ## A terminal: its launcher entry says TerminalEmulator, or its app_id is a known one.
 func _terminal(id: int) -> bool:
 	var owner: Dictionary = launcher.windows.get(id, {})
-	return bool(launcher.app(str(owner.get("app", ""))).get("terminal", false)) or AppKeyboard.terminal_app(str(_app_ids.get(id, "")))
+	return bool(launcher.app(str(owner.get("app", ""))).get("terminal", false)) or _page_script("app_keyboard").terminal_app(str(_app_ids.get(id, "")))
 
 
 ## livi-output names its video windows livi-video; their touches are the phone's.

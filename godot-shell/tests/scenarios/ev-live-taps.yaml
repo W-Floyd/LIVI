@@ -63,14 +63,14 @@ steps:
   - wait: { frames: 2 }
   - gdscript: *tile_items
   - gdscript: |
-      if shell.get_meta("tile_items") != ["None set", "Charge off · Climate off", "Limit 20 %"]:
+      if shell.get_meta("tile_items") != ["None set", "Off", "Limit 20 %"]:
           return "the car's live schedules, none set: %s" % [shell.get_meta("tile_items")]
   - set: { core: { telemetry: { departure1: { on: true, hour: 7, minute: 30, days: [true, true, true, true, true, false, false] }, scheduledChargingMode: "off_peak_only", scheduledClimate: true } } }
   - wait: { frames: 2 }
   - gdscript: *tile_items
   - gdscript: |
       # The scenario's clock is a Thursday, 08:00.
-      if shell.get_meta("tile_items") != ["Tomorrow 07:30", "Charge on · Climate on", "Limit 20 %"]:
+      if shell.get_meta("tile_items") != ["Tomorrow 07:30", "Charge & climate on", "Limit 20 %"]:
           return "departure 1 weekdays at 07:30: %s" % [shell.get_meta("tile_items")]
   - set: { core: { telemetry: { departure1: null, departure2: null, scheduledChargingMode: null, scheduledClimate: null, v2lDischargeLimitPct: null } } }
   - wait: { frames: 2 }

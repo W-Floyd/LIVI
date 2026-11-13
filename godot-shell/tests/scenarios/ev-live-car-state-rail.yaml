@@ -51,9 +51,10 @@ steps:
   - wait: { frames: 2 }
   - gdscript: *row
   - screenshot: { name: ev-live-car-state-rail-rhd, compare: false }
-  # The targets fit their text: every label inside its tile, wrapped or trimmed with an ellipsis,
-  # never cut off, at small and large text, every bar edge and both drive sides, beside the rail;
-  # with the car's live schedules (2026-11-12) and a V2L limit.
+  # The targets fit their text and stay short: no taller than a title and a detail line
+  # (EvTile.height()), every label inside its tile, trimmed with an ellipsis if at all, never cut
+  # off, at small and large text, every bar edge and both drive sides, beside the rail; with the
+  # car's live schedules (2026-11-12) and a V2L limit.
   - set: { core: { telemetry: { departure1: {}, departure2: {} } } }
   - set: { core: { telemetry: { departure1: { on: false, hour: 12, minute: 0, days: [false, false, false, false, false, false, false] }, departure2: { on: false, hour: 12, minute: 0, days: [false, false, false, false, false, false, false] }, scheduledChargingMode: "off", scheduledClimate: false, v2lDischargeLimitPct: 20 } } }
   - gdscript: |
@@ -66,6 +67,8 @@ steps:
                   for id in ["next_departure", "scheduled", "v2l", "Settings"]:
                       var tile: Control = shell.get_node("EvLive/" + id)
                       var box := tile.get_global_rect().grow(0.5)
+                      if tile.size.y > EvTile.height() + 0.5:
+                          return "%s, %s, %s: %s is %s tall, over %s" % [ts, pos, hand, id, tile.size.y, EvTile.height()]
                       for l in tile.find_children("*", "Label", true, false):
                           if not l.is_visible_in_tree() or l.text == "":
                               continue

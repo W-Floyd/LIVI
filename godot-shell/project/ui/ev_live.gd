@@ -24,6 +24,7 @@ const STRINGS := {
 	title = "Electric vehicle", battery = "Battery", on = "Climate on", off = "Climate off", km = "km", m = "m",
 	charger = "Charger", next_departure = "Next departure", scheduled = "Scheduled charging",
 	v2l = "Electricity use (V2L)", unknown = "–", not_available = "Not available", none_set = "None set",
+	short_next_departure = "Departure", short_scheduled = "Schedule", short_v2l = "V2L",
 	today = "Today", tomorrow = "Tomorrow", state_on = "On", state_off = "Off",
 	v2x = "V2X", v2l_badge = "V2L",
 }
@@ -430,10 +431,14 @@ func _set_tiles() -> void:
 	}
 	# The shell's own tiles say it in words: a plug and a fan beside "Off" read as nothing.
 	if not skin:
-		var words := [] if _tile_live.charging == "" and _tile_live.climate == "" else \
-			["Charge %s" % (_tile_live.charging.to_lower() if _tile_live.charging != "" else STRINGS.unknown),
-			"Climate %s" % (_tile_live.climate.to_lower() if _tile_live.climate != "" else STRINGS.unknown)]
-		items.scheduled = [{text = " · ".join(words) if not words.is_empty() else STRINGS.not_available}]
+		# One line: what is on, else "Off".
+		var on := []
+		if _tile_live.charging == STRINGS.state_on:
+			on.append("Charge")
+		if _tile_live.climate == STRINGS.state_on:
+			on.append("climate" if not on.is_empty() else "Climate")
+		var said: bool = _tile_live.charging != "" or _tile_live.climate != ""
+		items.scheduled = [{text = " & ".join(on) + " on" if not on.is_empty() else STRINGS.state_off if said else STRINGS.not_available}]
 		items.v2l = [{text = _tile_live.v2l}] if _tile_live.v2l != "" else []
 	var icons := {next_departure = "plug", scheduled = "clock", v2l = "v2l"}
 	for id in TILES:
@@ -443,7 +448,8 @@ func _set_tiles() -> void:
 		if skin:
 			look = {title = _look(spec.title), item = _look("mainview_nextDeparture_value_soff")}
 		t.skin_key = str(_view(spec.box).get("background", "")) if skin else ""
-		t.set_content({title = _str(id), icon = _icon_content(spec.icon, icons[id]) if skin else {name = icons[id]},
+		# The shell's own row is short: the full names are the settings' sections.
+		t.set_content({title = _str(id) if skin else STRINGS["short_" + id], icon = _icon_content(spec.icon, icons[id]) if skin else {name = icons[id]},
 			items = items[id], look = look})
 	_settings.skin_key = str(_view(SETTINGS_VIEW).get("background", "")) if skin else ""
 	_settings.set_content({title = "", items = [], icon = {} if _settings.skin_key != "" else {name = "gear"}})

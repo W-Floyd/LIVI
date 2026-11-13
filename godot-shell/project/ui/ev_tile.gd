@@ -72,6 +72,7 @@ func _style() -> void:
 	UI.style_label(_title)
 	_title.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_title.max_lines_visible = -1
+	_title.clip_text = true
 	_title.custom_minimum_size.y = 0
 	if look.get("title", {}).has("size"):
 		_title.add_theme_font_size_override("font_size", int(look.title.size))
@@ -100,7 +101,7 @@ func _style() -> void:
 				l.add_theme_font_size_override("font_size", int(look.item.size))
 			l.set_meta("item", true)
 			# Takes the tile's width, not its own: an unclipped line would widen the tile's text
-			# past its edge and cut the title off too. `fit` breaks or trims it.
+			# past its edge and cut the title off too; trimmed with an ellipsis if it must be.
 			l.set_meta("text", str(it.text))
 			l.clip_text = true
 			l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -121,51 +122,26 @@ func _style() -> void:
 	custom_minimum_size.y = maxf(ThemeManager.px.touch * (1.0 if skinned else 1.3), need)
 
 
-## Wraps the title to two lines where one would be trimmed, for a tile `width` wide, and
-## returns the height the tile then needs.
-func fit(width: float) -> float:
-	var gap: float = ThemeManager.px.gap
-	# A little under what is there: a title measured to fit must not wrap when laid out.
-	var avail := (width - gap * 2.4 - (_icon.custom_minimum_size.x + gap * 0.8 if _icon.visible else 0.0)) * 0.92
-	_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_title.max_lines_visible = 2
-	var th := 0.0
-	if _title.visible:
-		th = _title.get_theme_font("font").get_multiline_string_size(
-			_title.text, HORIZONTAL_ALIGNMENT_CENTER, avail, _title.get_theme_font_size("font_size"), 2).y
-	_title.custom_minimum_size.y = th
-	var ih := 0.0
-	if _items.visible:
-		var labels := _items.get_children().filter(func(n): return n is Label)
-		var fixed := 0.0
-		for n in _items.get_children():
-			if not n is Label:
-				fixed += (n as Control).custom_minimum_size.x
-		fixed += _items.get_theme_constant("separation") * maxi(0, _items.get_child_count() - 1)
-		var each := (avail - fixed) / maxf(1.0, labels.size())
-		for n in _items.get_children():
-			var h: float = (n as Control).custom_minimum_size.y
-			if n is Label:
-				h = _fit_item(n, each, true)
-			ih = maxf(ih, h)
-	var body := th + ih
-	var need: float = maxf(_icon.custom_minimum_size.y if _icon.visible else 0.0, body) + gap * 1.4
-	custom_minimum_size.y = maxf(ThemeManager.px.touch * (1.0 if skin_key != "" else 1.3), need)
+## Sets the tile's height for `width` and returns it: a line for the title and one for the
+## details, each trimmed with an ellipsis if it must be. Every shell-drawn tile is `height()`
+## tall, whatever its text: a row that grows takes the scene's room.
+func fit(_width: float) -> float:
+	for l in [_title] + _items.get_children().filter(func(n): return n is Label):
+		l.autowrap_mode = TextServer.AUTOWRAP_OFF
+		l.clip_text = true
+		l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		l.custom_minimum_size.y = 0
+	custom_minimum_size.y = height() if skin_key == "" else ThemeManager.px.touch
 	return custom_minimum_size.y
 
 
-## An item's text on one line where it fits `width`; else, with `two` and parts (" · "), one
-## part a line, each trimmed with an ellipsis if it must be. Returns its height.
-func _fit_item(l: Label, width: float, two: bool) -> float:
-	var font := l.get_theme_font("font")
-	var px := l.get_theme_font_size("font_size")
-	var text: String = l.get_meta("text", l.text)
-	var lines := PackedStringArray([text])
-	if font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, px).x > width and two and " · " in text:
-		lines = text.split(" · ")
-	l.text = "\n".join(lines)
-	l.custom_minimum_size.y = font.get_height(px) * lines.size()
-	return l.custom_minimum_size.y
+## A shell-drawn tile's height at the theme's text size: a title line and a detail line, or 1.3
+## touch targets if that is more.
+static func height() -> float:
+	var title: Font = ThemeManager.fonts.strong
+	var item: Font = ThemeManager.fonts.body
+	var lines := title.get_height(ThemeManager.font_size("caption")) + item.get_height(ThemeManager.font_size("caption"))
+	return maxf(ThemeManager.px.touch * 1.3, lines + ThemeManager.px.gap * 1.4)
 
 
 ## The box in each state: the pack's image when the tile has a skin, else a surface over the

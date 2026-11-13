@@ -86,7 +86,8 @@ message, a micom-livi opt-in path, a core action, and `write = "core"` with a ca
   with only those fields changed (the variant's `reflects:`), sends via micomd's `-input`, and reports
   `evScheduleWrite` confirmed once the readback matches, failed after 10 s. The core ends the request on that
   word, or after 30 s; the page shows the edit while it stands, then the car's values.
-- Gates, all needed: micomd `-allow-dangerous` (both messages are `dangerous`), micom-livi `-input` and
+- Gates, all needed: micomd `-allow-inferred -allow-dangerous-msg ev-departures,ev-off-peak` (both messages
+  are `dangerous`; not `-allow-dangerous`, which opens every dangerous message), micom-livi `-input` and
   `-ev-schedule-writes` (off by default; LIVI shows the schedule read-only without it), parked (micom-livi:
   driving regulation known off and gear P or unknown; core: `drivingRegulation` not true and gear P or
   absent; the page: `Drive.moving`).
@@ -192,7 +193,7 @@ Writes (one at a time; read back via the items above and the cluster):
       `-ev-schedule-writes`; the Schedule page shows the car's values read-only. Check
       `micomd -query /run/micomd.ctl snapshot` holds 0x8C53 and 0x8C54 (without them every edit fails "nothing
       received yet"; set something from the stock HU or Kia Connect, or add a startup read, first). Note the
-      three payloads. Then micomd `-allow-dangerous` and micom-livi `-ev-schedule-writes`, parked, IGN on:
+      three payloads. Then micomd `-allow-dangerous-msg ev-departures,ev-off-peak` and micom-livi `-ev-schedule-writes`, parked, IGN on:
       1. Departure 1: toggle Fri only. Expect one `ev-departures` line in micom-livi's log, 0x8C55 [6] b3:2
          → 1, every other byte of 0x8C53/54/55 unchanged, the page "confirmed" (no failure row).
       2. Toggle it back; same checks.

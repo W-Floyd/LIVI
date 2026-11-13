@@ -8,8 +8,8 @@
 #
 # The sysroot is Alpine edge's armv7 packages, unpacked (alpine-sysroot.py); the linker is
 # clang + lld. Needs rustup, clang, ld.lld, pkg-config, cmake and perl (brew install lld
-# llvm cmake pkgconf). The native workspace pins a beta toolchain (rust-toolchain.toml);
-# rustup fetches it.
+# llvm cmake pkgconf). The repository pins the toolchain (rust-toolchain.toml); rustup
+# fetches it.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 gs=$(cd "$here/../.." && pwd)

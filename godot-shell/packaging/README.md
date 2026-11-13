@@ -26,8 +26,8 @@ packaging/scripts/build-armv7.sh core       # livi-core, livi-output, livi-helpe
 Prerequisites: rustup, clang, `ld.lld`, pkg-config, cmake, perl, python3, curl (on a Mac:
 `brew install lld llvm cmake pkgconf`). `alpine-sysroot.py` unpacks Alpine edge's armv7 apks
 (musl, libgcc, GStreamer, eudev, libxkbcommon, openssl, ... 170 packages, ~550 MB, about 2 min on
-a slow link) into `packaging/out/work/sysroot`; the linker is clang + lld against it. The native
-workspace pins a beta toolchain (`rust-toolchain.toml`); rustup installs it. Built in 7 s (ext,
+a slow link) into `packaging/out/work/sysroot`; the linker is clang + lld against it. The
+repository pins the toolchain (`rust-toolchain.toml`); rustup installs it. Built in 7 s (ext,
 warm) and 46 s on 10 cores (core, 432 CPU-s).
 
 Output (`readelf -d`): ELF32, ARM, EABI5 hard float (flags `0x5000400`), interpreter
@@ -61,8 +61,9 @@ package (the child needs binfmt or a real armv7 system, e.g. the gen5w QEMU gues
 ## Packages
 
 `alpine/livi-core/APKBUILD` and `alpine/livi-shell/APKBUILD`, in the style of `livi-headunit`
-(`pmb:cross-native2`: the native chroot cross-compiles with rustup's toolchain, the armv7
-buildroot is the sysroot; Alpine's armv7 rust lags). The source is a `git archive` of this
+(`pmb:cross-native2`: the native chroot cross-compiles with Alpine's rust, the armv7
+buildroot, with the armv7 rust's std, is the sysroot). Alpine's rust, not the pinned one, so the
+workspace's MSRV must stay at or below Alpine edge's. The source is a `git archive` of this
 repository's HEAD, pinned and checksummed by `make-source.sh`:
 
 ```sh
@@ -112,7 +113,7 @@ fullscreen window of that session. `/etc/livi-shell.conf` has the panel size and
 switches.
 
 Status: the APKBUILDs' `package()` and subpackages are checked by `apk-armv7.sh` (abuild,
-prebuilt binaries); the from-source pmbootstrap build, which fetches a Rust toolchain and ~600
+prebuilt binaries); the from-source pmbootstrap build, which fetches ~600
 crates and imports the project with the native chroot's `godot`, is `pmb-armv7.sh`: both build
 (upstream pmaports, ~6 GB in the volume, a few minutes warm); not yet installed on the unit.
 

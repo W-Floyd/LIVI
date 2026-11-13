@@ -4,10 +4,10 @@
 # (video and audio, GStreamer) and livi-helperd (USB, Bluetooth, Wi-Fi, as root through sudo).
 # From this tree's native/; the shell (livi-shell) is the UI, with no livi-ui or livi-compositor.
 #
-# Cross-compiled with upstream Rust, as livi-headunit is (pmb:cross-native2): the tree pins a
-# beta toolchain (native/rust-toolchain.toml) that Alpine does not ship, and a qemu build of the
-# crates is out of reach. The native chroot compiles; the armv7 buildroot, with makedepends_host
-# in it, is the sysroot at $CBUILDROOT. See packaging/README.md for the same build on a Mac.
+# Cross-compiled with Alpine's Rust (pmb:cross-native2), not pmaports' crossdirect, which runs
+# cargo, cmake and the linker under qemu. The native chroot's rustc compiles; the armv7
+# buildroot, with makedepends_host in it (rust-stdlib: the target's std), is the sysroot at
+# $CBUILDROOT. See packaging/README.md for the same build on a Mac.
 #
 # Installs beside livi-headunit (not over it): everything is under /usr/lib/livi-core.
 #
@@ -37,22 +37,24 @@ depends="
 	util-linux-misc
 	"
 # clang-libclang (bindgen), not clang or clang-dev: with those pmbootstrap installs clang instead
-# of gcc-armv7, the target's C compiler and linker here.
-makedepends_build="rustup cmake clang-libclang pkgconf perl linux-headers"
+# of gcc-armv7, the target's C compiler and linker here. cmd:cargo and rust-stdlib, not cargo and
+# rust: with those names pmbootstrap installs every dependency, runtime ones too, in the native
+# chroot as well (crossdirect's need), and livi-shell's livi-core exists only for armv7.
+makedepends_build="cmd:cargo cmake clang-libclang pkgconf perl linux-headers"
 makedepends_host="
 	eudev-dev
 	gst-plugins-base-dev
 	gstreamer-dev
 	libxkbcommon-dev
 	openssl-dev
+	rust-stdlib
 	wayland-dev
 	xz-dev
 	"
-# net: rustup and cargo fetch the toolchain and the crates
+# net: cargo fetches the crates
 options="net !check !strip pmb:cross-native2"
 
-_target=armv7-unknown-linux-musleabihf
-_host=aarch64-unknown-linux-musl
+_target=armv7-alpine-linux-musleabihf
 
 # Set by make-source.sh.
 _livi_commit=
@@ -72,14 +74,16 @@ _livi_sync() {
 	(cd "$2" && find . ! -type d) | while IFS= read -r _f; do
 		[ -e "$1/$_f" ] || [ -L "$1/$_f" ] || rm -f "$2/$_f"
 	done
+	# Left empty, a removed crate's directory is still a workspace member to crates/*.
+	(cd "$2" && find . -depth -type d ! -name . -exec rmdir {} + 2>/dev/null) || :
 }
 
 build() {
-	# The toolchain and crates outlive the build chroot in pmbootstrap's sccache mount (sccache
-	# itself is not used); with _livi_fast, the compiled crates too.
+	# The crates outlive the build chroot in pmbootstrap's sccache mount (sccache itself is not
+	# used); with _livi_fast, the compiled crates too.
 	_cache=/mnt/pmbootstrap/sccache/livi-core
 	mkdir -p "$_cache"
-	export RUSTUP_HOME="$_cache/rustup" CARGO_HOME="$_cache/cargo"
+	export CARGO_HOME="$_cache/cargo"
 	export CARGO_TARGET_DIR="$srcdir/target"
 	if [ -n "$_livi_fast" ]; then
 		export CARGO_TARGET_DIR="$_cache/target"
@@ -89,24 +93,13 @@ build() {
 		_livi_sync "$srcdir/livi-$_livi_commit" "$_cache/src"
 		cd "$_cache/src/native"
 	fi
-	export PATH="$CARGO_HOME/bin:$PATH"
 	unset RUSTC_WRAPPER
 	# abuild's flags would reach the host build scripts too, and changing them reruns every cc
 	# build script (aws-lc among them).
 	unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
 
-	[ -x "$CARGO_HOME/bin/rustup" ] ||
-		rustup-init -y --no-modify-path --profile minimal \
-			--default-host $_host --default-toolchain none
-	# the channel comes from rust-toolchain.toml
-	rustup toolchain install --profile minimal
-	rustup target add $_target
-	# musl has no libdl; the crates that ask for it get an empty one.
-	_sc="$(rustc --print sysroot)/lib/rustlib/$_target/lib/self-contained"
-	[ ! -d "$_sc" ] || [ -f "$_sc/libdl.a" ] || ar rc "$_sc/libdl.a"
-
 	_x=armv7-alpine-linux-musleabihf
-	_t=armv7_unknown_linux_musleabihf
+	_t=armv7_alpine_linux_musleabihf
 	_s=$CBUILDROOT
 	export CC_$_t=$_x-gcc CXX_$_t=$_x-g++ AR_$_t=$_x-ar
 	export CFLAGS_$_t="--sysroot=$_s" CXXFLAGS_$_t="--sysroot=$_s"
@@ -114,10 +107,12 @@ build() {
 	export PKG_CONFIG_ALLOW_CROSS=1
 	export PKG_CONFIG_SYSROOT_DIR_$_t=$_s
 	export PKG_CONFIG_LIBDIR_$_t=$_s/usr/lib/pkgconfig:$_s/usr/share/pkgconfig
-	export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER=$_x-gcc
+	export CARGO_TARGET_ARMV7_ALPINE_LINUX_MUSLEABIHF_LINKER=$_x-gcc
 	# As RUSTFLAGS, not the per-target variable: abuild exports RUSTFLAGS, and one that is set
-	# outranks per-target rustflags. With --target it reaches only the target's crates.
-	export RUSTFLAGS="-C target-feature=-crt-static -C link-arg=--sysroot=$_s -C link-arg=-Wl,-rpath-link=$_s/usr/lib"
+	# outranks per-target rustflags. With --target it reaches only the target's crates, so the
+	# --sysroot (the target's std, from the same rust release as the native rustc, or rustc
+	# rejects it) leaves the build scripts on the native one.
+	export RUSTFLAGS="--sysroot=$_s/usr -C target-feature=-crt-static -C link-arg=--sysroot=$_s -C link-arg=-Wl,-rpath-link=$_s/usr/lib"
 
 	export LIVI_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 	export LIVI_BUILD=g5w LIVI_BUILD_DATE=$(date -u +%F) LIVI_BUILD_RUN=0

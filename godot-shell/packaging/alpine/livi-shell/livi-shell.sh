@@ -4,18 +4,19 @@
 # device. The shell opens its own Wayland socket ($LIVI_SHELL_SOCKET) for livi-core's
 # livi-output, which livi-core.service points at it.
 set -eu
-[ ! -f /etc/livi-shell.conf ] || . /etc/livi-shell.conf
+conf=${LIVI_SHELL_CONF:-/etc/livi-shell.conf}
+[ ! -f "$conf" ] || . "$conf"
 : "${LIVI_SHELL_SOCKET:=livi-shell}"
 export LIVI_SHELL_SOCKET
 godot="${LIVI_SHELL_GODOT:-/usr/bin/godot}"
-# Apps started from the shell need a session bus: the user's, or a private one for the shell.
+# Apps started from the shell need a session bus. The kiosk's is its own, for its life: a user's
+# (/run/user/<uid>/bus) lasts only while someone is logged in, libdbus exits the shell when it
+# goes, and what it activates (portals, AT-SPI) is a desktop's. LIVI_SHELL_DBUS=session keeps the
+# environment's.
 dbus=
-if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
-    if [ -S "/run/user/$(id -u)/bus" ]; then
-        export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
-    elif command -v dbus-run-session >/dev/null; then
-        dbus=dbus-run-session
-    fi
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ "${LIVI_SHELL_DBUS:-}" != session ]; then
+    unset DBUS_SESSION_BUS_ADDRESS
+    ! command -v dbus-run-session >/dev/null || dbus=dbus-run-session
 fi
 # Unset, Godot probes each DRM device for a discrete GPU in forked children before its window
 # (~150 ms in the VM); the unit has one GPU, so 0, the default device, is what it would find.

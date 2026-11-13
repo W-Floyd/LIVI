@@ -8,6 +8,7 @@ cd "$(dirname "$0")/.."
 named=
 for a in "$@"; do case $a in --*) ;; *) named=1 ;; esac; done
 [ -n "$named" ] || (cd ext && cargo test --quiet)
+[ -n "$named" ] || scripts/test-launcher.sh
 # Release: the measure steps time the extension, and a debug build's numbers mean little.
 scripts/build-ext.sh --release
 # Every run: the import registers the extension, resources and global class names (a new

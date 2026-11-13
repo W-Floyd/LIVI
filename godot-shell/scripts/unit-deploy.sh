@@ -1,10 +1,11 @@
 #!/bin/sh
 # Builds what the head unit runs from HEAD and installs what differs, with one sudo prompt.
 #
-#   scripts/unit-deploy.sh [-n | -b] [shell|release|core|micomd|all] [host]     (default: all)
+#   scripts/unit-deploy.sh [-n | -b] [-p] [shell|release|core|micomd|all] [host]     (default: all)
 #
 #   -n  what would change, read-only: the unit's hashes and versions against HEAD, nothing built
 #   -b  build and compare, install nothing
+#   -p  micomd as packages, never the fast path
 #
 #   shell   the project and the extension (scripts/unit-sync.sh), then restart livi-shell
 #   release the shell as a release template and pack instead (scripts/export-release.sh, exported
@@ -12,9 +13,12 @@
 #           (shell clears it again); shell and release also install the launcher and its unit
 #   core    livi-core, livi-output, livi-helperd (packaging/scripts/build-armv7.sh), the ones
 #           whose sha256 differs from the unit's
-#   micomd  micomd + micom-livi when the unit's micomd is not the APKBUILD's go-micomd version,
-#           device-mobis-g5w(-systemd) when a file of it differs from the unit's; built with
-#           tools/pmb from PMAPORTS_DIR's HEAD
+#   micomd  micomd, micom-livi, micom-precondition when the unit's are neither the APKBUILD's
+#           go-micomd version nor this build's sha256. Fast path: built here with go from a
+#           worktree of GO_MICOMD_DIR at that commit and copied over the package's files, mkinitfs
+#           only for a new micomd. Package path (-p; or the unit has no micomd package, or
+#           device-mobis-g5w(-systemd) differs from the unit's): apks built with tools/pmb from
+#           PMAPORTS_DIR's HEAD
 #   all     micomd, core, shell
 #
 # shell and core build from a clean worktree of this checkout's HEAD (LIVI_DEPLOY_CACHE, default
@@ -28,10 +32,11 @@ gs=$(cd "$(dirname "$0")/.." && pwd)
 repo=$(cd "$gs/.." && pwd)
 . "$gs/scripts/dotenv.sh"
 
-usage() { sed -n '3,11p' "$0" >&2; exit 2; }
+usage() { sed -n '3,12p' "$0" >&2; exit 2; }
 mode=
-while getopts nb o; do
-    case $o in n) mode=dry ;; b) mode=build ;; *) usage ;; esac
+pkg=
+while getopts nbp o; do
+    case $o in n) mode=dry ;; b) mode=build ;; p) pkg=1 ;; *) usage ;; esac
 done
 shift $((OPTIND - 1))
 what=all
@@ -53,7 +58,8 @@ logrun() { # name cmd...: output to the cache's log, its tail on failure
 }
 
 # --- micomd ------------------------------------------------------------------------------------
-apks='' micomd_pkgs=''
+apks='' micomd_pkgs='' bins=''
+mbins='micomd micom-livi micom-precondition'
 if has micomd; then
     P=${PMAPORTS_DIR:?PMAPORTS_DIR: the pmaports checkout to build micomd from (.env)}
     md=$(git -C "$P" ls-files -- '*/micomd/APKBUILD') md=${md%/APKBUILD}
@@ -63,32 +69,108 @@ if has micomd; then
     [ -z "$(git -C "$P" status --porcelain -- "$md" "$dd")" ] ||
         echo "  uncommitted changes in $md or $dd are not deployed"
     ver=$(git -C "$P" show "HEAD:$md/APKBUILD" | sed -n 's/^_ver=//p')
+    sha=${ver##*-}
     # Every file the device package ships verbatim: one whose hash no installed file has changed.
     git -C "$P" ls-tree --name-only HEAD "$dd/" | grep -vE '/APKBUILD$|\.initd$' |
         while read -r f; do printf '%s %s\n' "$(git -C "$P" show "HEAD:$f" | shasum -a 256 | cut -d' ' -f1)" "${f##*/}"; done \
         >"$stage/device.sums"
-    unit "printf '%s\\n' \"\$(grep -ao 'v0\\.0\\.0-[0-9]\\{14\\}-[0-9a-f]\\{12\\}' /usr/bin/micomd | head -1)\"
-        grep -c -F '$ver' /usr/bin/micomd
-        apk info -v 2>/dev/null | grep -E '^(micomd|micom-livi|device-mobis-g5w(-systemd)?)-[0-9]' | tr '\n' ' '; echo
-        apk info -L device-mobis-g5w device-mobis-g5w-systemd 2>/dev/null | grep -v -e '^\$' -e 'contains:\$' |
-            sed 's|^|/|' | xargs sha256sum 2>/dev/null | cut -d' ' -f1" >"$stage/unit.micomd" || true
-    echo "  unit: $(sed -n 3p "$stage/unit.micomd")"
-    if [ "$(sed -n 2p "$stage/unit.micomd")" = 0 ]; then
-        echo "  micomd: $(sed -n 1p "$stage/unit.micomd") -> $ver"
-        micomd_pkgs=micomd
-    else
-        echo "  micomd: $ver, same"
+    # V: micomd's go-micomd version; A: packages; B: binary, sha256, has $ver, against its package's
+    # checksum (pkg, mod, none); D: a device package file's sha256.
+    unit sh -s -- "$ver" $mbins >"$stage/unit.micomd" <<'EOS' || true
+ver=$1; shift
+echo "V $(grep -ao 'v0\.0\.0-[0-9]\{14\}-[0-9a-f]\{12\}' /usr/bin/micomd 2>/dev/null | head -n 1)"
+echo "A $(apk info -v 2>/dev/null | grep -E '^(micomd|micom-livi|device-mobis-g5w(-systemd)?)-[0-9]' | tr '\n' ' ')"
+for b; do
+    f=/usr/bin/$b
+    [ -f "$f" ] || { echo "B $b - 0 none"; continue; }
+    z=$(awk -v b="$b" '/^[PF]:/ { r = 0 } /^F:/ { d = substr($0, 3) } /^R:/ { r = d == "usr/bin" && substr($0, 3) == b }
+        r && /^Z:Q/ { print substr($0, 3); exit }' /lib/apk/db/installed 2>/dev/null)
+    case $z in Q1*) h=sha1sum ;; Q2*) h=sha256sum ;; *) h= ;; esac
+    o=none
+    if [ -n "$h" ]; then
+        o=mod
+        [ "$(printf '%s' "${z#Q?}" | base64 -d | od -An -tx1 | tr -d ' \n')" != "$($h "$f" | cut -d' ' -f1)" ] || o=pkg
     fi
-    changed=$(sed -n '4,$p' "$stage/unit.micomd" | awk 'NR == FNR { h[$1] = 1; next } !($1 in h) { print $2 }' - "$stage/device.sums" | tr '\n' ' ')
+    echo "B $b $(sha256sum "$f" | cut -d' ' -f1) $(grep -c -F "$ver" "$f") $o"
+done
+apk info -L device-mobis-g5w device-mobis-g5w-systemd 2>/dev/null | grep -v -e '^$' -e 'contains:$' |
+    sed 's|^|/|' | xargs sha256sum 2>/dev/null | sed 's/ .*//; s/^/D /'
+EOS
+    uapk=$(sed -n 's/^A //p' "$stage/unit.micomd")
+    echo "  unit: $uapk"
+    changed=$(sed -n 's/^D //p' "$stage/unit.micomd" | awk 'NR == FNR { h[$1] = 1; next } !($1 in h) { print $2 }' - "$stage/device.sums" | tr '\n' ' ')
     if [ -n "$changed" ]; then
         echo "  device-mobis-g5w: differs: $changed"
-        micomd_pkgs="$micomd_pkgs device-mobis-g5w"
+        micomd_pkgs=device-mobis-g5w
     else
         echo "  device-mobis-g5w: same"
     fi
 
+    # Fast: the binaries built here and copied over the package's; package: apks built with tools/pmb.
+    why=
+    if [ -n "$pkg" ]; then why=-p
+    elif ! printf ' %s' "$uapk" | grep -q ' micomd-[0-9]'; then why="no micomd package on the unit"
+    elif [ -n "$changed" ]; then why="device-mobis-g5w differs"
+    elif [ -z "${GO_MICOMD_DIR:-}" ]; then why="no GO_MICOMD_DIR"
+    elif ! git -C "$GO_MICOMD_DIR" rev-parse -q --verify "$sha^{commit}" >/dev/null; then why="go-micomd $sha not in GO_MICOMD_DIR"
+    fi
+    uver=$(sed -n 's/^V //p' "$stage/unit.micomd")
+    if [ -n "$why" ]; then
+        echo "  path: package ($why)"
+        if ! printf ' %s' "$uapk" | grep -q ' micomd-[0-9]' || ! grep -qE '^B micomd [^ ]+ [1-9]' "$stage/unit.micomd"; then
+            echo "  micomd: ${uver:-none} -> $ver"
+            micomd_pkgs="micomd $micomd_pkgs"
+        elif [ -n "$pkg" ] && grep -qE ' (mod|none)$' "$stage/unit.micomd"; then
+            # A fast deploy's files go back to the package's.
+            echo "  micomd: $ver, files not the package's: reinstalled"
+            micomd_pkgs="micomd $micomd_pkgs"
+        else
+            echo "  micomd: $ver, same"
+        fi
+    else
+        echo "  path: fast"
+        mo=$cache/micomd-bin
+        if [ "$mode" != dry ]; then
+            PATH=$PATH:/opt/homebrew/bin:/usr/local/go/bin
+            command -v go >/dev/null || { echo "no go: install it, or -p" >&2; exit 1; }
+            gw=$cache/go-micomd
+            if [ -e "$gw/.git" ]; then
+                git -C "$gw" checkout -q --detach -f "$sha" && git -C "$gw" clean -fdqx
+            else
+                git -C "$GO_MICOMD_DIR" worktree prune
+                git -C "$GO_MICOMD_DIR" worktree add -q --detach "$gw" "$sha"
+            fi
+            echo "  building $mbins, log: $cache/micomd-go.log"
+            rm -rf "$mo" && mkdir -p "$mo"
+            # As the APKBUILD's go install; built from a git checkout (go 1.24+), the binaries carry
+            # the same module pseudo-version (and vcs.*), so the unit's version check reads them alike.
+            cmds=$(printf './cmd/%s ' $mbins)
+            logrun micomd-go env GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 \
+                go build -C "$gw" -trimpath -ldflags='-s -w' -o "$mo/" $cmds
+            v=$(go version -m "$mo/micomd" | awk '$1 == "mod" { print $3 }')
+            [ "$v" = "$ver" ] || { echo "built micomd says $v, not $ver" >&2; exit 1; }
+            echo "$sha" >"$mo/.built"
+        fi
+        [ "$(cat "$mo/.built" 2>/dev/null)" = "$sha" ] || { mo=; echo "  no build of $sha yet (-b builds one): by version only"; }
+        for b in $mbins; do
+            # shellcheck disable=SC2046 # its fields
+            set -- $(grep "^B $b " "$stage/unit.micomd" || echo "B $b - 0 none")
+            l=; [ -z "$mo" ] || l=$(shasum -a 256 "$mo/$b" | cut -d' ' -f1)
+            if [ -n "$l" ] && [ "$3" = "$l" ]; then
+                echo "  $b: same, this build"
+            elif [ "$4" != 0 ]; then
+                case $5 in pkg) o="the package's" ;; mod) o="another build" ;; *) o=unpackaged ;; esac
+                echo "  $b: same version, $o"
+            else
+                echo "  $b: $([ "$3" = - ] && echo missing || echo differs) -> $ver"
+                [ -z "$mo" ] || { mkdir -p "$stage/bin" && cp "$mo/$b" "$stage/bin/"; }
+                bins="$bins $b"
+            fi
+        done
+    fi
+
     # An unpushed go-micomd commit: the module proxy has no such version.
-    sha=${ver##*-} mirror=
+    mirror=
     if [ -n "$micomd_pkgs" ] && [ -n "${GO_MICOMD_DIR:-}" ] &&
         git -C "$GO_MICOMD_DIR" rev-parse -q --verify "$sha^{commit}" >/dev/null &&
         [ -z "$(git -C "$GO_MICOMD_DIR" branch -r --contains "$sha")" ]; then
@@ -249,11 +331,11 @@ if has shell || has release; then
 fi
 
 [ -z "$mode" ] || exit 0
-[ -n "$apks$core$shell$release" ] || { echo "nothing to install"; exit 0; }
+[ -n "$apks$bins$core$shell$release" ] || { echo "nothing to install"; exit 0; }
 
 # --- the root step: one sudo -------------------------------------------------------------------
 {
-    printf 'apks=%s\ncore=%s\nshell=%s\nrelease=%s\nR=%s\n' "'$apks'" "'$core'" "'$shell'" "'$release'" "$R"
+    printf 'apks=%s\nbins=%s\ncore=%s\nshell=%s\nrelease=%s\nR=%s\n' "'$apks'" "'$bins'" "'$core'" "'$shell'" "'$release'" "$R"
     cat <<'EOS'
 set -u
 d=$(cd "$(dirname "$0")" && pwd)
@@ -285,6 +367,18 @@ if [ -n "$apks" ]; then
     # micomd is in the initramfs.
     mkinitfs >"$d/mkinitfs.log" 2>&1 || { cat "$d/mkinitfs.log"; exit 1; }
     systemctl daemon-reload
+    systemctl restart mobis-g5w-micomd.service
+    sleep 3
+    systemctl restart mobis-g5w-micom-livi.service
+fi
+if [ -n "$bins" ]; then
+    echo "== micomd, fast:$bins"
+    # Over the package's files, which stays installed: apk audit lists them modified until a -p
+    # deploy reinstalls it.
+    for b in $bins; do
+        cp "$d/bin/$b" "/usr/bin/.$b.new" && chmod 755 "/usr/bin/.$b.new" && mv -f "/usr/bin/.$b.new" "/usr/bin/$b" || exit 1
+    done
+    case " $bins " in *" micomd "*) mkinitfs >"$d/mkinitfs.log" 2>&1 || { cat "$d/mkinitfs.log"; exit 1; } ;; esac
     systemctl restart mobis-g5w-micomd.service
     sleep 3
     systemctl restart mobis-g5w-micom-livi.service
@@ -326,10 +420,10 @@ if [ -n "$core" ]; then
         systemctl start livi-wifi-ap.service
     fi
 fi
-[ -z "$apks" ] || sleep 5
+[ -z "$apks$bins" ] || sleep 5
 
 echo "== check"
-if [ -n "$apks" ]; then
+if [ -n "$apks$bins" ]; then
     apk info -v 2>/dev/null | grep -E '^(micomd|micom-livi|device-mobis-g5w(-systemd)?)-[0-9]' | tr '\n' ' '; echo
     m=$(j -u mobis-g5w-micomd)
     v=$(printf '%s\n' "$m" | grep 'switching to it' | tail -n 1)

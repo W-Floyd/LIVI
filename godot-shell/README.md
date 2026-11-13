@@ -219,7 +219,7 @@ what runs where, and what is left for the unit.
 
 ```sh
 scripts/unit-deploy.sh -n            # what would change: the unit's hashes and versions against HEAD
-scripts/unit-deploy.sh [-b] [shell|core|micomd|all] [host]    # -b: build and compare, install nothing
+scripts/unit-deploy.sh [-b] [-p] [shell|core|micomd|all] [host]    # -b: build and compare, install nothing
 ```
 
 Builds from HEAD, never the working tree: `shell` and `core` from a clean worktree in
@@ -230,10 +230,14 @@ Builds from HEAD, never the working tree: `shell` and `core` from a clean worktr
 - `shell`: `scripts/unit-sync.sh` (project, extension, load check), then restarts livi-shell.
 - `core`: livi-core, livi-output and livi-helperd whose sha256 differs from the unit's, with
   livi-shell and livi-shell-core stopped. Starts `livi-wifi-ap` if a new helper left it down.
-- `micomd`: micomd and micom-livi when the unit's micomd is not the APKBUILD's go-micomd version,
-  device-mobis-g5w(-systemd) when a file of it differs; `apk add`, a drop-in whose ExecStart flags
-  are now all packaged removed, `mkinitfs`, micomd then micom-livi restarted. A go-micomd commit on
-  no remote branch of `GO_MICOMD_DIR` is built from that checkout.
+- `micomd`: micomd, micom-livi and micom-precondition when the unit's are neither the APKBUILD's
+  go-micomd version nor this build's sha256. By default built here with `go` from a worktree of
+  `GO_MICOMD_DIR` at that commit (seconds) and copied over the package's files, `mkinitfs` only
+  for a new micomd, micomd then micom-livi restarted; `apk audit` lists them modified until a
+  package deploy. That is `-p`, and is taken anyway when the unit has no micomd package or
+  device-mobis-g5w(-systemd) differs: apks built with tools/pmb (minutes), `apk add`, a drop-in
+  whose ExecStart flags are now all packaged removed, `mkinitfs`, the restarts. A go-micomd commit
+  on no remote branch of `GO_MICOMD_DIR` is built from that checkout.
 - `all` (the default): micomd, core, shell.
 
 ## Video on the unit

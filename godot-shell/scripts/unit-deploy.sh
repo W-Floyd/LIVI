@@ -470,7 +470,10 @@ rc=0
 if [ -n "${LIVI_UNIT_SUDO_PASS:-}" ]; then
     printf '%s\n' "$LIVI_UNIT_SUDO_PASS" | unit "sudo -S -p '' sh $rdir/root.sh" || rc=$?
 else
-    ssh -t "$host" "sudo sh $rdir/root.sh" || rc=$?
+    # The prompt times out (sudo's passwd_timeout) while nobody is at the keyboard; ask again
+    # until it's answered or Ctrl-C. -v in the same tty caches it for the root step.
+    ssh -t "$host" "until sudo -v -p 'deploy; asks again on timeout, Ctrl-C stops'; do
+        printf '\\a'; sleep 1; done; sudo sh $rdir/root.sh" || rc=$?
 fi
 unit "rm -rf $rdir" 2>/dev/null || :
 exit $rc

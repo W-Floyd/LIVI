@@ -1,3 +1,7 @@
 out/
 ext/target/
 .env
+# The Godot editor writes these when it opens the project; nothing refers to scripts by UID
+# and the unit imports its own (scripts/unit-sync.sh skips them).
+*.uid
+*.import

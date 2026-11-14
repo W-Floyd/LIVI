@@ -107,6 +107,13 @@ func _style() -> void:
 	_detail.visible = not compact
 	_label.visible = not (compact and icon_only)
 	_label.text = short_label if compact and short_label != "" else label
+	# One line: the detail after the label where the row has room for both.
+	if compact and not icon_only and detail != "":
+		var f: Font = _label.get_theme_font("font")
+		var both := "%s · %s" % [_label.text, detail]
+		var room: float = size.x - compact_width(false) - ThemeManager.px.gap * 0.8
+		if f.get_string_size(both, HORIZONTAL_ALIGNMENT_LEFT, -1, _label.get_theme_font_size("font_size")).x <= room:
+			_label.text = both
 	var row: HBoxContainer = _label.get_parent().get_parent()
 	if compact:
 		custom_minimum_size.y = ThemeManager.px.touch

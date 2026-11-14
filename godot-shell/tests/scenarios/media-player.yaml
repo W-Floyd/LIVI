@@ -1,12 +1,13 @@
 name: media-player
 # Home's media card with the phone hidden and at each of its widths, every status bar edge, text
 # scale and hand: while something plays it leads home, never smaller than the battery card, which
-# keeps its own height; the layout is the one its room picks (MiniPlayer._choose); beside the text
-# the cover a square the card's height at its left edge, over it the card's width from its top;
-# nothing of the text under the controls or out of the card. Nothing playing: a
-# compact card, every card at its own height. Beside the cover, the text from the card's padding
-# and the controls from the text's edge; under it, the controls centred. With the
-# Phone | <app> pill: Precondition inside the battery card, one line, or beside the pill rather
+# keeps its own height (in rows, those under the media card the row's); while something plays no
+# band taller than a gutter in the panel; the layout is the one its room picks
+# (MiniPlayer._choose); beside the text the cover a square the card's height at its left edge, over
+# it the card's width from its top; nothing of the text under the controls or out of the card.
+# Nothing playing: a compact card, every card at its own height. Beside the cover, the text from
+# the card's padding and the controls from the text's edge; under it, the controls centred. With
+# the Phone | <app> pill: Precondition inside the battery card, one line, or beside the pill rather
 # than none, and the battery card kept; a refit leaves no card over another or the pill.
 clock: 2026-11-09T08:30:00
 nav: true
@@ -37,8 +38,8 @@ steps:
           [0.0, "left", 1.0, "lhd", "tall"],
           [0.0, "bottom", 1.3, "rhd", "wide"],
           [0.0, "right", 1.6, "rhd", "tall"],
-          [0.37, "top", 1.0, "lhd", "tall"],
-          [0.37, "top", 1.0, "rhd", "tall"],
+          [0.37, "top", 1.0, "lhd", "wide"],
+          [0.37, "top", 1.0, "rhd", "wide"],
           [0.37, "left", 1.0, "lhd", "one"],
           [0.37, "top", 1.3, "rhd", "one"],
           [0.5, "top", 1.0, "lhd", "one"],
@@ -73,10 +74,25 @@ steps:
               bad.append("%s: %s, want %s" % [label, player.layout, r[4]])
           if player.layout != player._choose()[0]:
               bad.append("%s: %s, its room picks %s" % [label, player.layout, player._choose()[0]])
-          # Every card but the media card (and side by side the battery's column) at its own height.
+          # Every card but the media card at its own height (side by side the battery's column, in
+          # rows those under the media card at the row's).
+          var in_rows: bool = panel.split(panel._shown())
+          # While something plays, the cards fill the panel's height: no band taller than a gutter
+          # above, between or below them.
+          if player.has_content() and player.is_visible_in_tree():
+              var spans := []
+              for c in panel.get_children():
+                  if c.visible and not c.top_level and c != panel.foot:
+                      spans.append(Vector2(c.get_global_rect().position.y, c.get_global_rect().end.y))
+              spans.sort_custom(func(a, b): return a.x < b.x)
+              var y: float = panel.get_global_rect().position.y
+              for v in spans + [Vector2(panel.get_global_rect().end.y, 0.0)]:
+                  if v.x - y > panel.gap + 1.0:
+                      bad.append("%s: a band of %d px at %d in the panel %s" % [label, v.x - y, y, panel.get_global_rect()])
+                  y = maxf(y, v.y)
           var rects := []
           for c in panel.get_children():
-              if c != player and c.visible and not c.top_level and not (split and c == stat) and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
+              if c != player and c.visible and not c.top_level and not (split and c == stat) and not in_rows and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
                   bad.append("%s: %s stretched to %d" % [label, c.name, c.size.y])
               if c.visible and c != panel.foot:
                   for o in rects:
@@ -218,11 +234,25 @@ steps:
           # none over another or the pill.
           Core.fake_set("nowPlaying/title", "Another Title" if shell.now_playing.title != "Another Title" else "A Remarkably Long Song Title That Goes On")
           await runner.frames(4)
+          var in_rows: bool = panel.split(panel._shown())
+          # While something plays, the cards fill the panel's height: no band taller than a gutter
+          # above, between or below them.
+          if player.has_content() and player.is_visible_in_tree():
+              var spans := []
+              for c in panel.get_children():
+                  if c.visible and not c.top_level and c != panel.foot:
+                      spans.append(Vector2(c.get_global_rect().position.y, c.get_global_rect().end.y))
+              spans.sort_custom(func(a, b): return a.x < b.x)
+              var y: float = panel.get_global_rect().position.y
+              for v in spans + [Vector2(panel.get_global_rect().end.y, 0.0)]:
+                  if v.x - y > panel.gap + 1.0:
+                      bad.append("%s: a band of %d px at %d in the panel %s" % [label, v.x - y, y, panel.get_global_rect()])
+                  y = maxf(y, v.y)
           var rects := [["Pill", source.get_global_rect()]]
           for c in panel.get_children():
               if not c.visible:
                   continue
-              if c != player and not c.top_level and c != panel.foot and not (split and c == stat) and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
+              if c != player and not c.top_level and c != panel.foot and not (split and c == stat) and not in_rows and absf(c.size.y - c.get_combined_minimum_size().y) > 1.0:
                   bad.append("%s: %s at %d, its own height %d" % [label, c.name, c.size.y, c.get_combined_minimum_size().y])
               # A carried row inside its card, clear of the card's own content.
               if c == panel.foot:

@@ -1369,9 +1369,9 @@ func _fit() -> void:
 	for n in PRIORITY:
 		panel.get_node(n).visible = wanted[n]
 	left_out.clear()
-	# Before any card goes: Precondition inside the battery card, then one line, then beside the
-	# Phone | <app> pill (an icon where its words don't fit), then the battery card compact, then
-	# the media card one row without prev.
+	# Precondition is the battery card's bottom row, but in rows. Before any card goes: Precondition one line,
+	# then beside the <app> | <phone> toggle with the status bar off (an icon where its words don't
+	# fit), then the battery card compact, then the media card one row without prev.
 	var fits := func() -> bool: return panel.needed(dashboard) <= room + 1.0
 	var inside := func(on: bool) -> void:
 		_precondition.inset = on
@@ -1380,9 +1380,14 @@ func _fit() -> void:
 	_precondition.compact = false
 	_precondition.top_level = false
 	_precondition.icon_only = false
-	inside.call(false)
+	# In rows (`HomeCards.split`) Precondition is a card of its own beside the battery card: inside
+	# it, the two would be too tall for the media card's cover beside its text.
+	inside.call(_precondition.visible and (dashboard or not panel.split(panel._shown())))
 	_stat.compact = false
 	_player.allow_two_rows = true
+	# In rows, the battery's type smaller before Precondition's words are cut.
+	if not dashboard and not panel.row_fits():
+		_stat.compact = true
 	panel.below = 0.0
 	if panel.side_by_side:
 		_fit_side_by_side(panel, fits, inside)
@@ -1390,8 +1395,6 @@ func _fit() -> void:
 	if not fits.call() and not _player.has_content() and not panel.side_by_side:
 		_player.visible = false
 		left_out.append("Player")
-	if not fits.call() and _precondition.visible and not panel.side_by_side:
-		inside.call(true)
 	if not fits.call() and _precondition.visible:
 		_precondition.compact = true
 		panel.sync_foot()

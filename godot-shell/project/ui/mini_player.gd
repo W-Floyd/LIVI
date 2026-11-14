@@ -281,16 +281,6 @@ func _row_height() -> float:
 	return ceilf(maxf(ThemeManager.px.touch, text) + get_theme_stylebox("panel").get_minimum_size().y)
 
 
-## The card's least width for `wide` (`_choose`): its cover two touch targets beside the text and the
-## larger controls.
-func wide_width() -> float:
-	var t: float = ThemeManager.px.touch
-	var sep := float(_rows.get_theme_constant("separation"))
-	# A gap over: the controls' rounded sizes (`_arrange`).
-	return ceilf(get_theme_stylebox("panel").get_minimum_size().x + t * 2.0 + sep + ThemeManager.px.gap \
-		+ maxf(min_text_width() * ThemeManager.px.title / ThemeManager.px.body, _buttons_width(3, t * 1.25)))
-
-
 ## `n` controls of `side` (they have no padding).
 func _buttons_width(n: int, side: float) -> float:
 	return side * n + ThemeManager.px.touch_gap * (n - 1)
@@ -436,3 +426,8 @@ func _place() -> void:
 	_top.size_flags_vertical = Control.SIZE_FILL
 	# A row on a card taller than it (the stack's media card) sits in its middle.
 	_rows.alignment = BoxContainer.ALIGNMENT_BEGIN if layout in ["tall", "cover"] else BoxContainer.ALIGNMENT_CENTER
+
+
+## The card's height for `wide` with one line of title, touch-size controls and no album line.
+func wide_height() -> float:
+	return ceilf(_large_stack_height(1, ThemeManager.px.touch, false) + get_theme_stylebox("panel").get_minimum_size().y)

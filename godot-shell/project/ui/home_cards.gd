@@ -2,8 +2,9 @@ class_name HomeCards
 extends Container
 ## Home's cards. The media card (`tall`), while something plays, leads: it gets the large slot
 ## and every other card keeps its own height. Beside the phone's picture, one column at the
-## panel's edge: split in two where it has room (the media card full height on the driver's
-## side, the rest stacked beside it), else stacked with the media card filling the height the rest
+## panel's edge: in rows where it has room for two (the media card the column's width on top, at
+## least half the height, the rest side by side under it at the height of the tallest), else
+## stacked with the media card filling the height the rest
 ## leaves, never shorter than the tallest of them. With no picture, a dashboard over the whole
 ## width: the media card on the driver's side, the rest stacked beside it, centred. With
 ## nothing playing, the cards stack at their own heights, centred. `wide` blends the column and
@@ -30,9 +31,8 @@ var gap := 16.0
 ## The dashboard's share of the width for the stacked cards: they keep their column look, a
 ## little wider; the media card takes the rest.
 const LIST_SHARE := 0.42
-## Beside the phone, a column with room for two splits (TALL_SHARE of it at least TALL_TOUCH
-## touch targets, the rest at least REST_TOUCH: a card's title on one line): `tall` full height
-## on the driver's side, the rest stacked from the top in the other, as narrow as its widest card.
+## Beside the phone, a column with room for two (TALL_SHARE of it at least TALL_TOUCH touch
+## targets, the rest at least REST_TOUCH: a card's title on one line) goes in rows (`split`).
 const TALL_SHARE := 0.36
 const TALL_TOUCH := 5.5
 const REST_TOUCH := 10.0
@@ -78,11 +78,12 @@ func sync_foot() -> void:
 
 
 func _get_minimum_size() -> Vector2:
-	return Vector2(column, lerpf(needed(false), needed(true), wide))
+	return Vector2(column, lerpf(needed(false, true), needed(true, true), wide))
 
 
-## The height the visible cards need in the column (false) or the dashboard (true).
-func needed(dashboard: bool) -> float:
+## The height the visible cards need in the column (false) or the dashboard (true); `least`, the
+## least they can take.
+func needed(dashboard: bool, least := false) -> float:
 	var shown := _shown()
 	var lead := _lead(shown)
 	if side_by_side:
@@ -98,8 +99,11 @@ func needed(dashboard: bool) -> float:
 		return _stack_height(shown)
 	var rest := shown.duplicate()
 	rest.erase(lead)
-	if dashboard or split(shown):
+	if dashboard:
 		return maxf(_stack_height(rest), _lead_min(lead))
+	if split(shown):
+		# The least: mid-drag nothing refits, and the media card gives way before the panel grows.
+		return (_lead_min(lead) if least else _lead_row(lead)) + gap + _row_height(rest)
 	return _stack_height(rest) + gap * float(not rest.is_empty()) + _lead_floor(lead, rest)
 
 
@@ -136,8 +140,12 @@ func child_width(c: Control) -> float:
 	var w := minf(column, size.x)
 	var col := w
 	if lead != null and split(shown):
-		var rest_w := _rest_width(shown, lead, w)
-		col = w - gap - rest_w if c == lead else rest_w
+		if c == lead:
+			col = w
+		else:
+			var rest := shown.duplicate()
+			rest.erase(lead)
+			col = _row_widths(rest, w)[rest.find(c)]
 	if side_by_side:
 		var hw := minf(host_width, size.x) if host in _with(c) else 0.0
 		return hw if c == host else size.x - (hw + gap if hw > 0.0 else 0.0)
@@ -225,10 +233,22 @@ func _column_rects(shown: Array[Control]) -> Array[Rect2]:
 	var rest := shown.duplicate()
 	rest.erase(lead)
 	if split(shown):
-		var rest_w := _rest_width(shown, lead, w)
-		var lead_w := w - gap - rest_w
-		var out := _stack(rest, x + lead_w + gap if driver_left else x, rest_w)
-		out.insert(shown.find(lead), Rect2(x if driver_left else x + rest_w + gap, 0.0, lead_w, size.y))
+		# Rows: the media card the column's width over the rest side by side, the driver's first,
+		# alike in height; the media card takes the height they leave.
+		var row_h := _row_height(rest)
+		var lead_h := maxf(_lead_row(lead), size.y - row_h - gap)
+		var widths := _row_widths(rest, w)
+		var out: Array[Rect2] = []
+		var cx := x if driver_left else x + w
+		for c in shown:
+			if c == lead:
+				out.append(Rect2(x, 0.0, w, lead_h))
+				continue
+			var cw: float = widths[rest.find(c)]
+			if not driver_left:
+				cx -= cw
+			out.append(Rect2(cx, lead_h + gap, cw, row_h))
+			cx += cw + gap if driver_left else -gap
 		return out
 	# Stacked: the media card takes the height the rest leave.
 	var fill := maxf(_lead_floor(lead, rest), size.y - _stack_height(rest) - gap * float(not rest.is_empty()))
@@ -257,20 +277,58 @@ func _dashboard_rects(shown: Array[Control]) -> Array[Rect2]:
 	return out
 
 
-## Split in two, the stacked cards' column: as narrow as its widest card allows, the rest to the
-## media card, which leaves it at least TALL_TOUCH touch targets.
-func _rest_width(shown: Array[Control], lead: Control, w: float) -> float:
-	var least := 0.0
-	var words := 0.0
-	for c in shown:
-		if c != lead:
-			least = maxf(least, ceilf(c.get_combined_minimum_size().x))
-			# A row's short label whole (ToggleRow), where the media card keeps its cover beside
-			# its text.
-			if c.has_method("compact_width"):
-				words = maxf(words, c.compact_width(true))
-	var keep: float = lead.wide_width() if lead.has_method("wide_width") else ThemeManager.px.touch * TALL_TOUCH
-	return minf(maxf(least, minf(words, w - gap - keep)), w - gap - ThemeManager.px.touch * TALL_TOUCH)
+## In rows the media card keeps the height its cover beside the text needs (`wide_height`), at
+## least half; the rest go compact first (`Shell._fit`).
+func _lead_row(lead: Control) -> float:
+	var want: float = lead.wide_height() if lead.has_method("wide_height") else 0.0
+	return maxf(_lead_min(lead), maxf(want, floorf((size.y - gap) / 2.0)))
+
+
+## The row's widths: each card at least its least, then what it wants (a row's words whole,
+## ToggleRow), the rest shared alike.
+func _row_widths(cards: Array, w: float) -> Array[float]:
+	var least: Array[float] = []
+	var more: Array[float] = []
+	for c in cards:
+		var m: float = ceilf(c.get_combined_minimum_size().x)
+		least.append(m)
+		more.append(maxf(0.0, c.compact_width(true) + ThemeManager.px.gap * 2.0 - m) if c.has_method("compact_width") else 0.0)
+	var spare: float = w - gap * (cards.size() - 1) - _sum(least)
+	var k := 1.0 if _sum(more) <= spare else maxf(0.0, spare) / _sum(more)
+	var left := maxf(0.0, spare - _sum(more) * k)
+	var out: Array[float] = []
+	for i in cards.size():
+		out.append(floorf(least[i] + more[i] * k + left / cards.size()))
+	return out
+
+
+## Whether the row gives every card what it wants (`_row_widths`).
+func row_fits() -> bool:
+	var shown := _shown()
+	var lead := _lead(shown)
+	if lead == null or not split(shown):
+		return true
+	var rest := shown.duplicate()
+	rest.erase(lead)
+	var w := minf(column, size.x)
+	var want := gap * (rest.size() - 1)
+	for c in rest:
+		want += maxf(c.get_combined_minimum_size().x, c.compact_width(true) + ThemeManager.px.gap * 2.0 if c.has_method("compact_width") else 0.0)
+	return want <= w + 0.5
+
+
+static func _sum(a: Array[float]) -> float:
+	var t := 0.0
+	for v in a:
+		t += v
+	return t
+
+
+func _row_height(cards: Array) -> float:
+	var h := 0.0
+	for c in cards:
+		h = maxf(h, c.get_combined_minimum_size().y)
+	return h
 
 
 ## The dashboard's stacked cards' width: never narrower than the widest of them (large type), so

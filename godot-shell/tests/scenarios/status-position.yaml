@@ -70,13 +70,18 @@ steps:
                   c.position += sr.position
                   if not riding and (c.intersects(b) or not is_equal_approx(c.get_area() + b.get_area(), sr.get_area())):
                       return at + "the page's rect %s beside the bar at %s" % [c, b]
-                  # In a row the clock in the bar's middle, while the sides have room for it.
+                  # In a row the clock and the temperature at the bar's start: its left end, or
+                  # riding, the end at the picture; the rest at the other end, apart.
                   if pos in ["top", "bottom"]:
                       var row: Control = status.get_child(0)
-                      var mid: Rect2 = row.get_child(1).get_global_rect()
-                      if row.get_child(0).size.x > 0.5 and absf(mid.get_center().x - b.get_center().x) > 1.0:
-                          return at + "the clock at %s, not the middle of the bar %s" % [mid, b]
-                      if row.get_combined_minimum_size().x > b.size.x - status.get_theme_stylebox("panel").get_minimum_size().x + 0.5:
+                      var time: Rect2 = status._clock.get_parent().get_global_rect()
+                      var others: Rect2 = status._phone_item.get_parent().get_global_rect()
+                      var box: StyleBox = status.get_theme_stylebox("panel")
+                      var at_right: bool = riding and shell.get_node("Page/Body/Slot").get_global_rect().get_center().x > b.get_center().x
+                      var off: float = b.end.x - box.get_margin(SIDE_RIGHT) - time.end.x if at_right else time.position.x - b.position.x - box.get_margin(SIDE_LEFT)
+                      if absf(off) > 0.5 or time.intersects(others) or (others.get_center().x < time.get_center().x) != at_right:
+                          return at + "the clock at %s, the rest at %s, in the bar %s (start at the right: %s)" % [time, others, b, at_right]
+                      if row.get_combined_minimum_size().x > b.size.x - box.get_minimum_size().x + 0.5:
                           return at + "the bar's row %s wider than the bar %s" % [row.get_combined_minimum_size(), b]
                   if rail and rail.joined != (pos == ("left" if hand == "lhd" else "right")):
                       return at + "the rail joined: %s" % rail.joined

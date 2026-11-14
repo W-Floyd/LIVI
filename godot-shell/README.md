@@ -490,11 +490,13 @@ as they open, so their rows ask for a second tap.
 (`~/.config/...`), read at start (not in tests). Its day or night is Auto (the core's
 `mainUiNightMode`, which follows LIVI's own appearance setting), Day or Night. Its Status bar
 (`status_position`) runs along the top (stock), the bottom, as a column of stacked items down the
-left or right, or is Off; in a row the clock and the outside temperature are in its middle. On home
-with the picture shown, a top or bottom bar rides the cards: it spans their column only, over or
-under them (their margin), and the picture has the panel's whole height (`Shell._riding`); where
-its row does not fit that width the outside temperature goes first, then the slot toggle's app
-segment is its icon alone, then both segments (`SourceToggle.squeeze`). Dismissed, and on other
+left or right, or is Off; in a row the clock and the outside temperature are at its left end, the
+rest at the right, and in a column at its top. On home with the picture shown, a top or bottom bar
+rides the cards: it spans their column only, over or under them (their margin), the picture has
+the panel's whole height (`Shell._riding`), and the clock and temperature are at the end beside
+the picture (`StatusBar.start_right` when the cards are left of it); where its row does not fit
+that width the slot toggle's app segment is its icon alone, then both segments
+(`SourceToggle.squeeze`), then the outside temperature goes. Dismissed, and on other
 pages, it spans the width; a column or Off is as before. Every page with the bar lays out in the
 rest (`Shell.content_rect`); on the driver's side a docked rail stays at the edge and the column
 sits beside it as one band. Its charge shows wherever home's battery card does not

@@ -16,12 +16,25 @@ var phone := "":
 	set(v):
 		phone = v
 		if _phone: _phone.text = v
-## Too narrow for everything (riding home's cards): the outside temperature goes first.
+## Too narrow for everything (riding home's cards): the outside temperature goes, after the slot
+## toggle's words.
 var narrow := false:
 	set(v):
 		narrow = v
 		if _temp_item and not vertical():
 			_temp_item.visible = not v
+
+## In a row, the clock and the outside temperature at the right end, the rest at the left: riding
+## cards that sit left of the picture, so the clock stays at the picture's edge.
+var start_right := false:
+	set(v):
+		if v == start_right:
+			return
+		start_right = v
+		if not vertical():
+			_arrange()
+			if is_inside_tree():
+				_style()
 
 ## The room the slot toggle takes in place of the phone's name; zero: the name.
 var source_size := Vector2.ZERO:
@@ -110,12 +123,10 @@ func _arrange() -> void:
 		_phone.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 		_phone_item = UI.hbox([phone_icon, _phone], 0.3)
 		_temp_item = UI.hbox([temp, _outside], 0.3)
-		# The clock in the middle: the sides share what is left alike, until the right one's
-		# items want more.
-		var right := UI.hbox([_phone_item, _slot(), bars, UI.hbox([_charge_icon, _charge], 0.3)], 1.5)
-		right.alignment = BoxContainer.ALIGNMENT_END
-		right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		add_child(UI.hbox([UI.spacer(), UI.hbox([_clock, _temp_item], 1.0), right], 1.5))
+		# The clock at the start end, outermost; the rest at the far end.
+		var time := UI.hbox([_temp_item, _clock] if start_right else [_clock, _temp_item], 1.0)
+		var rest := UI.hbox([_phone_item, _slot(), bars, UI.hbox([_charge_icon, _charge], 0.3)], 1.5)
+		add_child(UI.hbox([rest, UI.spacer(), time] if start_right else [time, UI.spacer(), rest], 1.5))
 		_charge.get_parent().visible = charge_shown
 		_temp_item.visible = not narrow
 		_show_source()

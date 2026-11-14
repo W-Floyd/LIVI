@@ -44,11 +44,18 @@ steps:
       elif slot.size.x < ThemeManager.px.side - 0.5:
           return "shown: the slot %s" % slot
       # Shown, a top or bottom bar rides the cards: the picture has the whole height, the bar is
-      # within the cards' column, clear of the picture and the cards.
+      # within the cards' column, clear of the picture and the cards, its clock at the picture's end
+      # and clear of the rest.
       if shell._riding():
-          var st: Rect2 = shell.get_node("Page/Status").get_global_rect()
+          var bar: StatusBar = shell.get_node("Page/Status")
+          var st: Rect2 = bar.get_global_rect()
           if absf(slot.size.y - shell.size.y) > 0.5 or st.position.x < side.position.x - 0.5 or st.end.x > side.end.x + 0.5 or st.intersects(slot) or st.intersects(cards):
               return "riding: the bar %s, the side %s, the slot %s, the cards %s" % [st, side, slot, cards]
+          var time: Rect2 = bar._clock.get_parent().get_global_rect()
+          var others: Rect2 = bar._phone_item.get_parent().get_global_rect()
+          var near: float = absf(time.end.x - st.end.x) if slot.position.x > st.position.x else absf(time.position.x - st.position.x)
+          if near > bar.get_theme_stylebox("panel").get_margin(SIDE_LEFT) + 0.5 or time.intersects(others):
+              return "riding: the clock at %s, the rest at %s, in the bar %s beside the slot %s" % [time, others, st, slot]
   - expect_node: { path: Page/Body/Slot, visible: true }
   - screenshot: { name: home-phone-toggle-shown, tolerance: 8 }
   # Drags from each width: [from, to, snapped], in each home layout. The phone's widths are the

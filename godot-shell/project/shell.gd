@@ -391,8 +391,9 @@ func _riding() -> bool:
 	return _status != null and _page_name == "home" and _split_to < 1.0 and _status.edge in ["top", "bottom"]
 
 
-## Riding: the bar over the cards' column, as wide; where its row does not fit, the outside
-## temperature goes, then the slot toggle's words (`_status_tight`).
+## Riding: the bar over the cards' column, as wide, its clock at the picture's edge; where its row
+## does not fit, the slot toggle's app name goes, then its phone's name (`_status_tight`), then
+## the outside temperature.
 func _place_status() -> void:
 	if not _riding() or _placing_status:
 		return
@@ -401,17 +402,18 @@ func _place_status() -> void:
 	var side := _side.get_rect()
 	_status.position = Vector2(_body.position.x + side.position.x, 0.0 if _status.edge == "top" else size.y - t)
 	_status.size = Vector2(side.size.x, t)
+	_status.start_right = ThemeManager.side_left()
 	# Measured with the toggle's widths at each squeeze, whatever it shows now, so the choice
-	# does not flip: the temperature goes, then the toggle's names are cut, then it is icons.
+	# does not flip.
 	var rest := func() -> float: return _status.get_combined_minimum_size().x - _status.source_size.x
 	_status.narrow = false
 	var level := 0
+	var toggle := 0.0
 	if _source_in_bar:
-		_status.narrow = rest.call() + _source_widths[0] > side.size.x
 		while level < 2 and rest.call() + _source_widths[level] > side.size.x:
 			level += 1
-	else:
-		_status.narrow = rest.call() > side.size.x
+		toggle = _source_widths[level]
+	_status.narrow = rest.call() + toggle > side.size.x
 	if level != _status_tight:
 		_status_tight = level
 		_update_source()
@@ -443,6 +445,7 @@ func _layout_status() -> void:
 		return
 	if not _riding():
 		_status.narrow = false
+		_status.start_right = false
 		_status_tight = 0
 	var t := _status_thickness()
 	const PRESETS := {top = Control.PRESET_TOP_WIDE, bottom = Control.PRESET_BOTTOM_WIDE, left = Control.PRESET_LEFT_WIDE, right = Control.PRESET_RIGHT_WIDE, off = Control.PRESET_TOP_WIDE}

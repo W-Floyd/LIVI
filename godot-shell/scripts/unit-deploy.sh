@@ -145,10 +145,15 @@ EOS
             # As the APKBUILD's go install; built from a git checkout (go 1.24+), the binaries carry
             # the same module pseudo-version (and vcs.*), so the unit's version check reads them alike.
             cmds=$(printf './cmd/%s ' $mbins)
-            logrun micomd-go env GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 \
-                go build -C "$gw" -trimpath -ldflags='-s -w' -o "$mo/" $cmds
+            # -buildvcs=true: a GOFLAGS or environment that turns VCS stamping off would build
+            # "(devel)", which the unit's version check can't match.
+            logrun micomd-go env -u GOFLAGS GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 \
+                go build -C "$gw" -buildvcs=true -trimpath -ldflags='-s -w' -o "$mo/" $cmds
             v=$(go version -m "$mo/micomd" | awk '$1 == "mod" { print $3 }')
-            [ "$v" = "$ver" ] || { echo "built micomd says $v, not $ver" >&2; exit 1; }
+            [ "$v" = "$ver" ] || {
+                echo "built micomd says $v, not $ver ($(git -C "$gw" status --porcelain | wc -l | tr -d ' ') changed file(s) in $gw); -p builds the package" >&2
+                exit 1
+            }
             echo "$sha" >"$mo/.built"
         fi
         [ "$(cat "$mo/.built" 2>/dev/null)" = "$sha" ] || { mo=; echo "  no build of $sha yet (-b builds one): by version only"; }

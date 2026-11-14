@@ -131,7 +131,9 @@ EOS
         echo "  path: fast"
         mo=$cache/micomd-bin
         if [ "$mode" != dry ]; then
-            PATH=$PATH:/opt/homebrew/bin:/usr/local/go/bin
+            # Homebrew's go first: an older go elsewhere on PATH (1.24 seen) builds "(devel)"
+            # instead of the module pseudo-version the version check compares.
+            PATH=/opt/homebrew/bin:$PATH:/usr/local/go/bin
             command -v go >/dev/null || { echo "no go: install it, or -p" >&2; exit 1; }
             gw=$cache/go-micomd
             if [ -e "$gw/.git" ]; then
@@ -151,7 +153,7 @@ EOS
                 go build -C "$gw" -buildvcs=true -trimpath -ldflags='-s -w' -o "$mo/" $cmds
             v=$(go version -m "$mo/micomd" | awk '$1 == "mod" { print $3 }')
             [ "$v" = "$ver" ] || {
-                echo "built micomd says $v, not $ver ($(git -C "$gw" status --porcelain | wc -l | tr -d ' ') changed file(s) in $gw); -p builds the package" >&2
+                echo "built micomd says $v, not $ver ($(go version | cut -d' ' -f3), $(git -C "$gw" status --porcelain | wc -l | tr -d ' ') changed file(s) in $gw); -p builds the package" >&2
                 exit 1
             }
             echo "$sha" >"$mo/.built"

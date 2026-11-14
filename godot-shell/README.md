@@ -514,6 +514,7 @@ contract for apps the shell hosts (godot-maps), so they need not read theme file
 `near`, `text_scale`, `material`, `reduced_motion`, `quality`), `colors` (token to `#rrggbb[aa]`),
 `series`, `px` (size token to panel pixels) and `fonts` (`display`, `body`, `strong`: `weight`,
 and `path` when the font is a file on disk). It is replaced through a rename, never half-written.
+Under Auto it waits for the core's night mode, then follows it (scenario `settings-apps`).
 
 An app adds its settings as a section by installing a schema,
 `<XDG data dir>/livi-shell/settings/<name>.json` (godot-maps: `/usr/share/livi-shell/settings/godot-maps.json`):

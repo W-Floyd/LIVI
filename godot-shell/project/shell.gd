@@ -657,6 +657,9 @@ func _follow_night() -> void:
 	var want := "night" if n else "day"
 	if ThemeManager.appearance != want:
 		ThemeManager.set_look({appearance = want})
+	else:
+		# The first night mode resolves Auto with no change: tokens.json waited for it.
+		ThemeManager.write_tokens()
 
 
 ## Follows the core's main screen: the phone asking for it (navigation, a call) opens the

@@ -42,7 +42,6 @@ var look_file := ""
 ## The resolved look for apps the shell hosts, rewritten on every change (`write_tokens`); "" writes
 ## none. Beside `look_file`.
 var tokens_file := ""
-var _tokens_written := ""
 
 ## Godot's button states as the state maps of a pack's selectors name them.
 const BUTTON_STATES := {
@@ -280,6 +279,10 @@ func apply() -> void:
 func write_tokens() -> void:
 	if tokens_file == "" or spec.is_empty():
 		return
+	# Auto before the core's night mode is known would hand apps a guess; Shell._follow_night
+	# writes once it is.
+	if appearance_mode == "auto" and Core.get_value("/config/mainUiNightMode") == null:
+		return
 	var colors := {}
 	for k in c:
 		colors[k] = "#" + c[k].to_html(c[k].a < 1.0)
@@ -307,7 +310,8 @@ func write_tokens() -> void:
 		colors = colors, series = series.map(func(s: Color) -> String: return "#" + s.to_html(false)),
 		px = sizes, fonts = font_files}
 	var text := JSON.stringify(tokens, "  ")
-	if text == _tokens_written:
+	# Against the file, not what was last written: another writer's copy gets replaced.
+	if FileAccess.file_exists(tokens_file) and text == FileAccess.get_file_as_string(tokens_file):
 		return
 	DirAccess.make_dir_recursive_absolute(tokens_file.get_base_dir())
 	# Through a rename: an app polling it never reads half a file.
@@ -319,7 +323,6 @@ func write_tokens() -> void:
 	f.store_string(text)
 	f.close()
 	DirAccess.rename_absolute(tmp, tokens_file)
-	_tokens_written = text
 
 
 func font_size(role: String) -> int:

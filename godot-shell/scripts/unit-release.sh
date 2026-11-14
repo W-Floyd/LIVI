@@ -21,7 +21,8 @@ dest=shellrel-next
 rsync -rtv $dry --delete --checksum "$src/" "$host:$dest/"
 [ -z "$dry" ] || exit 0
 # A headless start first: a pack that does not load leaves the panel grey.
-errors=$(ssh "$host" "mkdir -p /tmp/livi-check && chmod 700 /tmp/livi-check && cd /tmp && XDG_RUNTIME_DIR=/tmp/livi-check timeout 60 ~/$dest/livi-shell --headless --quit-after 60 2>&1 | grep -A1 -E 'SCRIPT ERROR|Parse Error|Failed to load|Can.t open|Couldn.t load'" || true)
+# Its own config dir: the running shell's look would be rewritten as this copy resolves it.
+errors=$(ssh "$host" "mkdir -p /tmp/livi-check && chmod 700 /tmp/livi-check && cd /tmp && XDG_RUNTIME_DIR=/tmp/livi-check XDG_CONFIG_HOME=/tmp/livi-check timeout 60 ~/$dest/livi-shell --headless --quit-after 60 2>&1 | grep -A1 -E 'SCRIPT ERROR|Parse Error|Failed to load|Can.t open|Couldn.t load'" || true)
 if [ -n "$errors" ]; then
     echo "not installed, the pack does not load (the unit's ~/$live is unchanged):"; echo "$errors"; exit 1
 fi

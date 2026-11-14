@@ -144,27 +144,48 @@ steps:
   - screenshot: settings-apply-rail
   - tap: { node: Settings/Header/Apply }
   - expect_action: { ApplySettings: null }
-  # tokens.json: the look resolved, rewritten when it changes.
+  # tokens.json: the look resolved, as the shell shows it, rewritten when it changes, Auto's
+  # resolution from the car's night mode included; nothing while Auto is unresolved.
   - gdscript: |
       ThemeManager.tokens_file = SettingsPage.config_home.path_join("livi-shell/tokens.json")
-      ThemeManager.set_look({appearance_mode = "night", text_scale = 1.2, hand = "rhd"})
-      var t = JSON.parse_string(FileAccess.get_file_as_string(ThemeManager.tokens_file))
       var bad := ""
-      if not t is Dictionary:
-          bad = "no tokens.json"
-      elif t.appearance != "night" or t.hand != "rhd" or not is_equal_approx(float(t.text_scale), 1.2) or int(t.version) != 1:
-          bad = "tokens look: %s" % [[t.appearance, t.hand, t.text_scale, t.version]]
-      # Every token: godot-maps colours its map from proj, accent, on_accent, text, dim, warn and crit.
-      elif t.colors.keys().size() != ThemeManager.c.size() or ThemeManager.c.keys().any(func(k): return not t.colors.has(k) or not Color(t.colors[k]).is_equal_approx(ThemeManager.c[k])):
-          bad = "tokens colors: %s" % [t.colors]
-      elif not is_equal_approx(float(t.px.body), snappedf(ThemeManager.px.body, 0.01)) or not t.fonts.body.has("weight"):
-          bad = "tokens px or fonts: %s %s" % [t.px, t.fonts]
-      elif not FileAccess.file_exists(str(t.fonts.body.get("path", ""))):
-          bad = "tokens font path: %s" % [t.fonts.body]
+      # [the core's night mode, the look set (none: only the car changes), tokens' appearance ("": no file)]
+      for row in [
+              [false, {appearance_mode = "night", text_scale = 1.2, hand = "rhd"}, "night"],
+              [true, {appearance_mode = "day", text_scale = 1.0, hand = "lhd"}, "day"],
+              [true, {appearance_mode = "auto"}, "night"],
+              [false, {}, "day"],
+              [true, {}, "night"],
+              [null, {text_scale = 1.1}, ""],
+              [true, {}, "night"]]:
+          DirAccess.remove_absolute(ThemeManager.tokens_file)
+          Core.fake_set("config/mainUiNightMode", row[0])
+          if not row[1].is_empty():
+              ThemeManager.set_look(row[1])
+          await runner.frames(20)
+          var at := "night mode %s, look %s: " % [row[0], row[1]]
+          if row[2] == "":
+              if FileAccess.file_exists(ThemeManager.tokens_file):
+                  bad = at + "tokens.json written unresolved"
+                  break
+              continue
+          var t = JSON.parse_string(FileAccess.get_file_as_string(ThemeManager.tokens_file))
+          if not t is Dictionary:
+              bad = at + "no tokens.json"
+          elif t.appearance != row[2] or ThemeManager.appearance != row[2]:
+              bad = at + "tokens %s, the shell %s, want %s" % [t.appearance, ThemeManager.appearance, row[2]]
+          elif t.hand != ThemeManager.hand or not is_equal_approx(float(t.text_scale), ThemeManager.text_scale) or int(t.version) != 1:
+              bad = at + "tokens look: %s" % [[t.hand, t.text_scale, t.version]]
+          # Every token: godot-maps colours its map from proj, accent, on_accent, text, dim, warn and crit.
+          elif t.colors.keys().size() != ThemeManager.c.size() or ThemeManager.c.keys().any(func(k): return not t.colors.has(k) or not Color(t.colors[k]).is_equal_approx(ThemeManager.c[k])):
+              bad = at + "tokens colors: %s" % [t.colors]
+          elif not is_equal_approx(float(t.px.body), snappedf(ThemeManager.px.body, 0.01)) or not t.fonts.body.has("weight"):
+              bad = at + "tokens px or fonts: %s %s" % [t.px, t.fonts]
+          elif not FileAccess.file_exists(str(t.fonts.body.get("path", ""))):
+              bad = at + "tokens font path: %s" % [t.fonts.body]
+          if bad != "":
+              break
       ThemeManager.set_look({appearance_mode = "day", text_scale = 1.0, hand = "lhd"})
-      t = JSON.parse_string(FileAccess.get_file_as_string(ThemeManager.tokens_file))
-      if bad == "" and (not t is Dictionary or t.appearance != "day"):
-          bad = "tokens.json not rewritten"
       ThemeManager.tokens_file = ""
       for p in ["livi-shell/tokens.json", "godot-maps/settings.json"]:
           DirAccess.remove_absolute(SettingsPage.config_home.path_join(p))

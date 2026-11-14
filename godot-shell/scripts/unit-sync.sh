@@ -41,7 +41,8 @@ fi
 
 [ -z "$dry" ] || exit 0
 # A headless load first: a script that doesn't parse leaves the panel grey.
-errors=$(ssh "$host" "mkdir -p /tmp/livi-check && chmod 700 /tmp/livi-check && cd /tmp && XDG_RUNTIME_DIR=/tmp/livi-check timeout 60 /usr/bin/godot --headless --path ~/$dest --quit-after 60 2>&1 | grep -A1 -E 'SCRIPT ERROR|Parse Error|Failed to load'" || true)
+# Its own config dir: the running shell's look would be rewritten as this copy resolves it.
+errors=$(ssh "$host" "mkdir -p /tmp/livi-check && chmod 700 /tmp/livi-check && cd /tmp && XDG_RUNTIME_DIR=/tmp/livi-check XDG_CONFIG_HOME=/tmp/livi-check timeout 60 /usr/bin/godot --headless --path ~/$dest --quit-after 60 2>&1 | grep -A1 -E 'SCRIPT ERROR|Parse Error|Failed to load'" || true)
 if [ -n "$errors" ]; then
     echo "not installed, the project does not load (the unit's ~/$live is unchanged):"; echo "$errors"; exit 1
 fi

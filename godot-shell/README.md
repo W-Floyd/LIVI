@@ -3,7 +3,7 @@
 A Godot 4 UI on livi-core; see [PLAN.md](PLAN.md).
 
 - `ext/`: the GDExtension (Rust, gdext). `CoreLink` (the core client, or an in-process fake
-  core), `WaylandCompositor` (smithay, shm so far; Linux only), `ShellTest` (scenario YAML,
+  core), `WaylandCompositor` (smithay; Linux only, a stub elsewhere), `ShellTest` (scenario YAML,
   golden comparison), and `livi-shell-test-client`, a Wayland client that draws known
   patterns.
 - `project/`: the Godot project. `boot.gd` runs the shell, or the scenario runner with
@@ -20,6 +20,11 @@ scripts/vm.sh scripts/test.sh --update-goldens  # rewrite goldens, then review t
 scripts/vm.sh scripts/test.sh --shots-only      # render without comparing
 scripts/vm.sh scripts/test.sh --record          # also record flows to MP4, for review and docs
 ```
+
+On macOS (`brew install --cask godot`), `scripts/test.sh` runs on the host in a window, for quick
+layout work. The extension's `WaylandCompositor` there is a stub with no clients
+(`ext/src/wayland_stub.rs`), so scenarios that need a hosted app's window are skipped. Goldens
+are the VM's: confirm a mismatch there before updating one.
 
 `vm.sh` syncs `godot-shell/` and `native/` into the VM, runs the command, and copies `out/`
 (`report.html`, metrics, and shots where they failed or were asked for) and the goldens the run
@@ -47,7 +52,7 @@ viewporter-scaled subsurface under a placeholder toplevel; `scale` is what the c
 disabling it, and logs what is typed as `text commit …`; `popup: true` opens a grabbing xdg popup, 160×96
 units of bars, below and right of each tap on the window, logging `popup configure X Y W H` and `popup done`), `{ role: command, run: [...] }` any
 Wayland program. `apps: <dir under tests/>` is the launcher's only data dir, with its `apps.yaml`
-(see "App launcher"). A scenario's `nav: true` docks the rail LIVI_SHELL_NAV turns on (`NavRail`),
+(see "App launcher"). A scenario's `nav: true` docks the rail the shell shows unless LIVI_SHELL_NAV=0 (`NavRail`),
 which every page but the phone's lays out beside.
 
 Steps: `page: home | ev | ev_live | media | app | apps | projection | <pack screen>` (see "Electric vehicle page"), `compare_reference` (below), `wait: { frames } | { window: app_id }`, `tap: { node } | { x, y }` (add `with: touch`

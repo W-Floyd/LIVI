@@ -12,6 +12,7 @@ mod gl_import;
 mod gl_scene;
 pub mod golden;
 pub mod keys;
+pub mod panel;
 #[cfg(target_os = "linux")]
 pub mod portal;
 pub mod scenario;
@@ -22,6 +23,8 @@ pub mod test_client;
 pub mod text_input;
 #[cfg(target_os = "linux")]
 mod wayland_node;
+#[cfg(not(target_os = "linux"))]
+mod wayland_stub;
 pub mod yuv;
 
 use std::collections::VecDeque;
@@ -81,6 +84,11 @@ pub struct CoreLink {
 #[godot_api]
 impl INode for CoreLink {
     fn process(&mut self, _delta: f64) {
+        // Reads what the shell sent the fake, which otherwise waits for a test to ask: past the
+        // socket's buffer (8 KB on macOS) the shell's next send blocks the main thread for good.
+        if let Some(f) = self.fake.as_mut() {
+            f.sent();
+        }
         self.drain();
     }
 }

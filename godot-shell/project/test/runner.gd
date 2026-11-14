@@ -116,6 +116,10 @@ func _run_one(path: String) -> String:
 		print("skipped: no car.mesh")
 		_rows.append({scenario = _scenario, shot = "", status = "skipped", msg = "no car.mesh"})
 		return ""
+	if Wayland.stub() and _needs_windows(sc):
+		print("skipped: stub compositor, no windows")
+		_rows.append({scenario = _scenario, shot = "", status = "skipped", msg = "stub compositor"})
+		return ""
 	# The launcher lists only the fixture's apps (and its apps.yaml), and never Waydroid's.
 	if fixtures.has("apps"):
 		var apps := _tests.path_join(fixtures.apps)
@@ -490,6 +494,15 @@ func _rss_mb() -> float:
 		if line.begins_with("VmRSS:"):
 			return int(line.split(" ", false)[1]) / 1024.0
 	return 0.0
+
+
+func _needs_windows(sc: Dictionary) -> bool:
+	if not sc.get("fixtures", {}).get("clients", []).is_empty():
+		return true
+	for step in sc.get("steps", []):
+		if step.has("expect_client") or step.has("wait") and step.wait.has("window"):
+			return true
+	return false
 
 
 func _wait_window(app_id: String) -> String:

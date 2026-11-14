@@ -97,8 +97,6 @@ var _slot_present := false
 var _nav_window := -1
 ## The look's `nav_app` and `home_source` as last applied (`_on_nav_look`).
 var _nav_seen := []
-## The launcher's list was read for the navigation app (`nav_app`).
-var _apps_scanned := false
 ## The navigation app kept running (`_keep_nav`): the one started since it was designated, the
 ## restarts so far after it exited, when its window last mapped, and the wait before the next.
 var _nav_kept := ""
@@ -1088,8 +1086,7 @@ func nav_app() -> String:
 	var id := ThemeManager.nav_app
 	if id == "":
 		return ""
-	if launcher.apps.is_empty() and not _apps_scanned:
-		_apps_scanned = true
+	if not launcher.scanned:
 		launcher.refresh()
 	return id if not launcher.app(id).is_empty() else ""
 

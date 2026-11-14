@@ -3,8 +3,8 @@ extends PanelContainer
 ## A column docked on the driver's side, full height, that jumps between pages: home, the
 ## electric vehicle page, the media page, the app launcher, the phone's window, and the phone's
 ## picture alone on the panel, where the rail hides (the page has its own way back). The shell
-## lays every other page out beside it (`Shell.rail_width`). Not part of any theme's layout; a
-## unit turns it on with LIVI_SHELL_NAV until the shell has its real navigation.
+## lays every other page out beside it (`Shell.rail_width`). Not part of any theme's layout; on
+## until the shell has its real navigation, unless LIVI_SHELL_NAV=0.
 ##
 ## The items' order is the look's (`ThemeManager.rail_order`, also set from Settings, Look). A
 ## press held still for LIFT_MS lifts an item, the finger drags it and the others make room, and
@@ -123,6 +123,10 @@ func item_shown(id: String) -> bool:
 
 ## Docks a rail beside `shell`, as its sibling; a tap opens the page with `open` (default
 ## `shell.open_page`).
+static func wanted() -> bool:
+	return OS.get_environment("LIVI_SHELL_NAV") != "0"
+
+
 static func attach(shell: Control, open := Callable()) -> NavRail:
 	var rail := NavRail.new()
 	rail.selected.connect(open if open.is_valid() else func(page): shell.open_page(page))

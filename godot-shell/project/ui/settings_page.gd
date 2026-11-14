@@ -1213,7 +1213,7 @@ func _nav_apps() -> Array:
 	var launcher: Launcher = get_parent().get("launcher") if get_parent() else null
 	if launcher == null:
 		return opts
-	if launcher.apps.is_empty():
+	if not launcher.scanned:
 		launcher.refresh()
 	for a in launcher.apps:
 		opts.append([a.id, a.name])

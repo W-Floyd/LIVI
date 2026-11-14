@@ -1,0 +1,7 @@
+# As native/.cargo/config.toml: livi-video-view builds and links against GStreamer.framework.
+[env]
+PKG_CONFIG_PATH_aarch64_apple_darwin = "/Library/Frameworks/GStreamer.framework/Versions/1.0/lib/pkgconfig"
+PKG_CONFIG_PATH_x86_64_apple_darwin = "/Library/Frameworks/GStreamer.framework/Versions/1.0/lib/pkgconfig"
+
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-Wl,-rpath,/Library/Frameworks/GStreamer.framework/Versions/1.0/lib"]

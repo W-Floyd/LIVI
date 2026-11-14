@@ -19,6 +19,25 @@ mod window {
         fn livi_set_backdrop(parent: usize, r: f64, g: f64, b: f64);
         fn livi_prepare_window(ui: usize);
         fn livi_set_window_curves(ui: usize, rgb: *const f32, count: i32);
+        fn livi_set_video_area(
+            ui: usize,
+            on: bool,
+            cx: f64,
+            cy: f64,
+            cw: f64,
+            ch: f64,
+            kx: f64,
+            ky: f64,
+            kw: f64,
+            kh: f64,
+        );
+    }
+
+    pub fn area(window: usize, area: Option<super::Area>) {
+        let a = area.unwrap_or_default();
+        let ([cx, cy, cw, ch], [kx, ky, kw, kh]) = (a.clip, a.content);
+        // SAFETY: window is the UI window's NSView or 0, which is ignored.
+        unsafe { livi_set_video_area(window, area.is_some(), cx, cy, cw, ch, kx, ky, kw, kh) };
     }
 
     pub fn backdrop(window: usize, [r, g, b]: [f64; 3]) {
@@ -50,6 +69,28 @@ mod window {
     pub fn prepare(_window: usize) {}
 
     pub fn curves(_window: usize, _rgb: &[f32]) {}
+
+    pub fn area(_window: usize, _area: Option<super::Area>) {}
+}
+
+/// Where a screen's planes show in its window, for a UI that lays the picture out itself:
+/// `clip` is what shows, `content` where the whole visible area would be (it may reach past
+/// `clip`). Both `[x, y, w, h]` in the window view's backing pixels from its top left; an
+/// empty `clip` hides the planes.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Area {
+    pub clip: [f64; 4],
+    pub content: [f64; 4],
+}
+
+/// A plane being drawn, for a UI that shows it as a window of its own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plane {
+    pub id: u32,
+    pub tag: String,
+    pub screen: &'static str,
+    /// The core's last placement of it: its stream size is `tier_w` × `tier_h`.
+    pub region: Region,
 }
 
 const CURVE_POINTS: usize = 256;
@@ -152,6 +193,7 @@ struct Drawn {
 #[derive(Default)]
 struct Screens {
     windows: HashMap<String, usize>,
+    areas: HashMap<String, Area>,
     placements: HashMap<String, Placement>,
     drawn: HashMap<u32, Drawn>,
     gamma: Option<[f64; 5]>,
@@ -292,11 +334,12 @@ pub fn set_window(screen: &str, window: usize) {
         } else {
             Vec::new()
         };
-        let (backdrop, gamma) = (s.backdrop, s.gamma);
+        let (backdrop, gamma, area) = (s.backdrop, s.gamma, s.areas.get(screen).copied());
         drop(s);
         gone.iter().for_each(|v| v.stop());
         if window != 0 {
             window::prepare(window);
+            window::area(window, area);
         }
         if let (true, Some(rgb)) = (window != 0, backdrop) {
             paint(window, rgb);
@@ -305,4 +348,36 @@ pub fn set_window(screen: &str, window: usize) {
             correct(window, v);
         }
     });
+}
+
+/// `None` gives the screen's planes its whole window again, as without a call.
+pub fn set_area(screen: &str, area: Option<Area>) {
+    on_main(|| {
+        let mut s = screens();
+        let window = s.windows.get(screen).copied();
+        match area {
+            Some(a) => s.areas.insert(screen.to_string(), a),
+            None => s.areas.remove(screen),
+        };
+        drop(s);
+        if let Some(w) = window {
+            window::area(w, area);
+        }
+    });
+}
+
+pub fn drawn() -> Vec<Plane> {
+    let s = screens();
+    let mut planes: Vec<Plane> = s
+        .drawn
+        .iter()
+        .map(|(&id, d)| Plane {
+            id,
+            tag: d.tag.clone(),
+            screen: d.screen,
+            region: s.placements.get(&d.tag).map(|p| p.region).unwrap_or_default(),
+        })
+        .collect();
+    planes.sort_by_key(|p| p.id);
+    planes
 }

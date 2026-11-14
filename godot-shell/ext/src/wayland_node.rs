@@ -257,6 +257,21 @@ impl WaylandCompositor {
         GString::new()
     }
 
+    /// False: this is the compositor; see wayland_stub.rs.
+    #[func]
+    fn stub(&self) -> bool {
+        false
+    }
+
+    /// The stub's (macOS): projection video is a client here.
+    #[func]
+    fn host_video(&mut self) -> GString {
+        GString::new()
+    }
+
+    #[func]
+    fn place_video(&mut self, _id: i64, _clip: Rect2, _content: Rect2) {}
+
     #[func]
     fn socket_name(&self) -> GString {
         self.server.as_ref().map(|s| gs(s.socket_name())).unwrap_or_default()

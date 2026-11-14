@@ -18,16 +18,27 @@ scripts/check-gd.sh
 rm -rf out
 
 runtime=$(mktemp -d)
-trap 'kill $weston 2>/dev/null; rm -rf "$runtime"' EXIT
-XDG_RUNTIME_DIR=$runtime weston --backend=headless --renderer=gl --socket=wayland-test \
-    --width=1920 --height=720 >"$runtime/weston.log" 2>&1 &
-weston=$!
-i=0
-until [ -S "$runtime/wayland-test" ]; do
-    i=$((i + 1))
-    [ $i -lt 50 ] || { cat "$runtime/weston.log" >&2; exit 1; }
-    sleep 0.1
-done
+weston=
+trap '[ -z "$weston" ] || kill $weston 2>/dev/null; rm -rf "$runtime"' EXIT
+display="--display-driver wayland"
+if [ "$(uname -s)" = Linux ]; then
+    XDG_RUNTIME_DIR=$runtime weston --backend=headless --renderer=gl --socket=wayland-test \
+        --width=1920 --height=720 >"$runtime/weston.log" 2>&1 &
+    weston=$!
+    i=0
+    until [ -S "$runtime/wayland-test" ]; do
+        i=$((i + 1))
+        [ $i -lt 50 ] || { cat "$runtime/weston.log" >&2; exit 1; }
+        sleep 0.1
+    done
+else
+    # macOS: a window on the desktop, and the extension's stub compositor (scenarios that need
+    # a hosted app's window are skipped). Goldens are llvmpipe's: a mismatch may be the renderer.
+    display=
+    if ! command -v timeout >/dev/null; then
+        if command -v gtimeout >/dev/null; then timeout() { gtimeout "$@"; }; else timeout() { shift; "$@"; }; fi
+    fi
+fi
 # A script file that fails to load leaves Godot idling instead of exiting, so the first such
 # error kills it; the timeout is for hangs. Only files: a scenario's gdscript step that does not
 # compile fails that scenario instead.
@@ -35,7 +46,7 @@ status=$runtime/status
 {
     XDG_RUNTIME_DIR=$runtime WAYLAND_DISPLAY=wayland-test timeout "${TEST_TIMEOUT:-240}" \
         sh -c 'echo $$ >"$1"; shift; exec "$@"' sh "$runtime/pid" \
-        godot --path project --display-driver wayland --rendering-driver opengl3 \
+        godot --path project $display --rendering-driver opengl3 \
         --audio-driver Dummy --fixed-fps 60 --disable-vsync -- --test "$@" &&
         echo 0 >"$status" || echo $? >"$status"
 } 2>&1 | awk -v pidf="$runtime/pid" '{ print; fflush() }

@@ -48,11 +48,13 @@ func _ready() -> void:
 		win.content_scale_size = Vector2i(1920, 720)
 		win.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
 		win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
-		# On a display of the panel's own size (the VM's default) the shell fills it; else a window.
+		# On a display of the panel's own size (the VM's default) the shell fills it; else a window
+		# of the panel's pixels, one to one.
 		if DisplayServer.screen_get_size() == Vector2i(1920, 720):
 			win.mode = Window.MODE_FULLSCREEN
 		else:
-			win.size = Vector2i(1280, 480)
+			win.size = Vector2i(1920, 720)
+			win.unresizable = true
 		_vp = win
 	else:
 		var sub := SubViewport.new()
@@ -62,6 +64,8 @@ func _ready() -> void:
 		_vp = sub
 	_shell = preload("res://shell.tscn").instantiate()
 	(_vp if _vp is SubViewport else self).add_child(_shell)
+	if NavRail.wanted():
+		NavRail.attach(_shell, _open)
 	var e := _tcp.listen(PORT, "*")
 	if e != OK:
 		push_error("live: cannot listen on %d (%s)" % [PORT, error_string(e)])

@@ -22,6 +22,8 @@ const SCALES := [100, 125, 150, 175, 200]
 
 ## `{id, name, icon, argv, cwd, app_ids, source, timeout_s, scale, drive_safe}`, in the order to show.
 var apps: Array = []
+## Whether `apps` has been listed: empty can be the list, and a refresh emits `changed`.
+var scanned := false
 ## Hosted windows by id: `{app_id, title, app}`, `app` the catalog id or "".
 var windows := {}
 ## Window ids, most recently shown last.
@@ -124,6 +126,7 @@ func _log_path(id: String) -> String:
 
 func _set_apps(list: Array) -> void:
 	apps = list
+	scanned = true
 	for id in windows:
 		if windows[id].app == "":
 			windows[id].app = _owner_of(windows[id].app_id, id, false)

@@ -22,6 +22,7 @@ Drive="*res://drive.gd"
 
 window/size/viewport_width=1920
 window/size/viewport_height=720
+window/per_pixel_transparency/allowed.macos=true
 
 [input_devices]
 

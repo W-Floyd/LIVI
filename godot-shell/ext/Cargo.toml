@@ -28,3 +28,7 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
 # The settings portal (portal.rs), on zbus's own runtime: the shell has no async one.
 zbus = { version = "6.2.1", default-features = false, features = ["default-rt", "service"] }
+
+# Projection video as the stock macOS frontend shows it: a native view under the window (wayland_stub.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+livi-video-view = { path = "../../native/crates/livi-video-view" }

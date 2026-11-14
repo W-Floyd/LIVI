@@ -74,7 +74,13 @@
 }
 @end
 
-@interface LIVIVideoHost : NSView
+// Under the UI's view: the whole window, or with an area (livi_set_video_area) its clip
+// rectangle. The planes lay out in its content view: the host's bounds, or where the area puts
+// the picture, which may reach past the clip.
+@interface LIVIVideoHost : NSView {
+@public
+  NSView* _content;
+}
 @end
 
 @implementation LIVIVideoHost
@@ -83,16 +89,27 @@
 }
 @end
 
+static LIVIVideoHost* find_host(NSView* frame) {
+  for (NSView* v in [frame subviews]) {
+    if ([v isKindOfClass:[LIVIVideoHost class]]) return (LIVIVideoHost*)v;
+  }
+  return nil;
+}
+
 static NSView* video_host(NSView* ui) {
   NSView* frame = [ui superview];
   if (!frame) return ui;
-  for (NSView* v in [frame subviews]) {
-    if ([v isKindOfClass:[LIVIVideoHost class]]) return v;
-  }
+  if (LIVIVideoHost* found = find_host(frame)) return found;
   LIVIVideoHost* host = [[LIVIVideoHost alloc] initWithFrame:[ui frame]];
   [host setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [host setWantsLayer:YES];
   host.layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+  host.layer.masksToBounds = YES;
+  NSView* content = [[NSView alloc] initWithFrame:[host bounds]];
+  [content setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  [content setWantsLayer:YES];
+  [host addSubview:content];
+  host->_content = content;
   [frame addSubview:host positioned:NSWindowBelow relativeTo:ui];
   NSWindow* win = [ui window];
   [win setOpaque:YES];
@@ -100,9 +117,51 @@ static NSView* video_host(NSView* ui) {
   return host;
 }
 
+static NSView* video_content(NSView* ui) {
+  NSView* host = video_host(ui);
+  return [host isKindOfClass:[LIVIVideoHost class]] ? ((LIVIVideoHost*)host)->_content : host;
+}
+
 extern "C" void livi_prepare_window(guintptr ui) {
   if (!ui) return;
   video_host((NSView*)(void*)ui);
+}
+
+// `clip` and `content` are rectangles of the UI view in its backing pixels from the top left;
+// `on` false gives the planes the whole view again. An empty clip hides them.
+extern "C" void livi_set_video_area(guintptr ui, bool on, double cx, double cy, double cw,
+    double ch, double kx, double ky, double kw, double kh) {
+  if (!ui) return;
+  NSView* u = (NSView*)(void*)ui;
+  NSView* h = video_host(u);
+  if (![h isKindOfClass:[LIVIVideoHost class]]) return;
+  LIVIVideoHost* host = (LIVIVideoHost*)h;
+  NSView* frame = [u superview];
+  if (!on) {
+    [host setHidden:NO];
+    [host setFrame:[u frame]];
+    [host setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+    [host->_content setFrame:[host bounds]];
+    [host->_content setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+    return;
+  }
+  if (cw <= 0 || ch <= 0) {
+    [host setHidden:YES];
+    return;
+  }
+  // Backing pixels from the top left to the view's points, then to the frame view's.
+  auto in_frame = [&](double x, double y, double w, double hh) {
+    NSRect r = [u convertRectFromBacking:NSMakeRect(x, y, w, hh)];
+    if (![u isFlipped]) r.origin.y = u.bounds.size.height - r.origin.y - r.size.height;
+    return [u convertRect:r toView:frame];
+  };
+  NSRect clip = in_frame(cx, cy, cw, ch);
+  NSRect content = in_frame(kx, ky, kw, kh);
+  [host setAutoresizingMask:NSViewNotSizable];
+  [host setFrame:clip];
+  [host->_content setAutoresizingMask:NSViewNotSizable];
+  [host->_content setFrame:NSOffsetRect(content, -clip.origin.x, -clip.origin.y)];
+  [host setHidden:NO];
 }
 
 static void insert_clip(NSView* p, LIVIClipView* clip) {
@@ -122,7 +181,7 @@ static void insert_clip(NSView* p, LIVIClipView* clip) {
 extern "C" guintptr livi_attach_view(guintptr parent, int rank, void** outView) {
   *outView = nullptr;
   if (!parent) return parent;
-  NSView* p = video_host((NSView*)(void*)parent);
+  NSView* p = video_content((NSView*)(void*)parent);
 
   LIVIClipView* clip = [[LIVIClipView alloc] initWithFrame:[p bounds]];
   clip->_gl = nullptr;

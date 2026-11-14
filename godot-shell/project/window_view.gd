@@ -47,6 +47,12 @@ var hold := false:
 			_fit_crop(true)
 var _hold_n := 0
 var _releasing := false
+## macOS: the projection's picture is a native view under the window (`Wayland.place_video`);
+## this view draws its rectangle transparent and says where it is. One view at a time shows it.
+var _native := false
+var _placed := []
+static var _video_owner: WindowView
+static var _hole: ShaderMaterial
 ## A window that never takes the view's shape (a phone refusing the area) is letterboxed after this.
 const HOLD_S := 2.0
 
@@ -62,6 +68,7 @@ func _ready() -> void:
 	Core.changed.connect(func(sections): if sections.has("config") or sections.has("sessions"): _fit_crop(true))
 	resized.connect(_fit_crop.bind(true))
 	set_notify_transform(true)
+	set_process(_native)
 
 
 ## The part of a `stream`-sized projection frame that the phone fills for a `screen`-sized
@@ -82,6 +89,11 @@ func _show() -> void:
 	if _raw and _raw.changed.is_connected(_fit_crop):
 		_raw.changed.disconnect(_fit_crop)
 	_raw = Wayland.texture(window_id) if window_id >= 0 else null
+	_native = to_core and _raw != null and Wayland.stub()
+	material = _hole_material() if _native else null
+	set_process(_native)
+	if not _native:
+		_place_video()
 	if _raw == null or not to_core:
 		texture = _raw
 		return
@@ -91,6 +103,44 @@ func _show() -> void:
 	_raw.changed.connect(_fit_crop)
 	_fit_crop(true)
 	texture = _crop
+
+
+func _process(_delta: float) -> void:
+	_place_video()
+
+
+## The picture's rectangle and the whole visible area's, in the window's pixels; empty while
+## this view does not show it.
+func _place_video() -> void:
+	var clip := Rect2()
+	var whole := Rect2()
+	if _native and is_visible_in_tree() and _crop and _crop.region.has_area():
+		var pic := picture_rect()
+		var visible_area := projection_crop(_cropped_size, _projection_screen())
+		var k := pic.size / _crop.region.size
+		whole = Rect2(pic.position - (_crop.region.position - visible_area.position) * k, visible_area.size * k)
+		var to_window := get_viewport().get_screen_transform() * get_global_transform_with_canvas()
+		clip = to_window * pic
+		whole = to_window * whole
+	if clip.has_area():
+		_video_owner = self
+	elif _video_owner != self:
+		return
+	else:
+		_video_owner = null
+	var key := [window_id, clip, whole]
+	if key != _placed:
+		_placed = key
+		Wayland.place_video(window_id, clip, whole)
+
+
+static func _hole_material() -> ShaderMaterial:
+	if _hole == null:
+		var s := Shader.new()
+		s.code = "shader_type canvas_item;\nrender_mode blend_disabled;\nvoid fragment() { COLOR = vec4(0.0); }\n"
+		_hole = ShaderMaterial.new()
+		_hole.shader = s
+	return _hole
 
 
 ## Again when the video's size changes (the phone's resolution tier), not every frame.
@@ -277,3 +327,6 @@ func _notification(what: int) -> void:
 				Wayland.pointer_motion(-1, 0, 0)
 		NOTIFICATION_FOCUS_EXIT:
 			Wayland.keyboard_focus(-1)
+		NOTIFICATION_EXIT_TREE:
+			_native = false
+			_place_video()

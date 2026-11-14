@@ -14,6 +14,8 @@ mod server;
 
 #[cfg(target_os = "android")]
 pub use screens::{View, camera, create, play, remove};
+#[cfg(target_os = "macos")]
+pub use screens::{Area, Plane, drawn, set_area};
 
 #[cfg(target_os = "macos")]
 pub fn serve(control: &std::path::Path, planes: &std::path::Path) -> std::io::Result<()> {

@@ -26,6 +26,10 @@ func _ready() -> void:
 	var err: String = Wayland.listen(OS.get_environment("LIVI_SHELL_SOCKET"))
 	if err != "":
 		push_error("compositor: %s" % err)
+	if Wayland.stub():
+		err = Wayland.host_video()
+		if err != "":
+			push_error("compositor: %s" % err)
 	Startup.mark("compositor")
 	_keep_core()
 	# The driver's look from last time; tests start from the default one and save nothing.
@@ -38,7 +42,7 @@ func _ready() -> void:
 	_compile_after_first_frame(page)
 	# Once the home page is up: the live EV page's shaders, compiled while nobody waits.
 	get_tree().create_timer(2.0).timeout.connect(shell.warm_up)
-	if OS.get_environment("LIVI_SHELL_NAV") != "":
+	if NavRail.wanted():
 		NavRail.attach(shell, func(page): _open(shell, page))
 	_restore_page(shell, page)
 

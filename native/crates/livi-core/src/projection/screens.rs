@@ -6,18 +6,21 @@ use super::*;
 
 impl Projection {
     pub(super) fn front_main(&self) -> Front {
-        if self.reverse_camera() {
-            return Front::Camera;
-        }
-        let wants = if self.attention.is_some() {
-            Front::Projection
-        } else {
-            self.wants.main
-        };
-        match wants {
+        match self.front_wanted() {
             Front::Projection if self.active().is_some_and(|s| s.video) => Front::Projection,
             Front::Projection => Front::Livi,
             other => other,
+        }
+    }
+
+    /// The main screen's front before the wait for the phone's first frame.
+    pub(super) fn front_wanted(&self) -> Front {
+        if self.reverse_camera() {
+            Front::Camera
+        } else if self.attention.is_some() {
+            Front::Projection
+        } else {
+            self.wants.main
         }
     }
 

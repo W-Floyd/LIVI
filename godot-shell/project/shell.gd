@@ -681,6 +681,18 @@ func _follow_front() -> void:
 		Core.act({kind = "show", screen = "main", front = "livi"})
 
 
+## A session coming or going changes `has_phone` without a window: the phone's page with no
+## phone left goes back where it was opened from.
+func _follow_sessions() -> void:
+	if has_phone() == _phone_present:
+		return
+	if _projection_page and not has_phone():
+		_update_split()
+		open_page(_return_to if _return_to != "projection" else "home")
+		return
+	_show_app()
+
+
 ## The car's own buttons and telemetry open pages by path; the shell has the projection only.
 func _on_core_page(path: String) -> void:
 	var first := path.trim_prefix("/").get_slice("/", 0)
@@ -840,6 +852,9 @@ func _update_split() -> void:
 	if phone != _phone_present:
 		_phone_present = phone
 		phone_changed.emit(phone)
+		# Home's slot may now show the phone: it hears it is shown, and sends its picture.
+		if not _following_front:
+			_tell_front()
 	# The driver can keep home to the cards while a phone is connected (Look → Phone on home).
 	var want := 0.0 if present and ThemeManager.home_phone else 1.0
 	_slide(want, _side_target(want))
@@ -1056,9 +1071,10 @@ func _place_handle() -> void:
 	_handle.place(pill, touch, content)
 
 
-## A projection video window (Android Auto or CarPlay streaming) is mapped.
+## A projection video window (Android Auto or CarPlay streaming) is mapped, or Android Auto is
+## connected: a phone paused while hidden sends no picture until shown, so it may have no window.
 func has_phone() -> bool:
-	return _windows.any(_is_projection)
+	return _windows.any(_is_projection) or Core.get_value("/sessions/active") == "androidauto"
 
 
 ## The navigation app (Settings → Look, or its tile's menu) while the launcher lists it, else "".
@@ -1670,6 +1686,8 @@ var _fit_due := false
 
 ## `sections` are the changed ones; empty means all.
 func _refresh(sections := {}) -> void:
+	if sections.is_empty() or sections.has("sessions"):
+		_follow_sessions()
 	if sections.is_empty() or sections.has("front"):
 		_follow_front()
 	if sections.is_empty() or sections.has("config"):

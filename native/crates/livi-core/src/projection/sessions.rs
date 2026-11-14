@@ -384,12 +384,14 @@ impl Projection {
             s.devices = list;
             s.cluster = self.cluster.clone();
         });
-        self.tell_shown(main);
+        self.tell_shown();
     }
 
     /// Android Auto keeps encoding only while its picture is on the main screen, unless the
-    /// setting says the phone always encodes.
-    fn tell_shown(&mut self, main: Front) {
+    /// setting says the phone always encodes. Asked for, not granted: the front waits for a frame
+    /// that a paused phone never sends.
+    fn tell_shown(&mut self) {
+        let main = self.front_wanted();
         let always = !self.config_seen.pause_hidden_video;
         let mut changed = Vec::new();
         for s in &mut self.sessions {

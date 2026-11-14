@@ -1489,7 +1489,7 @@ async fn android_auto_takes_the_screen_like_carplay() {
 async fn android_auto_hears_whether_its_picture_shows() {
     type Row = (&'static str, fn(&mut Rig), &'static [(AaId, bool)]);
     // (what happens, the VideoShown each phone hears)
-    let steps: [Row; 15] = [
+    let steps: [Row; 18] = [
         (
             "connects behind LIVI",
             |r| r.aa_connect(5, true),
@@ -1537,12 +1537,13 @@ async fn android_auto_hears_whether_its_picture_shows() {
             |r| r.aa_connect(6, false),
             &[(6, false)],
         ),
+        // Before its first frame: a hidden phone sends none, so the ask unpauses it.
         (
             "the second in front",
             |r| r.p.activate_next(),
-            &[(5, false)],
+            &[(5, false), (6, true)],
         ),
-        ("its first frame", |r| r.p.main_video_shown(), &[(6, true)]),
+        ("its first frame", |r| r.p.main_video_shown(), &[]),
         ("another page", |r| r.want(Front::Livi), &[(6, false)]),
         (
             "the setting off: every phone encodes",
@@ -1567,6 +1568,29 @@ async fn android_auto_hears_whether_its_picture_shows() {
             |r| r.p.on_aa(AaEvent::Disconnected { id: 6 }),
             &[],
         ),
+        (
+            "paused before any frame",
+            |r| {
+                r.p.on_aa(AaEvent::Disconnected { id: 5 });
+                r.p.on_aa(AaEvent::Spawned {
+                    id: 7,
+                    wired: false,
+                    usb_serial: None,
+                    peer: String::new(),
+                });
+                r.p.on_aa(AaEvent::Connected { id: 7 });
+            },
+            &[(7, false)],
+        ),
+        (
+            "asked for with no frame yet",
+            |r| {
+                r.want(Front::Projection);
+                assert_eq!(r.front(), Front::Livi, "the front waits for a frame");
+            },
+            &[(7, true)],
+        ),
+        ("its first frame shows", |r| r.p.main_video_shown(), &[]),
     ];
     let mut rig = Rig::new();
     for (name, step, want) in steps {

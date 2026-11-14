@@ -277,3 +277,37 @@ steps:
       return err
   - page: home
   - gdscript: *clear
+  # Android Auto paused while hidden sends no picture, so has no window yet: its rail item and
+  # home's slot show from the session alone, and showing either asks the core for the phone. Rows:
+  # what is open, then whether the phone is told it shows.
+  - gdscript: |
+      var rail: NavRail = runner._vp.get_node("NavRail")
+      var asks := func() -> Array:
+          return Core.fake_sent().filter(func(m): return m.get("type") == "action" and m.action.kind == "show" and m.action.screen == "main").map(func(m): return m.action.front)
+      for row in [["home", "projection"], ["projection", "projection"], ["media", "livi"]]:
+          shell.open_page(row[0] if row[0] != "projection" else "home")
+          await runner.frames(2)
+          Core.fake_clear()
+          var e: String = Core.fake_set("sessions/active", "androidauto")
+          if e != "":
+              return e
+          await runner.frames(2)
+          if row[0] == "projection":
+              await runner._tap(rail.get_node("Items/projection").get_global_rect().get_center())
+              await runner.frames(2)
+          var s: Control = shell.get_node_or_null("Page/Body/Slot")
+          var slot := s != null and s.is_visible_in_tree() and s.size.x > 0.0
+          if not rail.item_shown("projection") or not shell.has_phone() or shell._page_name != row[0] or (row[0] == "home" and not slot):
+              return "%s: rail item %s, page %s, slot %s" % [row, rail.item_shown("projection"), shell._page_name, slot]
+          if asks.call().is_empty() or asks.call()[-1] != row[1]:
+              return "%s: asked %s" % [row, asks.call()]
+          # The session gone with no window: the item goes, the phone's page with it.
+          e = Core.fake_set("sessions/active", null)
+          if e != "":
+              return e
+          await runner.frames(2)
+          if rail.item_shown("projection") or shell.has_phone() or shell._page_name == "projection":
+              return "%s, gone: rail item %s, page %s" % [row, rail.item_shown("projection"), shell._page_name]
+      shell.open_page("home")
+      await runner.frames(2)
+  - gdscript: *clear

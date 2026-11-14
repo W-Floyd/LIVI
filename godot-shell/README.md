@@ -491,7 +491,8 @@ as they open, so their rows ask for a second tap.
 `mainUiNightMode`, which follows LIVI's own appearance setting), Day or Night. Its Status bar
 (`status_position`) runs along the top (stock), the bottom, as a column of stacked items down the
 left or right, or is Off; in a row the clock and the outside temperature are at its left end, the
-rest at the right, and in a column at its top. On home with the picture shown, a top or bottom bar
+rest at the right, and in a column at its top. An item with no value (the outside temperature,
+the charge, the phone's name) is not shown, icon and all. On home with the picture shown, a top or bottom bar
 rides the cards: it spans their column only, over or under them (their margin), the picture has
 the panel's whole height (`Shell._riding`), and the clock and temperature are at the end beside
 the picture (`StatusBar.start_right` when the cards are left of it); where its row does not fit

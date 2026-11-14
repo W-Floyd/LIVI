@@ -5,6 +5,7 @@ name: status-position
 # for) clear of it. The app page has no bar: a hosted app keeps the shell's rect. Each edge in
 # either hand, and off (the page has the whole rect), then again with the rail docked, which a
 # column on the driver's side joins. The bar's charge shows wherever home's battery card doesn't.
+# The outside temperature's item shows only with one: none, then one, then none.
 clock: 2026-11-09T08:30:00
 fixtures:
   core: fixtures/ev6-main.json
@@ -70,15 +71,20 @@ steps:
                   c.position += sr.position
                   if not riding and (c.intersects(b) or not is_equal_approx(c.get_area() + b.get_area(), sr.get_area())):
                       return at + "the page's rect %s beside the bar at %s" % [c, b]
-                  # In a row the clock and the temperature at the bar's start: its left end, or
-                  # riding, the end at the picture; the rest at the other end, apart.
+                  # No outside temperature, no item for it, icon and all.
+                  if pos != "off" and status._temp_item.visible != (status.outside != ""):
+                      return at + "the temperature item shown: %s, the temperature %s" % [status._temp_item.visible, status.outside]
+                  # In a row the clock and the temperature at the bar's start, the clock flush with
+                  # it: its left end, or riding, the end at the picture; the rest at the other end,
+                  # apart.
                   if pos in ["top", "bottom"]:
                       var row: Control = status.get_child(0)
                       var time: Rect2 = status._clock.get_parent().get_global_rect()
+                      var clock: Rect2 = status._clock.get_global_rect()
                       var others: Rect2 = status._phone_item.get_parent().get_global_rect()
                       var box: StyleBox = status.get_theme_stylebox("panel")
                       var at_right: bool = riding and shell.get_node("Page/Body/Slot").get_global_rect().get_center().x > b.get_center().x
-                      var off: float = b.end.x - box.get_margin(SIDE_RIGHT) - time.end.x if at_right else time.position.x - b.position.x - box.get_margin(SIDE_LEFT)
+                      var off: float = b.end.x - box.get_margin(SIDE_RIGHT) - clock.end.x if at_right else clock.position.x - b.position.x - box.get_margin(SIDE_LEFT)
                       if absf(off) > 0.5 or time.intersects(others) or (others.get_center().x < time.get_center().x) != at_right:
                           return at + "the clock at %s, the rest at %s, in the bar %s (start at the right: %s)" % [time, others, b, at_right]
                       if row.get_combined_minimum_size().x > b.size.x - box.get_minimum_size().x + 0.5:
@@ -122,6 +128,18 @@ steps:
                           var lc: Control = ev.get_node(l)
                           if lc.visible and not c.encloses(lc.get_global_rect()):
                               return at + "%s at %s is off the page %s" % [l, lc.get_global_rect(), c]
+  # The fixture has no outside temperature (above): one arriving shows its item, and going, hides it.
+  - gdscript: |
+      Core.fake_set("telemetry/ambientC", 6.0)
+      await runner.frames(3)
+      if shell.get_node("Page/Status").outside == "":
+          return "no temperature after one arrived"
+  - gdscript: *every
+  - gdscript: |
+      Core.fake_set("telemetry/ambientC", null)
+      await runner.frames(3)
+      if shell.get_node("Page/Status")._temp_item.visible:
+          return "the temperature item still shown with none"
   - theme: { status_position: top, hand: lhd }
   - page: home
   - screenshot: { name: status-top, tolerance: 8 }

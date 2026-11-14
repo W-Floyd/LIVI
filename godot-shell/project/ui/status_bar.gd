@@ -12,17 +12,18 @@ var outside := "":
 	set(v):
 		outside = v
 		if _outside: _outside.text = v
+		_show_items()
 var phone := "":
 	set(v):
 		phone = v
 		if _phone: _phone.text = v
+		_show_items()
 ## Too narrow for everything (riding home's cards): the outside temperature goes, after the slot
 ## toggle's words.
 var narrow := false:
 	set(v):
 		narrow = v
-		if _temp_item and not vertical():
-			_temp_item.visible = not v
+		_show_items()
 
 ## In a row, the clock and the outside temperature at the right end, the rest at the left: riding
 ## cards that sit left of the picture, so the clock stays at the picture's edge.
@@ -51,12 +52,13 @@ var charge := "":
 	set(v):
 		charge = v
 		if _charge: _charge.text = v
+		_show_items()
 
 ## Off while the page shows the charge itself (home's battery card).
 var charge_shown := true:
 	set(v):
 		charge_shown = v
-		if _charge: _charge.get_parent().visible = v
+		_show_items()
 
 var charge_icon := "bolt":
 	set(v):
@@ -127,8 +129,6 @@ func _arrange() -> void:
 		var time := UI.hbox([_temp_item, _clock] if start_right else [_clock, _temp_item], 1.0)
 		var rest := UI.hbox([_phone_item, _slot(), bars, UI.hbox([_charge_icon, _charge], 0.3)], 1.5)
 		add_child(UI.hbox([rest, UI.spacer(), time] if start_right else [time, UI.spacer(), rest], 1.5))
-		_charge.get_parent().visible = charge_shown
-		_temp_item.visible = not narrow
 		_show_source()
 		return
 	for l in [_clock, _outside, _phone, _charge]:
@@ -148,7 +148,6 @@ func _arrange() -> void:
 		bars,
 		UI.vbox([_charge_icon, _charge], 0.2),
 	], 1.2))
-	_charge.get_parent().visible = charge_shown
 	_show_source()
 
 
@@ -178,8 +177,18 @@ func _show_source() -> void:
 	var on := source_size != Vector2.ZERO
 	source_slot.visible = on
 	source_slot.custom_minimum_size = source_size
-	_phone_item.visible = not on
-	_bars.visible = not on or vertical()
+	_show_items()
+
+
+## An item with nothing to say is not shown, icon and all.
+func _show_items() -> void:
+	if _temp_item == null:
+		return
+	var on := source_size != Vector2.ZERO
+	_temp_item.visible = outside != "" and not (narrow and not vertical())
+	_phone_item.visible = not on and phone != ""
+	_bars.visible = (on and vertical()) or (not on and phone != "")
+	_charge.get_parent().visible = charge_shown and charge != ""
 
 
 func _ready() -> void:

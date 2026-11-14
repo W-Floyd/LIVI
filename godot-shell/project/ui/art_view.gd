@@ -1,7 +1,8 @@
 class_name ArtView
 extends Control
-## A cover, cropped square and centred in the rect (or to fill it, `fill_rect`), in rounded corners; without one, the theme's placeholder with a
-## note. A new cover fades in over the old unless motion is reduced.
+## A cover, cropped square and centred in the rect (or bled to a card's edges, `flush_to`), in
+## rounded corners; without one, the theme's placeholder with a note. A new cover fades in over
+## the old unless motion is reduced.
 
 const FADE_S := 0.25
 
@@ -27,14 +28,24 @@ var fill := Color(0, 0, 0, 0):
 	set(v):
 		fill = v
 		queue_redraw()
-## The whole rect, the cover cropped to fill it, rather than a square in it.
-var fill_rect := false:
-	set(v):
-		fill_rect = v
-		_shape()
 var radius := -1.0:
 	set(v):
 		radius = v
+		_shape()
+## A card this draws to the edges of, past its own rect, rounded only where it meets the card's
+## corners: SIDE_LEFT, a square the card's height at its left edge (as wide as this rect reaches);
+## SIDE_TOP, the card's width from its top to this rect's foot.
+var flush_to: Control:
+	set(v):
+		if flush_to and flush_to.resized.is_connected(_shape):
+			flush_to.resized.disconnect(_shape)
+		flush_to = v
+		if v:
+			v.resized.connect(_shape)
+		_shape()
+var flush_side := SIDE_LEFT:
+	set(v):
+		flush_side = v
 		_shape()
 
 var _old: Texture2D
@@ -50,12 +61,14 @@ func _init() -> void:
 		_shader.code = """shader_type canvas_item;
 uniform vec2 origin;
 uniform vec2 size;
-uniform float radius;
+uniform vec4 radii;  // top left, top right, bottom right, bottom left
 varying vec2 local;
 void vertex() { local = VERTEX; }
 void fragment() {
-	vec2 q = abs(local - origin - size * 0.5) - (size * 0.5 - vec2(radius));
-	float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+	vec2 p = local - origin - size * 0.5;
+	float r = p.x < 0.0 ? (p.y < 0.0 ? radii.x : radii.w) : (p.y < 0.0 ? radii.y : radii.z);
+	vec2 q = abs(p) - (size * 0.5 - vec2(r));
+	float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
 	COLOR.a *= clamp(0.5 - d, 0.0, 1.0);
 }"""
 	var m := ShaderMaterial.new()
@@ -63,6 +76,13 @@ void fragment() {
 	material = m
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	resized.connect(_shape)
+	# The flush rect follows this rect's place in the card.
+	set_notify_transform(true)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSFORM_CHANGED and flush_to:
+		_shape()
 
 
 func _ready() -> void:
@@ -73,9 +93,15 @@ func _ready() -> void:
 func _shape() -> void:
 	var r := radius if radius >= 0.0 else float(ThemeManager.px.radius) * 1.5
 	var sq := square()
+	var radii := Vector4.ONE * r
+	if flush_to:
+		var box := flush_to.get_theme_stylebox("panel")
+		var cr: float = box.get_corner_radius(CORNER_TOP_LEFT) if box is StyleBoxFlat else ThemeManager.px.radius
+		radii = Vector4(cr, 0.0, 0.0, cr) if flush_side == SIDE_LEFT else Vector4(cr, cr, 0.0, 0.0)
+	radii = radii.min(Vector4.ONE * minf(sq.size.x, sq.size.y) / 2.0)
 	(material as ShaderMaterial).set_shader_parameter("origin", sq.position)
 	(material as ShaderMaterial).set_shader_parameter("size", sq.size)
-	(material as ShaderMaterial).set_shader_parameter("radius", minf(r, sq.size.x / 2.0))
+	(material as ShaderMaterial).set_shader_parameter("radii", radii)
 	queue_redraw()
 
 
@@ -106,8 +132,11 @@ func _draw() -> void:
 
 ## Where it draws: the largest square centred in the rect, so a stretched rect never stretches it.
 func square() -> Rect2:
-	if fill_rect:
-		return Rect2(Vector2.ZERO, size)
+	if flush_to and flush_to.is_inside_tree() and is_inside_tree():
+		var card := Rect2(flush_to.get_global_rect().position - get_global_rect().position, flush_to.size)
+		if flush_side == SIDE_LEFT:
+			return Rect2(card.position, Vector2(minf(card.size.y, size.x - card.position.x), card.size.y))
+		return Rect2(card.position, Vector2(card.size.x, size.y - card.position.y))
 	var side := minf(size.x, size.y)
 	return Rect2(((size - Vector2(side, side)) / 2.0).round(), Vector2(side, side))
 

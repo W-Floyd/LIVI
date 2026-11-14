@@ -24,13 +24,13 @@ steps:
       var art = shell.get_node("Page/Body/Side/Panel/Player").find_child("Art", true, false)
       if art.texture != np.art:
           return "home's player shows %s" % art.texture
-      # Home without the phone: the media card leads, the cover the card's height beside the text.
+      # Home without the phone: the media card leads, the cover a square the card's height beside the text.
       var player = shell.get_node("Page/Body/Side/Panel/Player")
       var r: Rect2 = art.square()
       if player.layout != "wide" or not player.find_child("Previous", true, false).visible:
           return "home's media card: %s" % player.layout
-      if absf(r.size.y - art.size.y) > 1.0 or r.size.x < ThemeManager.px.touch * 3.0:
-          return "home's cover is %s in %s" % [r.size, art.size]
+      if absf(r.size.y - player.size.y) > 1.0 or absf(r.size.x - r.size.y) > 1.0:
+          return "home's cover is %s on a card %s" % [r.size, player.size]
   - screenshot: { name: media-home, max_pixels: 16 }
   # Home's own buttons go to whichever source is on air.
   - gdscript: |

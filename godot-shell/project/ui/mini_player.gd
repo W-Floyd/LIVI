@@ -1,17 +1,17 @@
 class_name MiniPlayer
 extends Card
 ## What's playing, with the three controls a driver needs, laid out by the room home's panel
-## gives it (HomeCards.child_rect). Large (the media card leads home): `wide`, the cover the
-## card's height beside title, artist, album, a position bar and larger controls; `tall` where
-## that leaves the text too little width, the cover over them. Otherwise one row, the cover
-## square at the text's height; when the text would get fewer than MIN_CHARS beside the
-## controls, they go to a row of their own under it, prev going only when that row cannot hold
-## three; where the panel has no height for that row, one row without prev. Side by side
-## (HomeCards.side_by_side), `cover` before them: the cover the card's width, cropped to the
-## height the text, bar and controls under it leave; nothing playing, the placeholder so over
-## its line. Nothing playing:
-## `empty`, a placeholder and a line to open the media page. A tap on the card outside its
-## controls opens the media page.
+## gives it (HomeCards.child_rect). Beside the text the cover is a square the card's height at
+## its left edge, without padding (ArtView.flush_to); over it, the card's width from its top.
+## Large (the media card leads home): `wide`, the cover beside title, artist, album, a position
+## bar and larger controls; `tall` where that leaves the text too little width, the cover over
+## them, cropped to the height they leave. Otherwise one row; when the text would get fewer than
+## MIN_CHARS beside the controls, they go under it (`two`), prev going only when that row cannot
+## hold three; where the panel has no height for that row, one row without prev. Side by side
+## (HomeCards.side_by_side), `cover` before `tall`: as `tall`, prev going where three controls
+## don't fit; nothing playing, the placeholder so over its line. Nothing playing: `empty`, a
+## placeholder and a line to open the media page. A tap on the card outside its controls opens
+## the media page.
 
 signal control(name: String)  # playPause | next | prev
 signal opened
@@ -94,6 +94,7 @@ var _buttons: HBoxContainer
 func _build() -> void:
 	_art = ArtView.new()
 	_art.name = "Art"
+	_art.flush_to = self
 	_title = UI.label(title, "strong", "body")
 	_title.name = "Title"
 	_subtitle = UI.label("", "body", "caption", "dim")
@@ -199,7 +200,6 @@ func _texts() -> void:
 
 
 func _style() -> void:
-	_art.radius = ThemeManager.px.radius
 	_play.set_meta("icon_name", "pause" if playing else "play")
 	_play.tooltip_text = "Pause" if playing else "Play"
 	_buttons.add_theme_constant_override("separation", roundi(ThemeManager.px.touch_gap))
@@ -221,9 +221,16 @@ func _style() -> void:
 	_arrange()
 
 
-## The cover's side in a row: the text's height, at least a touch target.
-func art_side() -> float:
-	return maxf(ThemeManager.px.touch, _meta.get_combined_minimum_size().y)
+## The inner width the flush cover takes beside the text on a card `h` high: the square less the
+## left padding, and the padding beside it less the row's separation.
+func cover_slot(h: float) -> float:
+	var box := get_theme_stylebox("panel")
+	return maxf(0.0, h - box.get_margin(SIDE_LEFT) + box.get_margin(SIDE_TOP) - float(_top.get_theme_constant("separation")))
+
+
+## The card's height as the panel gives it.
+func card_height() -> float:
+	return inner_size().y + get_theme_stylebox("panel").get_minimum_size().y
 
 
 func _panel() -> HomeCards:
@@ -243,11 +250,12 @@ func inner_width() -> float:
 	return w - get_theme_stylebox("panel").get_minimum_size().x
 
 
-## The text's width beside the controls in one row, from the card's width alone (not from the
-## laid-out text, which the choice itself changes).
-func one_row_text_width() -> float:
+## The text's width beside the cover and controls in one row on a card `h` high (else one row
+## high), from the card's width alone (not from the laid-out text, which the choice itself
+## changes).
+func one_row_text_width(h := -1.0) -> float:
 	var gap := float(_top.get_theme_constant("separation"))
-	return inner_width() - art_side() - gap * 2.0 - _buttons_width(3, ThemeManager.px.touch)
+	return inner_width() - cover_slot(h if h > 0.0 else _row_height()) - gap * 2.0 - _buttons_width(3, ThemeManager.px.touch)
 
 
 ## MIN_CHARS of the title's font at its size in a row.
@@ -260,14 +268,17 @@ func min_text_width() -> float:
 ## The card's height in a row, or two where the text would be tight: what it needs at least,
 ## from the theme's fonts rather than its present layout.
 func compact_height() -> float:
-	var t: float = ThemeManager.px.touch
-	var pad := get_theme_stylebox("panel").get_minimum_size().y
+	var h := _row_height()
+	if title != "" and one_row_text_width() < min_text_width() and allow_two_rows:
+		h += float(_rows.get_theme_constant("separation")) + ThemeManager.px.touch
+	return h
+
+
+## The card's height in one row.
+func _row_height() -> float:
 	var text: float = ThemeManager.fonts.strong.get_height(ThemeManager.font_size("body")) \
 		+ ThemeManager.fonts.body.get_height(ThemeManager.font_size("caption")) + 6.0
-	var row := maxf(t, text)
-	if title != "" and one_row_text_width() < min_text_width() and allow_two_rows:
-		row += float(_rows.get_theme_constant("separation")) + t
-	return ceilf(row + pad)
+	return ceilf(maxf(ThemeManager.px.touch, text) + get_theme_stylebox("panel").get_minimum_size().y)
 
 
 ## The card's least width for `wide` (`_choose`): its cover two touch targets beside the text and the
@@ -314,27 +325,30 @@ func _choose() -> Array:
 		if side_by_side and over >= t * 2.0:
 			return ["cover", floorf(over), 1, t, false]
 		return ["empty", 0.0, 1, t, false]
+	var h := card_height()
+	# Beside the flush cover: the text column, which keeps MIN_CHARS at the title's size and the
+	# controls.
+	var beside := room.x - cover_slot(h) - float(_top.get_theme_constant("separation"))
 	for fit in [[2, t * 1.25, true], [1, t * 1.25, true], [1, t, true], [1, t, false]]:
 		var stack := _large_stack_height(fit[0], fit[1], fit[2])
+		var wide := room.y >= stack and beside >= maxf(min_text_width() * ThemeManager.px.title / ThemeManager.px.body, _buttons_width(3, fit[1]))
 		if side_by_side:
 			# A wide column: the cover beside the text as on the Media page, where it gets at
-			# least WIDE_TOUCH touch targets; else over it.
-			var beside_sbs := minf(room.y, room.x - sep - maxf(min_text_width() * ThemeManager.px.title / ThemeManager.px.body, _buttons_width(3, fit[1])))
-			if room.y >= stack and beside_sbs >= t * WIDE_TOUCH:
-				return ["wide", floorf(beside_sbs), fit[0], fit[1], fit[2]]
-			# Prev goes where three controls don't fit (`_arrange`).
+			# least WIDE_TOUCH touch targets; else over it, prev going where three controls don't
+			# fit (`_arrange`).
+			if wide and h >= t * WIDE_TOUCH:
+				return ["wide", h, fit[0], fit[1], fit[2]]
 			if room.y - stack - sep >= t * 2.0 and room.x >= _buttons_width(2, fit[1]):
 				return ["cover", floorf(room.y - stack - sep), fit[0], fit[1], fit[2]]
 			continue
-		# Beside the text: the card's height, leaving the text MIN_CHARS at the title's size and
-		# room for the controls.
-		var beside := minf(room.y, room.x - sep - maxf(min_text_width() * ThemeManager.px.title / ThemeManager.px.body, _buttons_width(3, fit[1])))
-		if room.y >= stack and beside >= t * 2.0:
-			return ["wide", floorf(beside), fit[0], fit[1], fit[2]]
-		var over := minf(room.x, room.y - stack - sep)
+		if wide:
+			return ["wide", h, fit[0], fit[1], fit[2]]
+		var over := room.y - stack - sep
 		if over >= t * 2.0 and room.x >= _buttons_width(3, fit[1]):
 			return ["tall", floorf(over), fit[0], fit[1], fit[2]]
-	if one_row_text_width() < min_text_width() and allow_two_rows:
+	# Under the text beside the cover, where the card has the height for them.
+	var two_rows := _row_height() + sep + t
+	if one_row_text_width(h) < min_text_width() and allow_two_rows and h >= two_rows - 1.0:
 		return ["two", 0.0, 1, t, false]
 	return ["one", 0.0, 1, t, false]
 
@@ -351,7 +365,7 @@ func _arrange() -> void:
 	var large := layout in ["tall", "wide", "cover"]
 	var room := inner_size()
 	# The controls on a large card as `_choose` fitted them.
-	var line: float = room.x - (pick[1] + float(_top.get_theme_constant("separation")) if layout == "wide" else 0.0)
+	var line: float = room.x - (cover_slot(card_height()) + float(_top.get_theme_constant("separation")) if layout in ["wide", "two"] else 0.0)
 	var big: float = pick[3]
 	_album.visible = large and album != "" and pick[4]
 	for b in [_prev, _play, _next]:
@@ -359,12 +373,13 @@ func _arrange() -> void:
 		b.icon = Icons.texture(b.get_meta("icon_name"), ThemeManager.px.icon * big / t)
 	_buttons.visible = layout != "empty" and title != ""
 	_seek.visible = large and show_position and title != ""
+	_col_fill.visible = layout == "wide"
 	if now_playing and _seek.visible:
 		_seek.seekable = now_playing.can_seek
 		_seek.fraction = now_playing.fraction()
-	_prev.visible = line >= _buttons_width(3, big) if layout != "one" else one_row_text_width() >= min_text_width()
-	# Under the text, from its edge (beside the cover); under a centred card, centred.
-	_buttons.alignment = BoxContainer.ALIGNMENT_CENTER if layout in ["two", "tall", "cover"] else BoxContainer.ALIGNMENT_BEGIN
+	_prev.visible = line >= _buttons_width(3, big) if layout != "one" else one_row_text_width(card_height()) >= min_text_width()
+	# Under the text, from its edge (beside the cover); under the cover, centred.
+	_buttons.alignment = BoxContainer.ALIGNMENT_CENTER if layout in ["tall", "cover"] else BoxContainer.ALIGNMENT_BEGIN
 	for l in [_title, _subtitle, _album]:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER if layout == "tall" else HORIZONTAL_ALIGNMENT_LEFT
 	# A large card's title in two lines at the title size before an ellipsis.
@@ -379,24 +394,20 @@ func _arrange() -> void:
 		_title.autowrap_mode = TextServer.AUTOWRAP_OFF
 		_title.max_lines_visible = -1
 		_title.clip_text = true
-	# The tall card's cover is drawn square in what its box gets (ArtView). Beside the text it is
-	# its side square, from the room the panel gives (never from this card's own minimum), the
-	# text column as high, text at the cover's top and controls at its foot.
-	match layout:
-		"wide":
-			_art.custom_minimum_size = Vector2(pick[1], pick[1])
-			_col.custom_minimum_size.y = pick[1]
-			# The controls' rounded sizes can make the row wider than `_choose` reckoned: the
-			# cover gives way rather than the card growing over its neighbour.
-			var over: float = get_combined_minimum_size().x - (_panel().child_width(self) if _panel() else size.x)
-			if over > 0.0:
-				var side: float = pick[1] - ceilf(over)
-				_art.custom_minimum_size = Vector2(side, side)
-				_col.custom_minimum_size.y = side
-		"tall", "cover":
-			_art.custom_minimum_size = Vector2(t, t)
-		_:
-			_art.custom_minimum_size = Vector2.ONE * art_side()
+	# Over the text the cover fills what its box gets (ArtView). Beside it, its slot is from the
+	# room the panel gives (never from this card's own minimum); `wide`'s text column as high,
+	# text at its top and controls at its foot.
+	if layout in ["tall", "cover"]:
+		_art.custom_minimum_size = Vector2(t, t)
+	else:
+		_art.custom_minimum_size = Vector2(cover_slot(card_height()), 0.0)
+		_col.custom_minimum_size.y = floorf(room.y) if layout == "wide" else 0.0
+		# The controls' rounded sizes can make the row wider than `_choose` reckoned: the cover
+		# gives way rather than the card growing over its neighbour.
+		var over: float = get_combined_minimum_size().x - (_panel().child_width(self) if _panel() else size.x)
+		if over > 0.0:
+			_art.custom_minimum_size.x = maxf(0.0, _art.custom_minimum_size.x - ceilf(over))
+	_art._shape()
 
 
 ## Moves the cover, text and controls into the layout's boxes.
@@ -404,11 +415,12 @@ func _place() -> void:
 	for n in [_art, _meta, _seek, _col_fill, _buttons, _top, _col]:
 		if n.get_parent():
 			n.get_parent().remove_child(n)
-	_art.fill_rect = layout == "cover"
-	_art.size_flags_vertical = Control.SIZE_EXPAND_FILL if layout in ["tall", "cover"] else Control.SIZE_SHRINK_BEGIN if layout == "wide" else Control.SIZE_FILL
+	var over := layout in ["tall", "cover"]
+	_art.flush_side = SIDE_TOP if over else SIDE_LEFT
+	_art.size_flags_vertical = Control.SIZE_EXPAND_FILL if over else Control.SIZE_FILL
 	_col.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	match layout:
-		"wide":
+		"wide", "two":
 			for n in [_meta, _seek, _col_fill, _buttons]:
 				_col.add_child(n)
 			_top.add_child(_art)
@@ -417,11 +429,6 @@ func _place() -> void:
 		"tall", "cover":
 			for n in [_art, _meta, _seek, _buttons]:
 				_rows.add_child(n)
-		"two":
-			for n in [_art, _meta]:
-				_top.add_child(n)
-			_rows.add_child(_top)
-			_rows.add_child(_buttons)
 		_:
 			for n in [_art, _meta, _buttons]:
 				_top.add_child(n)

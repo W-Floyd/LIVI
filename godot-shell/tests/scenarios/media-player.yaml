@@ -1,10 +1,11 @@
 name: media-player
 # Home's media card with the phone hidden and at each of its widths, every status bar edge, text
 # scale and hand: while something plays it leads home, never smaller than the battery card, which
-# keeps its own height; the layout is the one its room picks (MiniPlayer._choose); the cover
-# drawn square; nothing of the text under the controls or out of the card. Nothing playing: a
-# compact card, every card at its own height. Beside the cover, the text's top at the cover's top
-# and the controls from the text's edge; under a centred cover, the controls centred. With the
+# keeps its own height; the layout is the one its room picks (MiniPlayer._choose); beside the text
+# the cover a square the card's height at its left edge, over it the card's width from its top;
+# nothing of the text under the controls or out of the card. Nothing playing: a
+# compact card, every card at its own height. Beside the cover, the text from the card's padding
+# and the controls from the text's edge; under it, the controls centred. With the
 # Phone | <app> pill: Precondition inside the battery card, one line, or beside the pill rather
 # than none, and the battery card kept; a refit leaves no card over another or the pill.
 clock: 2026-11-09T08:30:00
@@ -33,15 +34,15 @@ steps:
   - gdscript: &rows |
       var rows := [
           [0.0, "top", 1.0, "lhd", "wide"],
-          [0.0, "left", 1.0, "lhd", "wide"],
+          [0.0, "left", 1.0, "lhd", "tall"],
           [0.0, "bottom", 1.3, "rhd", "wide"],
-          [0.0, "right", 1.6, "rhd", "wide"],
-          [0.37, "top", 1.0, "lhd", "wide"],
-          [0.37, "top", 1.0, "rhd", "wide"],
+          [0.0, "right", 1.6, "rhd", "tall"],
+          [0.37, "top", 1.0, "lhd", "tall"],
+          [0.37, "top", 1.0, "rhd", "tall"],
           [0.37, "left", 1.0, "lhd", "one"],
           [0.37, "top", 1.3, "rhd", "one"],
           [0.5, "top", 1.0, "lhd", "one"],
-          [0.5, "right", 1.0, "rhd", "one"],
+          [0.5, "right", 1.0, "rhd", "two"],
           [0.5, "bottom", 1.3, "lhd", "one"],
           [0.62, "top", 1.0, "lhd", "two"],
           [0.62, "left", 1.0, "lhd", "two"],
@@ -49,7 +50,7 @@ steps:
           [0.62, "top", 1.3, "rhd", "one"],
           [0.37, "left", 1.6, "lhd", "two"],
           [0.0, "top", 1.0, "lhd", "wide", "split"],
-          [0.37, "top", 1.0, "rhd", "wide", "split"],
+          [0.37, "top", 1.0, "rhd", "cover", "split"],
           [0.5, "left", 1.0, "lhd", "cover", "split"],
           [0.62, "top", 1.0, "lhd", "cover", "split"],
           [0.62, "bottom", 1.3, "rhd", null, "split"],
@@ -109,13 +110,14 @@ steps:
           var t: Rect2 = player.find_child("Title", true, false).get_global_rect()
           var s: Rect2 = player.find_child("Subtitle", true, false).get_global_rect()
           var buttons: Rect2 = player.find_child("Buttons", true, false).get_global_rect()
-          if player.layout in ["one", "two"] and (absf(art_view.size.x - art_view.size.y) > 1.0 or absf(art_view.size.y - player.art_side()) > 1.0):
-              bad.append("%s: the cover %s, not a square of %d" % [label, art_view.size, player.art_side()])
           if player.layout in ["wide", "tall", "cover"] and sq.size.y < ThemeManager.px.touch * 2.0 - 1.0:
               bad.append("%s: a large card's cover %s" % [label, sq.size])
-          # Side by side, the cover the card's width.
-          if player.layout == "cover" and absf(art.size.x - (pr.size.x - player.get_theme_stylebox("panel").get_minimum_size().x)) > 1.0:
-              bad.append("%s: the cover %s, not the card's width %s" % [label, art, pr])
+          # Flush with the card: beside the text a square at its left edge, top to bottom; over
+          # it, across the top.
+          var over: bool = player.layout in ["tall", "cover"]
+          var off := [art.position.x - pr.position.x, art.position.y - pr.position.y, (art.end.x - pr.end.x) if over else (art.end.y - pr.end.y), 0.0 if over else art.size.x - art.size.y]
+          if off.any(func(d): return absf(d) > 1.0):
+              bad.append("%s: the cover %s not flush %s with the card %s" % [label, art, "across its top" if over else "square at its left", pr])
           var controls: bool = player.layout != "empty" and player.has_content()
           var parts := [art, t, s] + ([buttons] if controls else [])
           for x in parts:
@@ -125,9 +127,14 @@ steps:
               bad.append("%s: the text or cover under the controls %s" % [label, buttons])
           # Alignment: beside the cover, the text from its top and the controls from the text's
           # edge; under it, the controls centred on the card.
-          if player.layout == "wide" and (absf(t.position.y - art.position.y) > 1.0 or absf(buttons.position.x - t.position.x) > 1.0):
-              bad.append("%s: cover top %d, title top %d; controls from %d, text from %d" % [label, art.position.y, t.position.y, buttons.position.x, t.position.x])
-          if player.layout in ["tall", "two", "cover"] and player.has_content():
+          var pad: StyleBox = player.get_theme_stylebox("panel")
+          if player.layout == "wide" and (absf(t.position.y - pr.position.y - pad.get_margin(SIDE_TOP)) > 1.0 or absf(buttons.position.x - t.position.x) > 1.0):
+              bad.append("%s: card top %d, title top %d; controls from %d, text from %d" % [label, pr.position.y, t.position.y, buttons.position.x, t.position.x])
+          if player.layout in ["one", "two", "wide", "empty"] and absf(t.position.x - art.end.x - pad.get_margin(SIDE_TOP)) > 1.0:
+              bad.append("%s: the text from %d, the cover's edge %d" % [label, t.position.x, art.end.x])
+          if player.layout == "two" and absf(buttons.position.x - t.position.x) > 1.0:
+              bad.append("%s: controls from %d, text from %d" % [label, buttons.position.x, t.position.x])
+          if player.layout in ["tall", "cover"] and player.has_content():
               var shown_buttons := Rect2()
               for b in player.find_child("Buttons", true, false).get_children():
                   if b.visible:
@@ -283,7 +290,9 @@ steps:
   # Every control on home's media card, in every arrangement, sends its action and home stays,
   # with a refit between press and release (the unit's telemetry refits several times a second);
   # a tap on the card's text opens Media.
+  # Playing without a cover: the placeholder where the cover goes.
   - set: { core: { nowPlaying: { title: A Remarkably Long Song Title That Goes On, artist: The Extraordinarily Named Ensemble } } }
+  - gdscript: *rows
   - gdscript: |
       var looks := [
           {home_phone = false, home_split = 0.0, home_layout = "cards"},

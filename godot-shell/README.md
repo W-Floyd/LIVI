@@ -309,12 +309,14 @@ card as its bottom row (`HomeCards.foot`, `StatTile.foot`), then goes to one lin
 and Auto where its words don't fit), then the battery card compact (`StatTile.compact`), then the
 media card to one row without prev; only then do cards go, Precondition first; with nothing
 playing, the compact media card goes first. It lays itself out by that room
-(`HomeCards.child_rect`, shown or not): `wide` (cover the card's height beside title, artist,
-album, a position bar and larger controls, as the Media page), `tall` (cover over them), one row,
-or the controls in a row under the text when it would keep fewer than `MIN_CHARS` beside them.
-Nothing playing: a compact "Nothing playing / Open Media" card. The cover is drawn square at every
-size (`ArtView.square`); beside the text its top is the title's and the controls start at the
-text's edge, under it they are centred. Scenario `media-player`.
+(`HomeCards.child_rect`, shown or not): `wide` (cover beside title, artist, album, a position bar
+and larger controls, as the Media page), `tall` (cover over them, where the cover beside them
+would leave the text too little width), one row, or the controls under the text when it would
+keep fewer than `MIN_CHARS` beside them. Nothing playing: a compact "Nothing playing / Open Media"
+card. Beside the text the cover is a square the card's full height at its left edge, without
+padding, rounded only by the card's corners (`ArtView.flush_to`); over it, the card's width from
+its top, cropped. With no cover, the placeholder so. The controls start at the text's edge beside
+the cover, under it they are centred. Scenario `media-player`.
 
 Look's Home layout (`home_layout`) Side by side (`HomeCards.side_by_side`) puts the battery card in
 a narrow column the panel's height away from the driver: the charge over a bar that fills upward,
@@ -323,8 +325,7 @@ where its words don't fit), reaching down, with the status bar off, beside the <
 toggle, which then sits under the media card from its edge (across the foot, the column ending
 above it, where the media card is narrower than the toggle). The media card takes the rest of the
 width and the height on the driver's side, the charging stop over it: `wide` where its cover beside
-the text gets `WIDE_TOUCH` touch targets, else its cover the card's width, cropped
-(`ArtView.fill_rect`), over the title, artist, bar and controls (`cover`, prev going where three
+the text leaves the text its width, else its cover the card's width, cropped, over the title, artist, bar and controls (`cover`, prev going where three
 don't fit); with nothing playing, the placeholder so. The same with no picture; a right-hand drive
 mirrors it. Where the media card's controls want the width or the column the height, the battery's
 type goes smaller (`StatTile.compact`), then Precondition goes. Cards never overlap: the
